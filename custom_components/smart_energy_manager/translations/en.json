@@ -1,0 +1,80 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smart Energy Manager – Entities",
+        "description": "Map your energy system entities. Required fields are marked with *.",
+        "data": {
+          "battery_soc_entity": "Battery State of Charge (SOC) *",
+          "battery_inverter_charge_entity": "Battery Inverter – Charge Power Setpoint *",
+          "battery_inverter_discharge_entity": "Battery Inverter – Discharge Power Setpoint *",
+          "battery_inverter_power_entity": "Battery Inverter – Current Power (optional)",
+          "battery_capacity_kwh": "Battery Capacity (kWh) *",
+          "battery_max_power_kw": "Battery Max Power (kW) *",
+          "solar_power_total_entity": "Solar Inverter – Total Power *",
+          "solar_power_l1_entity": "Solar Power L1 (optional)",
+          "solar_power_l2_entity": "Solar Power L2 (optional)",
+          "solar_power_l3_entity": "Solar Power L3 (optional)",
+          "ev_charger_switch_entity": "EV Charger – Enable Switch *",
+          "ev_charger_current_entity": "EV Charger – Current Setpoint *",
+          "ev_charger_power_entity": "EV Charger – Power (optional)",
+          "ev_soc_entity": "EV State of Charge (optional)",
+          "ev_charger_phase": "EV Single-Phase Car uses phase *",
+          "heat_pump_switch_entity": "Heat Pump Switch (optional)",
+          "heat_pump_power_entity": "Heat Pump Power (optional)",
+          "heat_pump_extra_hot_water_entity": "Heat Pump Extra Hot Water Switch (optional)",
+          "grid_power_l1_entity": "Grid Power L1 (optional)",
+          "grid_power_l2_entity": "Grid Power L2 (optional)",
+          "grid_power_l3_entity": "Grid Power L3 (optional)",
+          "grid_current_l1_entity": "Grid Current L1 (optional)",
+          "grid_current_l2_entity": "Grid Current L2 (optional)",
+          "grid_current_l3_entity": "Grid Current L3 (optional)",
+          "nordpool_entity": "Nordpool Price Sensor *",
+          "solcast_today_entity": "Solcast – Today Forecast (kWh) *",
+          "solcast_tomorrow_entity": "Solcast – Tomorrow Forecast (kWh) *"
+        }
+      },
+      "settings": {
+        "title": "Smart Energy Manager – Grid & Pricing",
+        "data": {
+          "max_current_per_phase": "Max Current per Phase (A)",
+          "grid_voltage": "Grid Voltage (V)",
+          "grid_fees_sek_kwh": "Grid Fees (SEK/kWh, excl. VAT)",
+          "energy_tax_sek_kwh": "Energy Tax (SEK/kWh, excl. VAT)",
+          "vat_rate": "VAT Rate (e.g. 0.25 for 25%)",
+          "sell_extra_revenue": "Extra Sell Revenue (SEK/kWh, e.g. 0.07)",
+          "battery_min_soc": "Battery Min SOC (%)",
+          "battery_max_soc": "Battery Max SOC (%)",
+          "ev_soc_target": "EV SOC Target (%)",
+          "winter_mode_enabled": "Enable Winter Mode by default",
+          "winter_cheap_hour_threshold": "Winter – Cheap Price Threshold (SEK/kWh)",
+          "winter_expensive_hour_threshold": "Winter – Expensive Price Threshold (SEK/kWh)",
+          "winter_min_soc": "Winter – Min SOC before stop discharge (%)",
+          "winter_max_soc": "Winter – Max SOC to charge to (%)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Smart Energy Manager – Options",
+        "data": {
+          "max_current_per_phase": "Max Current per Phase (A)",
+          "grid_fees_sek_kwh": "Grid Fees (SEK/kWh)",
+          "energy_tax_sek_kwh": "Energy Tax (SEK/kWh)",
+          "vat_rate": "VAT Rate",
+          "sell_extra_revenue": "Extra Sell Revenue (SEK/kWh)",
+          "battery_min_soc": "Battery Min SOC (%)",
+          "battery_max_soc": "Battery Max SOC (%)",
+          "ev_soc_target": "EV SOC Target (%)",
+          "winter_mode_enabled": "Winter Mode Default",
+          "winter_cheap_hour_threshold": "Cheap Price Threshold (SEK/kWh)",
+          "winter_expensive_hour_threshold": "Expensive Price Threshold (SEK/kWh)",
+          "winter_min_soc": "Winter Min SOC (%)",
+          "winter_max_soc": "Winter Max SOC (%)"
+        }
+      }
+    }
+  }
+}

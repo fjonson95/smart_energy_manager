@@ -1,0 +1,80 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smart Energy Manager – Enheter",
+        "description": "Mappa dina energisystem-entiteter. Obligatoriska fält är märkta med *.",
+        "data": {
+          "battery_soc_entity": "Batteri – Laddningsnivå (SOC) *",
+          "battery_inverter_charge_entity": "Batteri-inverter – Laddningseffekt Setpoint *",
+          "battery_inverter_discharge_entity": "Batteri-inverter – Urladdningseffekt Setpoint *",
+          "battery_inverter_power_entity": "Batteri-inverter – Aktuell Effekt (valfri)",
+          "battery_capacity_kwh": "Batterikapacitet (kWh) *",
+          "battery_max_power_kw": "Batteri Max Effekt (kW) *",
+          "solar_power_total_entity": "Sol-inverter – Total Effekt *",
+          "solar_power_l1_entity": "Soleffekt L1 (valfri)",
+          "solar_power_l2_entity": "Soleffekt L2 (valfri)",
+          "solar_power_l3_entity": "Soleffekt L3 (valfri)",
+          "ev_charger_switch_entity": "Billaddare – Aktiveringsswitch *",
+          "ev_charger_current_entity": "Billaddare – Strömstyrka Setpoint *",
+          "ev_charger_power_entity": "Billaddare – Effekt (valfri)",
+          "ev_soc_entity": "Bil – Laddningsnivå (valfri)",
+          "ev_charger_phase": "Enfas-bil laddar på fas *",
+          "heat_pump_switch_entity": "Elpanna/Värmepump Switch (valfri)",
+          "heat_pump_power_entity": "Elpanna/Värmepump Effekt (valfri)",
+          "heat_pump_extra_hot_water_entity": "Extra varmvatten Switch (valfri)",
+          "grid_power_l1_entity": "Näteffekt L1 (valfri)",
+          "grid_power_l2_entity": "Näteffekt L2 (valfri)",
+          "grid_power_l3_entity": "Näteffekt L3 (valfri)",
+          "grid_current_l1_entity": "Nätström L1 (valfri)",
+          "grid_current_l2_entity": "Nätström L2 (valfri)",
+          "grid_current_l3_entity": "Nätström L3 (valfri)",
+          "nordpool_entity": "Nordpool Prissensor *",
+          "solcast_today_entity": "Solcast – Dagsprognos (kWh) *",
+          "solcast_tomorrow_entity": "Solcast – Morgondagsprognos (kWh) *"
+        }
+      },
+      "settings": {
+        "title": "Smart Energy Manager – Nät & Prissättning",
+        "data": {
+          "max_current_per_phase": "Max Ström per Fas (A)",
+          "grid_voltage": "Nätspänning (V)",
+          "grid_fees_sek_kwh": "Nätavgifter (SEK/kWh, exkl. moms)",
+          "energy_tax_sek_kwh": "Energiskatt (SEK/kWh, exkl. moms)",
+          "vat_rate": "Momsats (t.ex. 0.25 för 25%)",
+          "sell_extra_revenue": "Extra säljintäkt (SEK/kWh, t.ex. 0.07)",
+          "battery_min_soc": "Batteri Min SOC (%)",
+          "battery_max_soc": "Batteri Max SOC (%)",
+          "ev_soc_target": "Bil Laddningsmål (%)",
+          "winter_mode_enabled": "Aktivera vinterläge som standard",
+          "winter_cheap_hour_threshold": "Vinter – Billigt pris gräns (SEK/kWh)",
+          "winter_expensive_hour_threshold": "Vinter – Dyrt pris gräns (SEK/kWh)",
+          "winter_min_soc": "Vinter – Min SOC innan urladdning stoppas (%)",
+          "winter_max_soc": "Vinter – Max SOC att ladda till (%)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Smart Energy Manager – Inställningar",
+        "data": {
+          "max_current_per_phase": "Max Ström per Fas (A)",
+          "grid_fees_sek_kwh": "Nätavgifter (SEK/kWh)",
+          "energy_tax_sek_kwh": "Energiskatt (SEK/kWh)",
+          "vat_rate": "Momsats",
+          "sell_extra_revenue": "Extra Säljintäkt (SEK/kWh)",
+          "battery_min_soc": "Batteri Min SOC (%)",
+          "battery_max_soc": "Batteri Max SOC (%)",
+          "ev_soc_target": "Bil Laddningsmål (%)",
+          "winter_mode_enabled": "Vinterläge Standard",
+          "winter_cheap_hour_threshold": "Billigt Pris Gräns (SEK/kWh)",
+          "winter_expensive_hour_threshold": "Dyrt Pris Gräns (SEK/kWh)",
+          "winter_min_soc": "Vinter Min SOC (%)",
+          "winter_max_soc": "Vinter Max SOC (%)"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Smart Energy Manager",
+  "content_in_root": false,
+  "homeassistant": "2024.1.0",
+  "filename": "smart_energy_manager.zip",
+  "render_readme": true
+}
