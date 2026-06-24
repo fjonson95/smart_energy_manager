@@ -16,17 +16,40 @@ CONF_SOLAR_INVERTER_POWER_L2 = "solar_power_l2_entity"
 CONF_SOLAR_INVERTER_POWER_L3 = "solar_power_l3_entity"
 CONF_SOLAR_INVERTER_TOTAL = "solar_power_total_entity"
 
+# Multi-car EV charger configuration
+# Each car entry is a dict:
+#   {
+#     "name": str,                        # friendly name
+#     "charger_switch": str,              # switch entity to enable/disable
+#     "charger_current": str,             # number entity for current setpoint
+#     "charger_power": str | None,        # sensor entity for actual power (optional)
+#     "ev_soc": str | None,               # sensor for EV SOC (optional)
+#     "ev_soc_target": float,             # target SOC % (default: 80)
+#     "phases": int,                      # 1 or 3
+#     "phase": str | None,                # "L1"/"L2"/"L3" – only when phases==1
+#   }
+CONF_EV_CARS = "ev_cars"
+
+# Legacy single-car keys (kept for backwards compatibility in migration)
 CONF_EV_CHARGER_POWER = "ev_charger_power_entity"
 CONF_EV_CHARGER_SWITCH = "ev_charger_switch_entity"
 CONF_EV_CHARGER_CURRENT = "ev_charger_current_entity"
 CONF_EV_CHARGER_PHASES = "ev_charger_phases"
-CONF_EV_CHARGER_PHASE = "ev_charger_phase"  # Which phase single-phase car uses (L1/L2/L3)
+CONF_EV_CHARGER_PHASE = "ev_charger_phase"
 CONF_EV_SOC = "ev_soc_entity"
 CONF_EV_SOC_TARGET = "ev_soc_target"
 
+# Heat pump / boiler
+# The physical unit has two distinct operating circuits:
+#   1. Heat pump compressor  – always 1-phase (phase configurable, default L3)
+#   2. Electric heating element (patron) – always 2-phase (phases configurable,
+#      default L1+L2) used only for "extra hot water" mode
 CONF_HEAT_PUMP_POWER = "heat_pump_power_entity"
 CONF_HEAT_PUMP_SWITCH = "heat_pump_switch_entity"
 CONF_HEAT_PUMP_EXTRA_HOT_WATER = "heat_pump_extra_hot_water_entity"
+CONF_HEAT_PUMP_PHASE = "heat_pump_phase"                # L1 / L2 / L3  (compressor, 1-phase)
+CONF_HEAT_PUMP_PATRON_PHASES = "heat_pump_patron_phases"  # list[str] e.g. ["L1","L2"] (element, 2-phase)
+CONF_HEAT_PUMP_PATRON_POWER_KW = "heat_pump_patron_power_kw"  # rated kW of heating element
 
 CONF_GRID_POWER_L1 = "grid_power_l1_entity"
 CONF_GRID_POWER_L2 = "grid_power_l2_entity"
@@ -60,22 +83,28 @@ CONF_BATTERY_MAX_SOC = "battery_max_soc"
 DEFAULT_MAX_CURRENT = 20
 DEFAULT_GRID_VOLTAGE = 230
 DEFAULT_VAT_RATE = 0.25
-DEFAULT_GRID_FEES = 0.45       # SEK/kWh
-DEFAULT_ENERGY_TAX = 0.536     # SEK/kWh
-DEFAULT_SELL_EXTRA_REVENUE = 0.07  # SEK/kWh
+DEFAULT_GRID_FEES = 0.45
+DEFAULT_ENERGY_TAX = 0.536
+DEFAULT_SELL_EXTRA_REVENUE = 0.07
 DEFAULT_BATTERY_MIN_SOC = 10
 DEFAULT_BATTERY_MAX_SOC = 95
 DEFAULT_WINTER_MIN_SOC = 20
 DEFAULT_WINTER_MAX_SOC = 95
 DEFAULT_EV_SOC_TARGET = 80
-DEFAULT_WINTER_CHEAP_THRESHOLD = 0.80   # SEK/kWh
-DEFAULT_WINTER_EXPENSIVE_THRESHOLD = 1.50  # SEK/kWh
+DEFAULT_WINTER_CHEAP_THRESHOLD = 0.80
+DEFAULT_WINTER_EXPENSIVE_THRESHOLD = 1.50
 
-# EV charger phase options
+# Heat pump defaults
+DEFAULT_HEAT_PUMP_PHASE = "L3"                         # Compressor (1-phase)
+DEFAULT_HEAT_PUMP_PATRON_PHASES = ["L1", "L2"]         # Heating element (2-phase)
+DEFAULT_HEAT_PUMP_PATRON_POWER_KW = 6.0                # Typical 6 kW element → 3 kW/phase
+
+# EV phase options
 EV_PHASE_L1 = "L1"
 EV_PHASE_L2 = "L2"
 EV_PHASE_L3 = "L3"
 EV_PHASES_OPTIONS = [EV_PHASE_L1, EV_PHASE_L2, EV_PHASE_L3]
+EV_NUM_PHASES_OPTIONS = [1, 3]
 
 # Operating modes
 MODE_AUTO = "auto"
@@ -88,13 +117,14 @@ OPERATING_MODES = [MODE_AUTO, MODE_WINTER, MODE_FORCE_CHARGE_EV, MODE_FORCE_CHAR
 # Update interval seconds
 UPDATE_INTERVAL = 30
 
-# Minimum solar power to consider charging EV (W)
-MIN_SOLAR_FOR_EV = 1400   # ~6A on 1 phase
-MIN_EV_CURRENT = 6        # A (IEC 61851 minimum)
-MAX_EV_CURRENT = 32       # A
+# Minimum solar surplus to consider starting EV charging
+MIN_SOLAR_FOR_EV_1PHASE = 1400   # W  (~6 A × 230 V)
+MIN_SOLAR_FOR_EV_3PHASE = 4140   # W  (~6 A × 230 V × 3 phases)
+MIN_EV_CURRENT = 6               # A  (IEC 61851 minimum)
+MAX_EV_CURRENT = 32              # A
 
 # Negative price threshold
 NEGATIVE_PRICE_THRESHOLD = 0.0  # SEK/kWh
 
-# Phase numbering
+# Phase labels
 PHASES = ["L1", "L2", "L3"]
