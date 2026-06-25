@@ -36,7 +36,7 @@ ENTITY_SELECTOR = selector.EntitySelector(selector.EntitySelectorConfig())
 NUMBER_SELECTOR = selector.NumberSelector(selector.NumberSelectorConfig(mode=selector.NumberSelectorMode.BOX))
 
 
-def _entity_schema(optional_keys=None):
+def _entity_schema():
     """Build entity selectors."""
     return {
         vol.Required(CONF_BATTERY_SOC): ENTITY_SELECTOR,
@@ -71,42 +71,52 @@ def _entity_schema(optional_keys=None):
     }
 
 
+def _settings_schema():
+    return {
+        vol.Required(CONF_MAX_CURRENT_PER_PHASE, default=DEFAULT_MAX_CURRENT): NUMBER_SELECTOR,
+        vol.Required(CONF_GRID_VOLTAGE, default=DEFAULT_GRID_VOLTAGE): NUMBER_SELECTOR,
+        vol.Required(CONF_GRID_FEES, default=DEFAULT_GRID_FEES): NUMBER_SELECTOR,
+        vol.Required(CONF_ENERGY_TAX, default=DEFAULT_ENERGY_TAX): NUMBER_SELECTOR,
+        vol.Required(CONF_VAT_RATE, default=DEFAULT_VAT_RATE): NUMBER_SELECTOR,
+        vol.Required(CONF_SELL_EXTRA_REVENUE, default=DEFAULT_SELL_EXTRA_REVENUE): NUMBER_SELECTOR,
+        vol.Required(CONF_BATTERY_MIN_SOC, default=DEFAULT_BATTERY_MIN_SOC): NUMBER_SELECTOR,
+        vol.Required(CONF_BATTERY_MAX_SOC, default=DEFAULT_BATTERY_MAX_SOC): NUMBER_SELECTOR,
+        vol.Required(CONF_EV_SOC_TARGET, default=DEFAULT_EV_SOC_TARGET): NUMBER_SELECTOR,
+        vol.Required(CONF_WINTER_MODE_ENABLED, default=False): selector.BooleanSelector(),
+        vol.Required(CONF_WINTER_CHEAP_HOUR_THRESHOLD, default=DEFAULT_WINTER_CHEAP_THRESHOLD): NUMBER_SELECTOR,
+        vol.Required(CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD, default=DEFAULT_WINTER_EXPENSIVE_THRESHOLD): NUMBER_SELECTOR,
+        vol.Required(CONF_WINTER_MIN_SOC, default=DEFAULT_WINTER_MIN_SOC): NUMBER_SELECTOR,
+        vol.Required(CONF_WINTER_MAX_SOC, default=DEFAULT_WINTER_MAX_SOC): NUMBER_SELECTOR,
+    }
+
+
 class SmartEnergyManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Smart Energy Manager."""
 
     VERSION = 1
 
+    def __init__(self):
+        self._data: dict = {}
+
     async def async_step_user(self, user_input=None):
-        """Handle the initial step - entities."""
+        """Step 1: entity mapping."""
         errors = {}
         if user_input is not None:
-            return await self.async_step_settings(user_input)
+            # Store step 1 data and advance to step 2
+            self._data = user_input
+            return await self.async_step_settings()
 
         schema = vol.Schema(_entity_schema())
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
-    async def async_step_settings(self, prev_input, user_input=None):
+    async def async_step_settings(self, user_input=None):
         """Step 2: grid and pricing settings."""
         if user_input is not None:
-            data = {**prev_input, **user_input}
+            # Merge both steps and create the entry
+            data = {**self._data, **user_input}
             return self.async_create_entry(title="Smart Energy Manager", data=data)
 
-        schema = vol.Schema({
-            vol.Required(CONF_MAX_CURRENT_PER_PHASE, default=DEFAULT_MAX_CURRENT): NUMBER_SELECTOR,
-            vol.Required(CONF_GRID_VOLTAGE, default=DEFAULT_GRID_VOLTAGE): NUMBER_SELECTOR,
-            vol.Required(CONF_GRID_FEES, default=DEFAULT_GRID_FEES): NUMBER_SELECTOR,
-            vol.Required(CONF_ENERGY_TAX, default=DEFAULT_ENERGY_TAX): NUMBER_SELECTOR,
-            vol.Required(CONF_VAT_RATE, default=DEFAULT_VAT_RATE): NUMBER_SELECTOR,
-            vol.Required(CONF_SELL_EXTRA_REVENUE, default=DEFAULT_SELL_EXTRA_REVENUE): NUMBER_SELECTOR,
-            vol.Required(CONF_BATTERY_MIN_SOC, default=DEFAULT_BATTERY_MIN_SOC): NUMBER_SELECTOR,
-            vol.Required(CONF_BATTERY_MAX_SOC, default=DEFAULT_BATTERY_MAX_SOC): NUMBER_SELECTOR,
-            vol.Required(CONF_EV_SOC_TARGET, default=DEFAULT_EV_SOC_TARGET): NUMBER_SELECTOR,
-            vol.Required(CONF_WINTER_MODE_ENABLED, default=False): selector.BooleanSelector(),
-            vol.Required(CONF_WINTER_CHEAP_HOUR_THRESHOLD, default=DEFAULT_WINTER_CHEAP_THRESHOLD): NUMBER_SELECTOR,
-            vol.Required(CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD, default=DEFAULT_WINTER_EXPENSIVE_THRESHOLD): NUMBER_SELECTOR,
-            vol.Required(CONF_WINTER_MIN_SOC, default=DEFAULT_WINTER_MIN_SOC): NUMBER_SELECTOR,
-            vol.Required(CONF_WINTER_MAX_SOC, default=DEFAULT_WINTER_MAX_SOC): NUMBER_SELECTOR,
-        })
+        schema = vol.Schema(_settings_schema())
         return self.async_show_form(step_id="settings", data_schema=schema)
 
     @staticmethod
