@@ -8,7 +8,6 @@ from typing import Optional
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.helpers import entity_registry as er
 
 from .const import (
     DOMAIN, UPDATE_INTERVAL,
@@ -16,26 +15,30 @@ from .const import (
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
     CONF_SOLAR_INVERTER_TOTAL,
     CONF_SOLAR_INVERTER_POWER_L1, CONF_SOLAR_INVERTER_POWER_L2, CONF_SOLAR_INVERTER_POWER_L3,
-    CONF_EV_CHARGER_SWITCH, CONF_EV_CHARGER_CURRENT, CONF_EV_CHARGER_POWER,
-    CONF_EV_SOC, CONF_EV_CHARGER_PHASE,
+    CONF_EV_CARS,
     CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_SWITCH, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
+    CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
     CONF_GRID_POWER_L1, CONF_GRID_POWER_L2, CONF_GRID_POWER_L3,
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
     CONF_NORDPOOL_ENTITY, CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW,
     CONF_GRID_FEES, CONF_ENERGY_TAX, CONF_VAT_RATE, CONF_SELL_EXTRA_REVENUE,
     CONF_MAX_CURRENT_PER_PHASE, CONF_GRID_VOLTAGE,
-    CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC, CONF_EV_SOC_TARGET,
+    CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC,
     CONF_WINTER_MODE_ENABLED,
     CONF_WINTER_CHEAP_HOUR_THRESHOLD, CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD,
     CONF_WINTER_MIN_SOC, CONF_WINTER_MAX_SOC,
     DEFAULT_MAX_CURRENT, DEFAULT_GRID_VOLTAGE, DEFAULT_VAT_RATE,
     DEFAULT_GRID_FEES, DEFAULT_ENERGY_TAX, DEFAULT_SELL_EXTRA_REVENUE,
-    DEFAULT_BATTERY_MIN_SOC, DEFAULT_BATTERY_MAX_SOC, DEFAULT_EV_SOC_TARGET,
+    DEFAULT_BATTERY_MIN_SOC, DEFAULT_BATTERY_MAX_SOC,
     DEFAULT_WINTER_CHEAP_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD,
     DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
+    DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     MODE_AUTO,
 )
-from .energy_controller import EnergyController, EnergyState, ControlDecision
+from .energy_controller import (
+    EnergyController, EnergyState, ControlDecision,
+    EvCarConfig, EvCarState,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +56,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._config = {**entry.data, **entry.options}
         self.operating_mode: str = MODE_AUTO
-        self.force_ev_charge: bool = False
         self._last_decision: Optional[ControlDecision] = None
         self._state: Optional[EnergyState] = None
         self._controller = self._build_controller()
@@ -65,7 +67,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             grid_voltage=float(c.get(CONF_GRID_VOLTAGE, DEFAULT_GRID_VOLTAGE)),
             battery_min_soc=float(c.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
             battery_max_soc=float(c.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)),
-            ev_soc_target=float(c.get(CONF_EV_SOC_TARGET, DEFAULT_EV_SOC_TARGET)),
             winter_cheap_threshold=float(c.get(CONF_WINTER_CHEAP_HOUR_THRESHOLD, DEFAULT_WINTER_CHEAP_THRESHOLD)),
             winter_expensive_threshold=float(c.get(CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD)),
             winter_min_soc=float(c.get(CONF_WINTER_MIN_SOC, DEFAULT_WINTER_MIN_SOC)),
@@ -76,7 +77,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         if not entity_id:
             return default
         state = self.hass.states.get(entity_id)
-        if state is None or state.state in ("unavailable", "unknown", None):
+        if state is None or state.state in ("unavailable", "unknown"):
             return default
         try:
             return float(state.state)
@@ -92,7 +93,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         return state.state.lower() in ("on", "true", "1", "home", "charging")
 
     def _get_nordpool_price(self) -> float:
-        """Extract current hour spot price from nordpool sensor."""
         entity_id = self._config.get(CONF_NORDPOOL_ENTITY)
         if not entity_id:
             return 0.0
@@ -100,21 +100,34 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         if state is None or state.state in ("unavailable", "unknown"):
             return 0.0
         try:
-            # nordpool integration stores current price in state
             return float(state.state)
         except (ValueError, TypeError):
             return 0.0
 
-    def _get_solcast_forecast(self, entity_id: Optional[str]) -> float:
-        if not entity_id:
-            return 0.0
-        state = self.hass.states.get(entity_id)
-        if state is None or state.state in ("unavailable", "unknown"):
-            return 0.0
-        try:
-            return float(state.state)
-        except (ValueError, TypeError):
-            return 0.0
+    def _build_ev_car_states(self) -> list[EvCarState]:
+        """Build EvCarState list from config + live HA state."""
+        cars_cfg: list[dict] = self._config.get(CONF_EV_CARS, [])
+        result: list[EvCarState] = []
+        for car_data in cars_cfg:
+            cfg = EvCarConfig(
+                name=car_data.get("name", "Car"),
+                charger_switch=car_data.get("charger_switch", ""),
+                charger_current=car_data.get("charger_current", ""),
+                charger_power=car_data.get("charger_power") or None,
+                ev_soc=car_data.get("ev_soc") or None,
+                ev_soc_target=float(car_data.get("ev_soc_target", 80.0)),
+                phases=int(car_data.get("phases", 1)),
+                phase=car_data.get("phase", "L1"),
+            )
+            soc_raw = self._get_state_float(cfg.ev_soc, default=-1.0)
+            result.append(EvCarState(
+                config=cfg,
+                charging=self._get_state_bool(cfg.charger_switch),
+                current_a=self._get_state_float(cfg.charger_current),
+                power_w=self._get_state_float(cfg.charger_power),
+                soc_pct=soc_raw if soc_raw >= 0 else None,
+            ))
+        return result
 
     async def _async_update_data(self) -> dict:
         """Fetch data and run control logic."""
@@ -134,23 +147,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 solar_power_l1=self._get_state_float(c.get(CONF_SOLAR_INVERTER_POWER_L1)),
                 solar_power_l2=self._get_state_float(c.get(CONF_SOLAR_INVERTER_POWER_L2)),
                 solar_power_l3=self._get_state_float(c.get(CONF_SOLAR_INVERTER_POWER_L3)),
-                solar_forecast_today_kwh=self._get_solcast_forecast(c.get(CONF_SOLCAST_TODAY)),
-                solar_forecast_tomorrow_kwh=self._get_solcast_forecast(c.get(CONF_SOLCAST_TOMORROW)),
+                solar_forecast_today_kwh=self._get_state_float(c.get(CONF_SOLCAST_TODAY)),
+                solar_forecast_tomorrow_kwh=self._get_state_float(c.get(CONF_SOLCAST_TOMORROW)),
 
                 battery_soc_pct=self._get_state_float(c.get(CONF_BATTERY_SOC), default=50.0),
                 battery_power_w=self._get_state_float(c.get(CONF_BATTERY_INVERTER_POWER)),
                 battery_capacity_kwh=float(c.get(CONF_BATTERY_CAPACITY_KWH, 10.0)),
                 battery_max_power_kw=float(c.get(CONF_BATTERY_MAX_POWER_KW, 5.0)),
 
-                ev_charging=self._get_state_bool(c.get(CONF_EV_CHARGER_SWITCH)),
-                ev_current_a=self._get_state_float(c.get(CONF_EV_CHARGER_CURRENT)),
-                ev_power_w=self._get_state_float(c.get(CONF_EV_CHARGER_POWER)),
-                ev_soc_pct=self._get_state_float(c.get(CONF_EV_SOC)) or None,
-                ev_phase=c.get(CONF_EV_CHARGER_PHASE, "L1"),
+                ev_cars=self._build_ev_car_states(),
 
                 heat_pump_power_w=self._get_state_float(c.get(CONF_HEAT_PUMP_POWER)),
                 heat_pump_on=self._get_state_bool(c.get(CONF_HEAT_PUMP_SWITCH)),
+                heat_pump_phase=c.get(CONF_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PHASE),
                 extra_hot_water_on=self._get_state_bool(c.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)),
+                heat_pump_patron_phases=c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES),
+                heat_pump_patron_power_kw=float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
 
                 grid_power_l1=self._get_state_float(c.get(CONF_GRID_POWER_L1)),
                 grid_power_l2=self._get_state_float(c.get(CONF_GRID_POWER_L2)),
@@ -164,7 +176,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 sell_price_sek_kwh=sell_price,
 
                 operating_mode=self.operating_mode,
-                force_ev_charge=self.force_ev_charge,
                 winter_mode=bool(c.get(CONF_WINTER_MODE_ENABLED, False)),
             )
             self._state = state
@@ -172,7 +183,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             decision = self._controller.compute(state)
             self._last_decision = decision
 
-            # Execute the decision
             await self._execute_decision(state, decision)
 
             return {
@@ -184,62 +194,46 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             }
 
         except Exception as err:
+            _LOGGER.exception("Error updating Smart Energy Manager")
             raise UpdateFailed(f"Error updating Smart Energy Manager: {err}") from err
 
     async def _execute_decision(self, state: EnergyState, decision: ControlDecision) -> None:
         """Apply control decisions to actual devices."""
-        # --- Battery charge ---
+        # Battery charge
         charge_entity = self._config.get(CONF_BATTERY_INVERTER_CHARGE)
         discharge_entity = self._config.get(CONF_BATTERY_INVERTER_DISCHARGE)
 
         if charge_entity:
-            if decision.battery_charge_power_w > 0:
-                await self.hass.services.async_call(
-                    "number", "set_value",
-                    {"entity_id": charge_entity, "value": decision.battery_charge_power_w},
-                    blocking=False,
-                )
-            else:
-                await self.hass.services.async_call(
-                    "number", "set_value",
-                    {"entity_id": charge_entity, "value": 0},
-                    blocking=False,
-                )
-
-        if discharge_entity:
-            if decision.battery_discharge_power_w > 0:
-                await self.hass.services.async_call(
-                    "number", "set_value",
-                    {"entity_id": discharge_entity, "value": decision.battery_discharge_power_w},
-                    blocking=False,
-                )
-            else:
-                await self.hass.services.async_call(
-                    "number", "set_value",
-                    {"entity_id": discharge_entity, "value": 0},
-                    blocking=False,
-                )
-
-        # --- EV charger ---
-        ev_switch = self._config.get(CONF_EV_CHARGER_SWITCH)
-        ev_current_entity = self._config.get(CONF_EV_CHARGER_CURRENT)
-
-        if ev_current_entity and decision.ev_enable and decision.ev_current_a > 0:
             await self.hass.services.async_call(
                 "number", "set_value",
-                {"entity_id": ev_current_entity, "value": decision.ev_current_a},
+                {"entity_id": charge_entity, "value": round(decision.battery_charge_power_w)},
                 blocking=False,
             )
-
-        if ev_switch:
-            service = "turn_on" if decision.ev_enable else "turn_off"
+        if discharge_entity:
             await self.hass.services.async_call(
-                "switch", service,
-                {"entity_id": ev_switch},
+                "number", "set_value",
+                {"entity_id": discharge_entity, "value": round(decision.battery_discharge_power_w)},
                 blocking=False,
             )
 
-        # --- Extra hot water ---
+        # EV cars – iterate per-car decisions
+        for car_state, ev_dec in zip(state.ev_cars, decision.ev_decisions):
+            cfg = car_state.config
+            if ev_dec.enable and ev_dec.current_a > 0 and cfg.charger_current:
+                await self.hass.services.async_call(
+                    "number", "set_value",
+                    {"entity_id": cfg.charger_current, "value": round(ev_dec.current_a)},
+                    blocking=False,
+                )
+            if cfg.charger_switch:
+                service = "turn_on" if ev_dec.enable else "turn_off"
+                await self.hass.services.async_call(
+                    "switch", service,
+                    {"entity_id": cfg.charger_switch},
+                    blocking=False,
+                )
+
+        # Extra hot water / heating element
         hot_water_entity = self._config.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)
         if hot_water_entity:
             service = "turn_on" if decision.extra_hot_water else "turn_off"

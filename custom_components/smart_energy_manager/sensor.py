@@ -2,18 +2,13 @@
 from __future__ import annotations
 
 from homeassistant.components.sensor import (
-    SensorEntity,
-    SensorDeviceClass,
-    SensorStateClass,
+    SensorEntity, SensorDeviceClass, SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.const import (
-    UnitOfPower, UnitOfEnergy, UnitOfElectricCurrent,
-    PERCENTAGE, UnitOfElectricPotential,
-)
+from homeassistant.const import UnitOfPower, UnitOfElectricCurrent
 
 from .const import DOMAIN
 from .coordinator import SmartEnergyCoordinator
@@ -25,20 +20,29 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: SmartEnergyCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([
+
+    entities: list[SensorEntity] = [
         SmartEnergyBuyPriceSensor(coordinator, entry),
         SmartEnergySellPriceSensor(coordinator, entry),
         SmartEnergySpotPriceSensor(coordinator, entry),
         SmartEnergyBatteryChargePowerSensor(coordinator, entry),
         SmartEnergyBatteryDischargePowerSensor(coordinator, entry),
-        SmartEnergyEvCurrentSensor(coordinator, entry),
         SmartEnergyPhaseL1Sensor(coordinator, entry),
         SmartEnergyPhaseL2Sensor(coordinator, entry),
         SmartEnergyPhaseL3Sensor(coordinator, entry),
         SmartEnergyDecisionReasonSensor(coordinator, entry),
         SmartEnergyOperatingModeSensor(coordinator, entry),
         SmartEnergySolarSurplusSensor(coordinator, entry),
-    ])
+    ]
+
+    # Dynamic per-car sensors
+    cars_cfg = entry.data.get("ev_cars", [])
+    for i, car in enumerate(cars_cfg):
+        name = car.get("name", f"Car {i+1}")
+        entities.append(SmartEnergyEvCarCurrentSensor(coordinator, entry, i, name))
+        entities.append(SmartEnergyEvCarEnabledSensor(coordinator, entry, i, name))
+
+    async_add_entities(entities)
 
 
 class _BaseEnergySensor(CoordinatorEntity, SensorEntity):
@@ -68,9 +72,7 @@ class SmartEnergyBuyPriceSensor(_BaseEnergySensor):
 
     @property
     def native_value(self):
-        if self.coordinator.data:
-            return round(self.coordinator.data.get("buy_price", 0.0), 4)
-        return None
+        return round(self.coordinator.data.get("buy_price", 0.0), 4) if self.coordinator.data else None
 
 
 class SmartEnergySellPriceSensor(_BaseEnergySensor):
@@ -83,9 +85,7 @@ class SmartEnergySellPriceSensor(_BaseEnergySensor):
 
     @property
     def native_value(self):
-        if self.coordinator.data:
-            return round(self.coordinator.data.get("sell_price", 0.0), 4)
-        return None
+        return round(self.coordinator.data.get("sell_price", 0.0), 4) if self.coordinator.data else None
 
 
 class SmartEnergySpotPriceSensor(_BaseEnergySensor):
@@ -98,9 +98,7 @@ class SmartEnergySpotPriceSensor(_BaseEnergySensor):
 
     @property
     def native_value(self):
-        if self.coordinator.data:
-            return round(self.coordinator.data.get("spot_price", 0.0), 4)
-        return None
+        return round(self.coordinator.data.get("spot_price", 0.0), 4) if self.coordinator.data else None
 
 
 class SmartEnergyBatteryChargePowerSensor(_BaseEnergySensor):
@@ -131,18 +129,44 @@ class SmartEnergyBatteryDischargePowerSensor(_BaseEnergySensor):
         return round(d.battery_discharge_power_w) if d else 0
 
 
-class SmartEnergyEvCurrentSensor(_BaseEnergySensor):
-    _attr_unique_id = "sem_ev_current_setpoint"
-    _attr_name = "EV Charge Current Setpoint"
+class SmartEnergyEvCarCurrentSensor(_BaseEnergySensor):
+    """Current setpoint sensor for one specific EV car."""
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
     _attr_device_class = SensorDeviceClass.CURRENT
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:ev-station"
 
+    def __init__(self, coordinator, entry, car_index: int, car_name: str):
+        super().__init__(coordinator, entry)
+        self._car_index = car_index
+        self._attr_unique_id = f"sem_ev_car_{car_index}_current"
+        self._attr_name = f"{car_name} Charge Current Setpoint"
+
     @property
     def native_value(self):
         d = self.coordinator.last_decision
-        return d.ev_current_a if d else 0
+        if not d or self._car_index >= len(d.ev_decisions):
+            return 0
+        ev_dec = d.ev_decisions[self._car_index]
+        return round(ev_dec.current_a) if ev_dec.enable else 0
+
+
+class SmartEnergyEvCarEnabledSensor(_BaseEnergySensor):
+    """Charging enabled sensor for one specific EV car."""
+    _attr_icon = "mdi:car-electric"
+
+    def __init__(self, coordinator, entry, car_index: int, car_name: str):
+        super().__init__(coordinator, entry)
+        self._car_index = car_index
+        self._attr_unique_id = f"sem_ev_car_{car_index}_enabled"
+        self._attr_name = f"{car_name} Charging Enabled"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.last_decision
+        if not d or self._car_index >= len(d.ev_decisions):
+            return "off"
+        return "on" if d.ev_decisions[self._car_index].enable else "off"
 
 
 class SmartEnergyPhaseL1Sensor(_BaseEnergySensor):
@@ -218,7 +242,5 @@ class SmartEnergySolarSurplusSensor(_BaseEnergySensor):
         s = self.coordinator.current_state
         if not s:
             return 0
-        house_load = max(0.0, (
-            s.grid_power_l1 + s.grid_power_l2 + s.grid_power_l3 + s.solar_power_w
-        ))
+        house_load = max(0.0, s.grid_power_l1 + s.grid_power_l2 + s.grid_power_l3 + s.solar_power_w)
         return round(max(0.0, s.solar_power_w - house_load))
