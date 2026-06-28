@@ -80,6 +80,18 @@
           "phases": "Antal faser",
           "phase": "Fas (vid 1-fas)"
         }
+      },
+      "legionella": {
+        "title": "Legionella-desinficering",
+        "description": "Kör elpatronen 1 gång/vecka för att värma varmvattnet till ≥60°C. Prioriterar solöverskott, annars lågt elpris.",
+        "data": {
+          "legionella_enabled": "Aktivera legionella-desinficering",
+          "legionella_interval_days": "Intervall (dagar)",
+          "legionella_preferred_hour_start": "Önskat starttimme (0-23)",
+          "legionella_preferred_hour_end": "Önskat sluttimme (0-23)",
+          "legionella_max_price_sek_kwh": "Max pris för körning (SEK/kWh)",
+          "legionella_duration_minutes": "Körtid (minuter)"
+        }
       }
     },
     "error": {

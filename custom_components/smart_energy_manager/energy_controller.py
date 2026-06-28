@@ -97,8 +97,12 @@ class EnergyState:
     heat_pump_patron_power_kw: float = DEFAULT_HEAT_PUMP_PATRON_POWER_KW
 
     # Direkt huslastavläsning (Elm4) i W – 0.0 innebär att koordinatorn beräknar den
-    # Elm4 täcker: övriga laster + elpanna + bil, exkl. sol/batteri
+    # Elm4 täcker: övriga laster + elpanna (Elm5)
+    # Elm4 inkluderar INTE billaddaren (bekräftat från mätdata: korr 0.98)
     house_load_w: float = 0.0
+
+    # Legionella-desinficering aktiv – åsidosätter extra_hot_water i executor
+    legionella_active: bool = False
 
     # Grid (positive = import from grid)
     grid_power_l1: float = 0.0
@@ -225,8 +229,8 @@ class EnergyController:
         sell_price = state.sell_price_sek_kwh
         negative_price = sell_price < NEGATIVE_PRICE_THRESHOLD
 
-        # Huslast – Elm4 direkt (house_load_w) om konfigurerat, annars beräkna
-        # Elm4 täcker: övriga laster + elpanna + bil, exkl. sol/batteri
+        # Huslast – Elm4 direkt om konfigurerat, annars beräkna
+        # Elm4 = övriga laster + elpanna (Elm5), EXKL. billaddare
         if state.house_load_w > 0:
             house_load_w = state.house_load_w
         else:

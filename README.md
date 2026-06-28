@@ -30,7 +30,7 @@ Elnät (3-fas, max 20A/fas)
 | Elmätare 1 | Nätanslutning | Negativ = export, Positiv = import | kW |
 | Elmätare 2 | Batteri-inverter AC-sida | Negativ = förbrukning | W |
 | Elmätare 3 | Sol-inverter | Positiv = produktion | W |
-| Elmätare 4 | Fastighetslast (exkl. sol/batteri) | Positiv = förbrukning | W |
+| Elmätare 4 | Fastighetslast (exkl. sol, batteri och billaddare) | Positiv = förbrukning | W |
 | Elmätare 5 | Elpanna | Positiv = förbrukning | W |
 
 > **OBS:** Elm1 rapporterar i **kW** – välj enheten `kW` i konfigurationen. Billaddare (intern mätare) rapporterar också i **kW**.
@@ -71,6 +71,37 @@ Elpannan har två separata kretsar med olika fasbelastning:
 
 Faserna för elpatronen beräknas automatiskt som de två faser som *inte* används av kompressorn. Väljs kompressorn till L3 → patron på L1+L2.
 
+
+## Legionella-desinficering
+
+Elpatronen (2-fas) körs automatiskt ca 1 gång/vecka för att värma varmvattnet till ≥ 60°C och eliminera legionellabakterier.
+
+### Prioritetsordning
+
+| Prioritet | Villkor | Beskrivning |
+|---|---|---|
+| 1 | Solöverskott ≥ 3 000 W inom önskat tidsfönster | Gratis solel driver patronen |
+| 2 | Elpris ≤ konfigurerat maxpris inom önskat tidsfönster | Körs på billig nätström |
+| 3 | Intervallet överskridits med 50 % (nödkörning) | Kör oavsett pris, undviker natten 23–06 |
+
+### Inställningar
+
+| Inställning | Standard | Beskrivning |
+|---|---|---|
+| Aktiverad | Ja | Slå av/på funktionen |
+| Intervall | 7 dagar | Hur ofta desinficering ska ske |
+| Önskat tidsfönster | 10–15 | Timmar då sol normalt är tillgänglig |
+| Max pris | 1,50 SEK/kWh | Kör ej på nätström om dyrare |
+| Körtid | 60 min | Hur länge elpatronen ska vara aktiv |
+
+### Sensorer
+
+| Entitet | Beskrivning |
+|---|---|
+| `sensor.sem_legionella_active` | `on` när desinficering pågår |
+| `sensor.sem_legionella_days_since` | Dagar sedan senaste körning |
+| `sensor.sem_legionella_next_due` | Beräknat datum för nästa körning |
+
 ## Multipla bilar
 
 Varje bil konfigureras oberoende med:
@@ -107,6 +138,9 @@ Bilar laddas i prioritetsordning (konfigurerad ordning). Fasgränserna kontrolle
 | `sensor.sem_phase_l3_load` | Beräknad fasbelastning L3 (W) |
 | `sensor.sem_house_load` | Huslast W – Elm4 direkt eller beräknad |
 | `sensor.sem_solar_surplus` | Solöverskott (W) |
+| `sensor.sem_legionella_active` | `on` när desinficering pågår |
+| `sensor.sem_legionella_days_since` | Dagar sedan senaste körning |
+| `sensor.sem_legionella_next_due` | Datum för nästa planerad körning |
 | `sensor.sem_decision_reason` | Textförklaring senaste beslut |
 | `sensor.sem_operating_mode` | Aktivt driftläge |
 
@@ -183,7 +217,14 @@ Konfigurationen sker i fem steg:
 - Kompressorns fas (1-fas, standard L3) – patronfaserna beräknas automatiskt
 - Elpatronens märkeffekt (kW)
 
-**Steg 5 – Elbilar**
+**Steg 5 – Legionella-desinficering**
+- Aktivera/avaktivera funktionen
+- Intervall i dagar (standard 7)
+- Önskat tidsfönster för körning (standard 10–15, sol-timmar)
+- Max elpris för körning på nätström (standard 1,50 SEK/kWh)
+- Körtid i minuter (standard 60)
+
+**Steg 6 – Elbilar**
 - Lägg till en eller flera bilar
 - Varje bil: namn, laddare-switch, strömsättningsentitet, SOC-sensor, SOC-mål, antal faser och fas (vid 1-fas)
 - Repetera för varje bil, välj "Klar" när alla bilar är konfigurerade

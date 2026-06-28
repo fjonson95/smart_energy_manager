@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from homeassistant.config_entries import ConfigEntry
@@ -42,6 +42,7 @@ from .energy_controller import (
     EnergyController, EnergyState, ControlDecision,
     EvCarConfig, EvCarState,
 )
+from .legionella import LegionellaManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,10 +63,14 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._last_decision: Optional[ControlDecision] = None
         self._state: Optional[EnergyState] = None
         self._controller = self._build_controller()
+        self._legionella = LegionellaManager(hass, self._config)
 
-        # Enhetsskalning – läses en gång från config
         self._grid_scale = 1000.0 if self._config.get(CONF_GRID_POWER_UNIT, UNIT_W) == UNIT_KW else 1.0
         self._ev_scale   = 1000.0 if self._config.get(CONF_EV_POWER_UNIT,   UNIT_W) == UNIT_KW else 1.0
+
+    async def async_config_entry_first_refresh(self):
+        await self._legionella.async_load()
+        await super().async_config_entry_first_refresh()
 
     def _build_controller(self) -> EnergyController:
         c = self._config
@@ -102,18 +107,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         return state.state.lower() in ("on", "true", "1", "home", "charging")
 
     def _get_grid_power_w(self, entity_id: Optional[str]) -> float:
-        """Läs näteffekt och konvertera kW→W om nödvändigt.
-
-        Elm1 rapporterar i kW (negativ=export, positiv=import).
-        Med grid_scale=1000 konverteras till W automatiskt.
-        """
+        """Läs näteffekt och konvertera kW→W om nödvändigt (Elm1 är i kW)."""
         return self._get_state_float(entity_id) * self._grid_scale
 
     def _get_ev_power_w(self, entity_id: Optional[str]) -> float:
-        """Läs EV-laddeffekt och konvertera kW→W om nödvändigt.
-
-        Bil_ladd rapporterar i kW.
-        """
+        """Läs EV-laddeffekt och konvertera kW→W om nödvändigt."""
         return self._get_state_float(entity_id) * self._ev_scale
 
     def _get_nordpool_price(self) -> float:
@@ -128,19 +126,20 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         except (ValueError, TypeError):
             return 0.0
 
-    def _get_house_load_w(
-        self,
-        grid_l1: float, grid_l2: float, grid_l3: float,
-        solar_w: float,
-        battery_power_w: float,
-    ) -> float:
+    def _get_house_load_w(self, grid_l1: float, grid_l2: float, grid_l3: float,
+                          solar_w: float, battery_power_w: float,
+                          ev_power_w: float) -> float:
         """Beräkna huslast i W.
 
-        Prioritet:
-        1. Direkt mätare (Elm4) om konfigurerad – mest exakt.
-        2. Beräknad från nätmätare + sol + batteri (fallback).
+        Topologi (bekräftad från mätdata):
+          Elm1(nät) = Elm4(fastighet) + Bil_ladd - Sol - Bat_urladdning + Bat_laddning
 
-        Elm4 täcker: övriga laster + elpanna + bil (men EJ sol/batteri).
+          Elm4 inkluderar: övriga laster + elpanna (Elm5)
+          Elm4 inkluderar INTE: billaddare, sol, batteri
+
+        Prioritet:
+          1. Elm4 direkt om konfigurerad (mest exakt, korr 0.98 mot Elm1)
+          2. Beräknad från Elm1 + kända laster (fallback)
         """
         house_entity = self._config.get(CONF_HOUSE_LOAD_ENTITY)
         if house_entity:
@@ -148,17 +147,14 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             if val > 0:
                 return val
 
-        # Fallback: nät + sol - batteri_laddning + batteri_urladdning
-        # grid positiv=import, battery_power positiv=laddning, negativ=urladdning
-        return max(0.0,
-            (grid_l1 + grid_l2 + grid_l3)
-            + solar_w
-            - max(0.0, battery_power_w)   # batteri laddar → extra förbrukning
-            + max(0.0, -battery_power_w)  # batteri urladdar → extra produktion
-        )
+        # Fallback: Elm1 + Sol + Bat_urladdning - Bat_laddning - Bil
+        # grid = import (pos) / export (neg)
+        grid_total = grid_l1 + grid_l2 + grid_l3
+        bat_charge    = max(0.0,  battery_power_w)
+        bat_discharge = max(0.0, -battery_power_w)
+        return max(0.0, grid_total + solar_w - bat_discharge + bat_charge - ev_power_w)
 
     def _build_ev_car_states(self) -> list[EvCarState]:
-        """Bygg EvCarState-lista från config + live HA-state."""
         cars_cfg: list[dict] = self._config.get(CONF_EV_CARS, [])
         result: list[EvCarState] = []
         for car_data in cars_cfg:
@@ -173,7 +169,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 phase=car_data.get("phase", "L1"),
             )
             soc_raw = self._get_state_float(cfg.ev_soc, default=-1.0)
-            # EV-laddeffekt: använd ev_scale om laddaren rapporterar i kW
             power_w = self._get_ev_power_w(cfg.charger_power) if cfg.charger_power else 0.0
             result.append(EvCarState(
                 config=cfg,
@@ -187,30 +182,40 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     # ── Huvuduppdatering ──────────────────────────────────────────────
 
     async def _async_update_data(self) -> dict:
-        """Hämta data och kör styrlogik."""
         c = self._config
         try:
-            spot_price = self._get_nordpool_price()
-            grid_fees     = float(c.get(CONF_GRID_FEES,          DEFAULT_GRID_FEES))
-            energy_tax    = float(c.get(CONF_ENERGY_TAX,         DEFAULT_ENERGY_TAX))
-            vat_rate      = float(c.get(CONF_VAT_RATE,           DEFAULT_VAT_RATE))
-            extra_revenue = float(c.get(CONF_SELL_EXTRA_REVENUE,  DEFAULT_SELL_EXTRA_REVENUE))
+            spot_price    = self._get_nordpool_price()
+            grid_fees     = float(c.get(CONF_GRID_FEES,         DEFAULT_GRID_FEES))
+            energy_tax    = float(c.get(CONF_ENERGY_TAX,        DEFAULT_ENERGY_TAX))
+            vat_rate      = float(c.get(CONF_VAT_RATE,          DEFAULT_VAT_RATE))
+            extra_revenue = float(c.get(CONF_SELL_EXTRA_REVENUE, DEFAULT_SELL_EXTRA_REVENUE))
 
             buy_price  = self._controller.calculate_buy_price(spot_price, grid_fees, energy_tax, vat_rate)
             sell_price = self._controller.calculate_sell_price(spot_price, extra_revenue)
 
-            # Näteffekt per fas (kW→W om Elm1 rapporterar kW)
             grid_l1 = self._get_grid_power_w(c.get(CONF_GRID_POWER_L1))
             grid_l2 = self._get_grid_power_w(c.get(CONF_GRID_POWER_L2))
             grid_l3 = self._get_grid_power_w(c.get(CONF_GRID_POWER_L3))
 
             solar_w       = self._get_state_float(c.get(CONF_SOLAR_INVERTER_TOTAL))
             battery_pwr_w = self._get_state_float(c.get(CONF_BATTERY_INVERTER_POWER))
-            # BatInv_in_out: positiv=laddning, negativ=urladdning – stämmer med EnergyState-konventionen
+            ev_cars       = self._build_ev_car_states()
 
-            ev_cars = self._build_ev_car_states()
+            # Total EV-effekt för huslastvberäkning (exkluderas från Elm4)
+            ev_total_w = sum(car.power_w for car in ev_cars)
 
-            house_load_w = self._get_house_load_w(grid_l1, grid_l2, grid_l3, solar_w, battery_pwr_w)
+            house_load_w = self._get_house_load_w(
+                grid_l1, grid_l2, grid_l3, solar_w, battery_pwr_w, ev_total_w
+            )
+
+            # Solöverskott (efter huslast, exkl. bil) – används av legionella
+            solar_surplus_w = max(0.0, solar_w - house_load_w)
+
+            # ── Legionella ────────────────────────────────────────────
+            now = datetime.now().astimezone()
+            legionella_active, legionella_reason = self._legionella.should_run_now(
+                now, solar_surplus_w, buy_price
+            )
 
             state = EnergyState(
                 solar_power_w=solar_w,
@@ -234,6 +239,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 heat_pump_patron_phases=c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES),
                 heat_pump_patron_power_kw=float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
 
+                # Legionella åsidosätter extra_hot_water om aktiv
+                legionella_active=legionella_active,
+
                 grid_power_l1=grid_l1,
                 grid_power_l2=grid_l2,
                 grid_power_l3=grid_l3,
@@ -255,6 +263,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             decision = self._controller.compute(state)
             self._last_decision = decision
 
+            # Legionella-orsak läggs in i decision om aktiv
+            if legionella_active:
+                decision.reason = legionella_reason + " | " + decision.reason
+
             await self._execute_decision(state, decision)
 
             return {
@@ -264,13 +276,16 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "sell_price": sell_price,
                 "spot_price": spot_price,
                 "house_load_w": house_load_w,
+                "solar_surplus_w": solar_surplus_w,
+                "legionella_active": legionella_active,
+                "legionella_last_run": self._legionella.last_run,
+                "legionella_days_since": self._legionella.days_since_last_run,
+                "legionella_next_due": self._legionella.next_due(),
             }
 
         except Exception as err:
             _LOGGER.exception("Error updating Smart Energy Manager")
             raise UpdateFailed(f"Error updating Smart Energy Manager: {err}") from err
-
-    # ── Exekvera beslut ───────────────────────────────────────────────
 
     async def _execute_decision(self, state: EnergyState, decision: ControlDecision) -> None:
         """Applicera styrningsbeslut på faktiska enheter."""
@@ -290,7 +305,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 blocking=False,
             )
 
-        # EV – per bil
         for car_state, ev_dec in zip(state.ev_cars, decision.ev_decisions):
             cfg = car_state.config
             if ev_dec.enable and ev_dec.current_a > 0 and cfg.charger_current:
@@ -307,17 +321,16 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     blocking=False,
                 )
 
-        # Elpatron / extra varmvatten
+        # Extra varmvatten: aktiveras av styrlogik ELLER legionella
         hot_water_entity = self._config.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)
         if hot_water_entity:
-            service = "turn_on" if decision.extra_hot_water else "turn_off"
+            activate = decision.extra_hot_water or state.legionella_active
+            service = "turn_on" if activate else "turn_off"
             await self.hass.services.async_call(
                 "switch", service,
                 {"entity_id": hot_water_entity},
                 blocking=False,
             )
-
-    # ── Properties ────────────────────────────────────────────────────
 
     @property
     def last_decision(self) -> Optional[ControlDecision]:
@@ -326,3 +339,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     @property
     def current_state(self) -> Optional[EnergyState]:
         return self._state
+
+    @property
+    def legionella(self) -> LegionellaManager:
+        return self._legionella

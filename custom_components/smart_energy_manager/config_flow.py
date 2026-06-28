@@ -35,6 +35,12 @@ from .const import (
     DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     CONF_HOUSE_LOAD_ENTITY, CONF_GRID_POWER_UNIT, CONF_EV_POWER_UNIT, UNIT_W, UNIT_KW,
+    CONF_LEGIONELLA_ENABLED, CONF_LEGIONELLA_INTERVAL_DAYS,
+    CONF_LEGIONELLA_PREFERRED_HOUR_START, CONF_LEGIONELLA_PREFERRED_HOUR_END,
+    CONF_LEGIONELLA_MAX_PRICE, CONF_LEGIONELLA_DURATION_MINUTES,
+    DEFAULT_LEGIONELLA_ENABLED, DEFAULT_LEGIONELLA_INTERVAL_DAYS,
+    DEFAULT_LEGIONELLA_PREFERRED_HOUR_START, DEFAULT_LEGIONELLA_PREFERRED_HOUR_END,
+    DEFAULT_LEGIONELLA_MAX_PRICE, DEFAULT_LEGIONELLA_DURATION_MINUTES,
     EV_PHASES_OPTIONS,
 )
 
@@ -118,6 +124,16 @@ STEP_HEAT_PUMP_SCHEMA = vol.Schema({
         selector.SelectSelectorConfig(options=EV_PHASES_OPTIONS, mode=selector.SelectSelectorMode.LIST)
     ),
     vol.Optional(CONF_HEAT_PUMP_PATRON_POWER_KW, default=DEFAULT_HEAT_PUMP_PATRON_POWER_KW): vol.Coerce(float),
+})
+
+
+STEP_LEGIONELLA_SCHEMA = vol.Schema({
+    vol.Optional(CONF_LEGIONELLA_ENABLED, default=DEFAULT_LEGIONELLA_ENABLED): bool,
+    vol.Optional(CONF_LEGIONELLA_INTERVAL_DAYS, default=DEFAULT_LEGIONELLA_INTERVAL_DAYS): vol.Coerce(int),
+    vol.Optional(CONF_LEGIONELLA_PREFERRED_HOUR_START, default=DEFAULT_LEGIONELLA_PREFERRED_HOUR_START): vol.Coerce(int),
+    vol.Optional(CONF_LEGIONELLA_PREFERRED_HOUR_END, default=DEFAULT_LEGIONELLA_PREFERRED_HOUR_END): vol.Coerce(int),
+    vol.Optional(CONF_LEGIONELLA_MAX_PRICE, default=DEFAULT_LEGIONELLA_MAX_PRICE): vol.Coerce(float),
+    vol.Optional(CONF_LEGIONELLA_DURATION_MINUTES, default=DEFAULT_LEGIONELLA_DURATION_MINUTES): vol.Coerce(int),
 })
 
 # EV car sub-flow (one car at a time)
@@ -216,7 +232,7 @@ class SmartEnergyManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             patron_phases = [p for p in ["L1", "L2", "L3"] if p != comp_phase]
             user_input[CONF_HEAT_PUMP_PATRON_PHASES] = patron_phases
             self._data.update(user_input)
-            return await self.async_step_ev_menu()
+            return await self.async_step_legionella()
 
         return self.async_show_form(
             step_id="heat_pump",
@@ -225,6 +241,20 @@ class SmartEnergyManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     # ── Step 5: EV menu (add car / done) ─────────────────────────────────────
+
+    async def async_step_legionella(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Steg 5 – Legionella-desinficering."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_ev_menu()
+
+        return self.async_show_form(
+            step_id="legionella",
+            data_schema=STEP_LEGIONELLA_SCHEMA,
+            description_placeholders={"title": "Legionella-desinficering"},
+        )
 
     async def async_step_ev_menu(
         self, user_input: dict[str, Any] | None = None

@@ -34,6 +34,9 @@ async def async_setup_entry(
         SmartEnergyOperatingModeSensor(coordinator, entry),
         SmartEnergySolarSurplusSensor(coordinator, entry),
         SmartEnergyHouseLoadSensor(coordinator, entry),
+        SmartEnergyLegionellaActiveSensor(coordinator, entry),
+        SmartEnergyLegionellaDaysSinceSensor(coordinator, entry),
+        SmartEnergyLegionellaNextDueSensor(coordinator, entry),
     ]
 
     # Dynamic per-car sensors
@@ -228,6 +231,49 @@ class SmartEnergyOperatingModeSensor(_BaseEnergySensor):
     @property
     def native_value(self):
         return self.coordinator.operating_mode
+
+
+
+class SmartEnergyLegionellaActiveSensor(_BaseEnergySensor):
+    """Visar om legionelladesinficering pågår."""
+    _attr_unique_id = "sem_legionella_active"
+    _attr_name = "Legionella Disinfection Active"
+    _attr_icon = "mdi:bacteria"
+
+    @property
+    def native_value(self) -> str:
+        d = self.coordinator.data
+        return "on" if (d and d.get("legionella_active")) else "off"
+
+
+class SmartEnergyLegionellaDaysSinceSensor(_BaseEnergySensor):
+    """Dagar sedan senaste legionellakörning."""
+    _attr_unique_id = "sem_legionella_days_since"
+    _attr_name = "Legionella Days Since Last Run"
+    _attr_native_unit_of_measurement = "d"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        if not d:
+            return None
+        days = d.get("legionella_days_since")
+        return round(days, 1) if days is not None else None
+
+
+class SmartEnergyLegionellaNextDueSensor(_BaseEnergySensor):
+    """Datum för nästa planerade legionellakörning."""
+    _attr_unique_id = "sem_legionella_next_due"
+    _attr_name = "Legionella Next Due"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:calendar-alert"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return d.get("legionella_next_due") if d else None
 
 
 class SmartEnergyHouseLoadSensor(_BaseEnergySensor):

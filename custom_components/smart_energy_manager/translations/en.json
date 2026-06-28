@@ -80,6 +80,18 @@
           "phases": "Antal faser",
           "phase": "Fas (vid 1-fas)"
         }
+      },
+      "legionella": {
+        "title": "Legionella Disinfection",
+        "description": "Runs the heating element weekly to heat water to ≥60°C. Prioritises solar surplus, otherwise low electricity price.",
+        "data": {
+          "legionella_enabled": "Enable legionella disinfection",
+          "legionella_interval_days": "Interval (days)",
+          "legionella_preferred_hour_start": "Preferred start hour (0-23)",
+          "legionella_preferred_hour_end": "Preferred end hour (0-23)",
+          "legionella_max_price_sek_kwh": "Max price for run (SEK/kWh)",
+          "legionella_duration_minutes": "Run duration (minutes)"
+        }
       }
     },
     "error": {

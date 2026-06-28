@@ -138,3 +138,19 @@ CONF_EV_POWER_UNIT = "ev_power_unit"       # "W" (default) eller "kW"
 
 UNIT_W = "W"
 UNIT_KW = "kW"
+
+# ── Legionella-desinficering ──────────────────────────────────────────────────
+CONF_LEGIONELLA_ENABLED = "legionella_enabled"
+CONF_LEGIONELLA_INTERVAL_DAYS = "legionella_interval_days"
+CONF_LEGIONELLA_PREFERRED_HOUR_START = "legionella_preferred_hour_start"
+CONF_LEGIONELLA_PREFERRED_HOUR_END = "legionella_preferred_hour_end"
+CONF_LEGIONELLA_MAX_PRICE = "legionella_max_price_sek_kwh"
+CONF_LEGIONELLA_DURATION_MINUTES = "legionella_duration_minutes"
+CONF_LEGIONELLA_LAST_RUN = "legionella_last_run"      # lagras i storage
+
+DEFAULT_LEGIONELLA_ENABLED = True
+DEFAULT_LEGIONELLA_INTERVAL_DAYS = 7
+DEFAULT_LEGIONELLA_PREFERRED_HOUR_START = 10   # sol brukar vara bra 10-15
+DEFAULT_LEGIONELLA_PREFERRED_HOUR_END = 15
+DEFAULT_LEGIONELLA_MAX_PRICE = 1.50            # SEK/kWh – kör ej om dyrare
+DEFAULT_LEGIONELLA_DURATION_MINUTES = 60       # elpatronen kör ~60 min
