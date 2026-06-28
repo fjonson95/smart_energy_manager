@@ -164,6 +164,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 sell_price_sek_kwh=sell_price,
 
                 operating_mode=self.operating_mode,
+                force_ev_charge=self.force_ev_charge,
                 winter_mode=bool(c.get(CONF_WINTER_MODE_ENABLED, False)),
             )
             self._state = state
