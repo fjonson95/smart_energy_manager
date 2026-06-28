@@ -96,6 +96,10 @@ class EnergyState:
     heat_pump_patron_phases: list[str] = field(default_factory=lambda: list(DEFAULT_HEAT_PUMP_PATRON_PHASES))
     heat_pump_patron_power_kw: float = DEFAULT_HEAT_PUMP_PATRON_POWER_KW
 
+    # Direkt huslastavläsning (Elm4) i W – 0.0 innebär att koordinatorn beräknar den
+    # Elm4 täcker: övriga laster + elpanna + bil, exkl. sol/batteri
+    house_load_w: float = 0.0
+
     # Grid (positive = import from grid)
     grid_power_l1: float = 0.0
     grid_power_l2: float = 0.0
@@ -221,15 +225,19 @@ class EnergyController:
         sell_price = state.sell_price_sek_kwh
         negative_price = sell_price < NEGATIVE_PRICE_THRESHOLD
 
-        # Estimate base house load (excludes EV and battery)
-        house_load_w = max(0.0, (
-            state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3
-            + solar_w
-            + max(0, -state.battery_power_w)   # battery discharging → adds supply
-            - max(0, state.battery_power_w)    # battery charging → consumes power
-        ))
+        # Huslast – Elm4 direkt (house_load_w) om konfigurerat, annars beräkna
+        # Elm4 täcker: övriga laster + elpanna + bil, exkl. sol/batteri
+        if state.house_load_w > 0:
+            house_load_w = state.house_load_w
+        else:
+            house_load_w = max(0.0, (
+                state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3
+                + solar_w
+                + max(0, -state.battery_power_w)
+                - max(0, state.battery_power_w)
+            ))
 
-        # --- Available solar surplus after house load ---
+        # Tillgängligt solöverskott efter huslast
         solar_surplus_w = max(0.0, solar_w - house_load_w)
 
         _LOGGER.debug(
@@ -347,9 +355,12 @@ class EnergyController:
             decision.battery_discharge_power_w = state.battery_max_power_kw * 1000
             decision.reason += f" | Discharge battery (expensive {buy_price:.3f} SEK)"
         elif solar_w > 100 and soc < self.winter_max_soc:
-            house_load_w = max(0.0,
-                state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3 + solar_w
-            )
+            if state.house_load_w > 0:
+                house_load_w = state.house_load_w
+            else:
+                house_load_w = max(0.0,
+                    state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3 + solar_w
+                )
             surplus = max(0.0, solar_w - house_load_w)
             if surplus > 100:
                 decision.battery_charge_power_w = min(
@@ -357,10 +368,11 @@ class EnergyController:
                 )
                 decision.reason += " | Charge battery from solar (winter)"
 
-        # EV: only charge from solar in winter mode
-        remaining_surplus = max(0.0, solar_w - max(0.0,
+        # EV: endast solöverskott i vinterläge
+        _house = state.house_load_w if state.house_load_w > 0 else max(0.0,
             state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3 + solar_w
-        ))
+        )
+        remaining_surplus = max(0.0, solar_w - _house)
         for i, car in enumerate(state.ev_cars):
             min_surplus = (MIN_SOLAR_FOR_EV_1PHASE if car.config.phases == 1
                            else MIN_SOLAR_FOR_EV_3PHASE)

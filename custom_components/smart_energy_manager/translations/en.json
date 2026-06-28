@@ -2,79 +2,136 @@
   "config": {
     "step": {
       "user": {
-        "title": "Smart Energy Manager – Entities",
-        "description": "Map your energy system entities. Required fields are marked with *.",
+        "title": "Nät & Prissättning",
+        "description": "Ange nätmätare och prisinformation",
         "data": {
-          "battery_soc_entity": "Battery State of Charge (SOC) *",
-          "battery_inverter_charge_entity": "Battery Inverter – Charge Power Setpoint *",
-          "battery_inverter_discharge_entity": "Battery Inverter – Discharge Power Setpoint *",
-          "battery_inverter_power_entity": "Battery Inverter – Current Power (optional)",
-          "battery_capacity_kwh": "Battery Capacity (kWh) *",
-          "battery_max_power_kw": "Battery Max Power (kW) *",
-          "solar_power_total_entity": "Solar Inverter – Total Power *",
-          "solar_power_l1_entity": "Solar Power L1 (optional)",
-          "solar_power_l2_entity": "Solar Power L2 (optional)",
-          "solar_power_l3_entity": "Solar Power L3 (optional)",
-          "ev_charger_switch_entity": "EV Charger – Enable Switch *",
-          "ev_charger_current_entity": "EV Charger – Current Setpoint *",
-          "ev_charger_power_entity": "EV Charger – Power (optional)",
-          "ev_soc_entity": "EV State of Charge (optional)",
-          "ev_charger_phase": "EV Single-Phase Car uses phase *",
-          "heat_pump_switch_entity": "Heat Pump Switch (optional)",
-          "heat_pump_power_entity": "Heat Pump Power (optional)",
-          "heat_pump_extra_hot_water_entity": "Heat Pump Extra Hot Water Switch (optional)",
-          "grid_power_l1_entity": "Grid Power L1 (optional)",
-          "grid_power_l2_entity": "Grid Power L2 (optional)",
-          "grid_power_l3_entity": "Grid Power L3 (optional)",
-          "grid_current_l1_entity": "Grid Current L1 (optional)",
-          "grid_current_l2_entity": "Grid Current L2 (optional)",
-          "grid_current_l3_entity": "Grid Current L3 (optional)",
-          "nordpool_entity": "Nordpool Price Sensor *",
-          "solcast_today_entity": "Solcast – Today Forecast (kWh) *",
-          "solcast_tomorrow_entity": "Solcast – Tomorrow Forecast (kWh) *"
+          "nordpool_entity": "Nordpool sensor (spotpris)",
+          "grid_power_l1_entity": "Näteffekt L1",
+          "grid_power_l2_entity": "Näteffekt L2",
+          "grid_power_l3_entity": "Näteffekt L3",
+          "grid_current_l1_entity": "Nätström L1",
+          "grid_current_l2_entity": "Nätström L2",
+          "grid_current_l3_entity": "Nätström L3",
+          "max_current_per_phase": "Max ström per fas (A)",
+          "grid_voltage": "Nätspänning (V)",
+          "grid_fees_sek_kwh": "Nätavgift (SEK/kWh)",
+          "energy_tax_sek_kwh": "Energiskatt (SEK/kWh)",
+          "vat_rate": "Moms (0.25 = 25%)",
+          "sell_extra_revenue": "Ersättning vid försäljning (SEK/kWh)",
+          "house_load_entity": "House load sensor (Elm4 – direct meter)",
+          "grid_power_unit": "Grid power unit (W or kW)",
+          "ev_power_unit": "EV charger power unit (W or kW)"
         }
       },
-      "settings": {
-        "title": "Smart Energy Manager – Grid & Pricing",
+      "solar": {
+        "title": "Solceller",
+        "description": "Ange solpanelernas mätare (valfritt)",
         "data": {
-          "max_current_per_phase": "Max Current per Phase (A)",
-          "grid_voltage": "Grid Voltage (V)",
-          "grid_fees_sek_kwh": "Grid Fees (SEK/kWh, excl. VAT)",
-          "energy_tax_sek_kwh": "Energy Tax (SEK/kWh, excl. VAT)",
-          "vat_rate": "VAT Rate (e.g. 0.25 for 25%)",
-          "sell_extra_revenue": "Extra Sell Revenue (SEK/kWh, e.g. 0.07)",
-          "battery_min_soc": "Battery Min SOC (%)",
-          "battery_max_soc": "Battery Max SOC (%)",
-          "ev_soc_target": "EV SOC Target (%)",
-          "winter_mode_enabled": "Enable Winter Mode by default",
-          "winter_cheap_hour_threshold": "Winter – Cheap Price Threshold (SEK/kWh)",
-          "winter_expensive_hour_threshold": "Winter – Expensive Price Threshold (SEK/kWh)",
-          "winter_min_soc": "Winter – Min SOC before stop discharge (%)",
-          "winter_max_soc": "Winter – Max SOC to charge to (%)"
+          "solar_power_total_entity": "Total soleffekt",
+          "solar_power_l1_entity": "Soleffekt L1",
+          "solar_power_l2_entity": "Soleffekt L2",
+          "solar_power_l3_entity": "Soleffekt L3",
+          "solcast_today_entity": "Solcast prognos idag (kWh)",
+          "solcast_tomorrow_entity": "Solcast prognos imorgon (kWh)"
+        }
+      },
+      "battery": {
+        "title": "Batteri",
+        "description": "Ange batterimätare och gränsvärden",
+        "data": {
+          "battery_soc_entity": "Batteri SOC (%)",
+          "battery_inverter_power_entity": "Batteri effekt (W)",
+          "battery_inverter_charge_entity": "Laddningssetpunkt",
+          "battery_inverter_discharge_entity": "Urladdningssetpunkt",
+          "battery_capacity_kwh": "Batterikapacitet (kWh)",
+          "battery_max_power_kw": "Max effekt (kW)",
+          "battery_min_soc": "Min SOC (%)",
+          "battery_max_soc": "Max SOC (%)"
+        }
+      },
+      "heat_pump": {
+        "title": "Elpanna / Värmepump",
+        "description": "Värmepump: 1-fas kompressor för husvärme. Elpatron: 2-fas för extra varmvatten (konfigureras automatiskt som de två återstående faserna).",
+        "data": {
+          "heat_pump_power_entity": "Värmepump effektsensor",
+          "heat_pump_switch_entity": "Värmepump strömbrytare",
+          "heat_pump_extra_hot_water_entity": "Extra varmvatten (elpatron)",
+          "heat_pump_phase": "Kompressorns fas (1-fas)",
+          "heat_pump_patron_power_kw": "Elpatronens effekt (kW)"
+        }
+      },
+      "ev_menu": {
+        "title": "Elbilar ({count} tillagda)",
+        "description": "Lägg till en elbil eller gå vidare",
+        "data": {
+          "add_car": "Lägg till elbil"
+        }
+      },
+      "ev_car": {
+        "title": "Elbil {title}",
+        "description": "Konfigurera laddare och fas för denna bil",
+        "data": {
+          "car_name": "Namn på bilen",
+          "charger_switch": "Laddare strömbrytare",
+          "charger_current": "Laddström setpunkt",
+          "charger_power": "Laddeffekt sensor (valfritt)",
+          "ev_soc": "Bilens batteri SOC (valfritt)",
+          "ev_soc_target": "Mål-SOC (%)",
+          "phases": "Antal faser",
+          "phase": "Fas (vid 1-fas)"
         }
       }
+    },
+    "error": {
+      "required": "Detta fält är obligatoriskt",
+      "required_fields": "Namn, strömbrytare och strömsetpunkt krävs"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Smart Energy Manager – Options",
+        "title": "Nät & Prissättning",
         "data": {
-          "max_current_per_phase": "Max Current per Phase (A)",
-          "grid_fees_sek_kwh": "Grid Fees (SEK/kWh)",
-          "energy_tax_sek_kwh": "Energy Tax (SEK/kWh)",
-          "vat_rate": "VAT Rate",
-          "sell_extra_revenue": "Extra Sell Revenue (SEK/kWh)",
-          "battery_min_soc": "Battery Min SOC (%)",
-          "battery_max_soc": "Battery Max SOC (%)",
-          "ev_soc_target": "EV SOC Target (%)",
-          "winter_mode_enabled": "Winter Mode Default",
-          "winter_cheap_hour_threshold": "Cheap Price Threshold (SEK/kWh)",
-          "winter_expensive_hour_threshold": "Expensive Price Threshold (SEK/kWh)",
-          "winter_min_soc": "Winter Min SOC (%)",
-          "winter_max_soc": "Winter Max SOC (%)"
+          "nordpool_entity": "Nordpool sensor",
+          "grid_fees_sek_kwh": "Nätavgift (SEK/kWh)",
+          "energy_tax_sek_kwh": "Energiskatt (SEK/kWh)",
+          "vat_rate": "Moms",
+          "sell_extra_revenue": "Försäljningsersättning (SEK/kWh)",
+          "max_current_per_phase": "Max ström per fas (A)",
+          "grid_voltage": "Nätspänning (V)"
+        }
+      },
+      "battery_opts": {
+        "title": "Batterigränser",
+        "data": {
+          "battery_min_soc": "Min SOC (%)",
+          "battery_max_soc": "Max SOC (%)",
+          "battery_capacity_kwh": "Kapacitet (kWh)",
+          "battery_max_power_kw": "Max effekt (kW)"
+        }
+      },
+      "ev_menu_opts": {
+        "title": "Elbilar ({count} konfigurerade)",
+        "data": {
+          "add_car": "Lägg till elbil"
+        }
+      },
+      "ev_car_opts": {
+        "title": "Lägg till elbil",
+        "data": {
+          "car_name": "Namn",
+          "charger_switch": "Laddare strömbrytare",
+          "charger_current": "Laddström setpunkt",
+          "charger_power": "Laddeffekt sensor",
+          "ev_soc": "Bilens SOC sensor",
+          "ev_soc_target": "Mål-SOC (%)",
+          "phases": "Antal faser",
+          "phase": "Fas (vid 1-fas)"
         }
       }
+    },
+    "error": {
+      "required_fields": "Namn, strömbrytare och strömsetpunkt krävs"
     }
   }
 }

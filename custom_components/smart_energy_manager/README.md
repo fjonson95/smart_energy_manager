@@ -5,31 +5,45 @@ En HACS-integration för Home Assistant som optimerar egenförbrukning av solene
 ## Systemöversikt
 
 ```
-Solceller (3-fas, lika per fas)
+Elnät (3-fas, max 20A/fas)
     │
-    ▼
-Sol-inverter ──────────────────────────────────────────┐
-                                                        │
-Batteri-inverter (3-fas, styrbar laddning/urladdning)  │   Elnät (3-fas, max 20A/fas)
-    │                                                   │       │
-    └───────────────────────────────────────────────────┴───────┤
-                                                                │
-                                              ┌─────────────────┤
-                                              │                 │
-                                         Billaddare        Elpanna
-                                      (3-fas HW, bil         (1-fas)
-                                       laddar 1-fas)
+    │   Batteri-inverter (3-fas)      Sol-inverter (3-fas)
+    │          │                             │
+    └──────────┴─────────────────────────────┴──── Elmätare 4 (huslast) ────┬──── Övriga laster
+                                                                             │
+                                                                        Elmätare 5
+                                                                             │
+                                                                          Elpanna
+                                                                        (1-fas kompressor
+                                                                       +2-fas elpatron)
+               │
+           Billaddare
+        (3-fas hårdvara,
+         varje bil laddar
+         1-fas eller 3-fas)
 ```
+
+### Elmätarroller
+
+| Mätare | Placering | Tecken | Enhet |
+|---|---|---|---|
+| Elmätare 1 | Nätanslutning | Negativ = export, Positiv = import | kW |
+| Elmätare 2 | Batteri-inverter AC-sida | Negativ = förbrukning | W |
+| Elmätare 3 | Sol-inverter | Positiv = produktion | W |
+| Elmätare 4 | Fastighetslast (exkl. sol/batteri) | Positiv = förbrukning | W |
+| Elmätare 5 | Elpanna | Positiv = förbrukning | W |
+
+> **OBS:** Elm1 rapporterar i **kW** – välj enheten `kW` i konfigurationen. Billaddare (intern mätare) rapporterar också i **kW**.
 
 ## Funktioner
 
 ### Autoläge (Självkonsumtion)
 1. **Täck hushållslast** – prioritet 1
-2. **Ladda bil från sol** – när solöverskott ≥ 1400W startas laddning, ström justeras dynamiskt
+2. **Ladda bilar från sol** – när solöverskott ≥ 1 400 W (1-fas) eller 4 140 W (3-fas) startas laddning; ström justeras dynamiskt per bil
 3. **Ladda batteri från solöverskott**
-4. **Extra varmvatten** – när batteriet är fullt och sol finns kvar
-5. **Ladda ur batteriet** – när priser är tillräckligt höga och ingen sol finns
-6. **Negativa elpriser** – när säljpriset är negativt absorberas all möjlig solel i batteri, bil och varmvatten
+4. **Extra varmvatten via elpatron** – när batteriet är fullt och sol finns kvar
+5. **Ladda ur batteriet** – när priserna är tillräckligt höga och ingen sol finns
+6. **Negativa elpriser** – när säljpriset är negativt absorberas all möjlig solel i batteri, bilar och varmvatten
 
 ### Vinterläge
 - Ladda batteri nattetid när priset underskrider konfigurerbar gräns
@@ -37,14 +51,36 @@ Batteri-inverter (3-fas, styrbar laddning/urladdning)  │   Elnät (3-fas, max 
 - Ladda alltid från sol när möjligt
 
 ### Forcelägen
-- **Force EV Charge** – ladda bil från elnät oavsett sol (max ström, men fasbegränsad)
+- **Force EV Charge** – ladda alla bilar från elnät oavsett sol (max ström, men fasbegränsad)
 - **Force Battery Charge** – ladda batteri från elnät
 
 ### Fasskydd
 Beräknar fasbelastning per fas och reducerar i prioritetsordning:
-1. Minskar billaddarens ström
+1. Minskar billaddarens ström (bil med lägst prioritet först)
 2. Minskar batteriladdning
-3. Stänger av billaddaren
+3. Stänger av extra varmvatten (elpatron)
+
+## Elpanna – fasmodell
+
+Elpannan har två separata kretsar med olika fasbelastning:
+
+| Krets | Drift | Faser | Typisk effekt |
+|---|---|---|---|
+| Värmepump (kompressor) | Normal husvärme | **1-fas** (konfigurerbar, standard L3) | 500–1 500 W |
+| Elpatron | Extra varmvatten | **2-fas** (de två övriga faserna, standard L1+L2) | 3 000–6 000 W |
+
+Faserna för elpatronen beräknas automatiskt som de två faser som *inte* används av kompressorn. Väljs kompressorn till L3 → patron på L1+L2.
+
+## Multipla bilar
+
+Varje bil konfigureras oberoende med:
+- Namn
+- Strömbrytare och strömsättningsentitet (laddare)
+- Effektsensor (valfritt)
+- SOC-sensor och SOC-mål (valfritt)
+- Antal faser: **1-fas** (ange vilken fas: L1/L2/L3) eller **3-fas**
+
+Bilar laddas i prioritetsordning (konfigurerad ordning). Fasgränserna kontrolleras gemensamt för alla bilar.
 
 ## Prissättning
 
@@ -56,39 +92,47 @@ Beräknar fasbelastning per fas och reducerar i prioritetsordning:
 ## Enheter som exponeras
 
 ### Sensorer
-| Enhet | Beskrivning |
+
+| Entitet | Beskrivning |
 |---|---|
 | `sensor.sem_buy_price` | Aktuellt köppris SEK/kWh |
 | `sensor.sem_sell_price` | Aktuellt säljpris SEK/kWh |
 | `sensor.sem_spot_price` | Nordpool spotpris |
 | `sensor.sem_battery_charge_power` | Batteri laddnings-setpoint (W) |
 | `sensor.sem_battery_discharge_power` | Batteri urladdnings-setpoint (W) |
-| `sensor.sem_ev_current_setpoint` | Billaddare strömsetpoint (A) |
+| `sensor.sem_ev_car_N_current` | Bil N laddströms-setpoint (A) |
+| `sensor.sem_ev_car_N_enabled` | Bil N laddning aktiv (on/off) |
 | `sensor.sem_phase_l1_load` | Beräknad fasbelastning L1 (W) |
 | `sensor.sem_phase_l2_load` | Beräknad fasbelastning L2 (W) |
 | `sensor.sem_phase_l3_load` | Beräknad fasbelastning L3 (W) |
+| `sensor.sem_house_load` | Huslast W – Elm4 direkt eller beräknad |
 | `sensor.sem_solar_surplus` | Solöverskott (W) |
-| `sensor.sem_decision_reason` | Text förklaring senaste beslut |
+| `sensor.sem_decision_reason` | Textförklaring senaste beslut |
 | `sensor.sem_operating_mode` | Aktivt driftläge |
 
+> `sem_phase_lX_load` är en **prognos**, inte en mätning – den speglar beräknad fasbelastning *efter* att styrningsbesluten verkställts. Används internt för fasskydd.
+
 ### Switches
-| Enhet | Funktion |
+
+| Entitet | Funktion |
 |---|---|
 | `switch.sem_force_ev_charge_from_grid` | Forcera billaddning från nät |
 | `switch.sem_winter_mode` | Aktivera vinterläge |
 | `switch.sem_force_charge_battery_from_grid` | Forcera batteriladdning |
 
 ### Select
-| Enhet | Funktion |
+
+| Entitet | Funktion |
 |---|---|
-| `select.sem_operating_mode` | Välj driftläge: auto / winter / force_charge_ev / force_charge_battery / manual |
+| `select.sem_operating_mode` | Välj driftläge: `auto` / `winter` / `force_charge_ev` / `force_charge_battery` / `manual` |
 
 ### Number (justerbart i realtid)
-| Enhet | Funktion |
+
+| Entitet | Funktion |
 |---|---|
 | `number.sem_battery_min_soc` | Batteri min SOC % |
 | `number.sem_battery_max_soc` | Batteri max SOC % |
-| `number.sem_ev_soc_target` | Bil laddningsmål % |
+| `number.sem_ev_soc_target` | Bil laddningsmål % (global standard) |
 | `number.sem_winter_cheap_threshold` | Prisgräns billigt (SEK/kWh) |
 | `number.sem_winter_expensive_threshold` | Prisgräns dyrt (SEK/kWh) |
 | `number.sem_winter_min_soc` | Vinter min SOC % |
@@ -107,17 +151,53 @@ Beräknar fasbelastning per fas och reducerar i prioritetsordning:
 ### Beroenden
 Dessa HACS-integrationer måste vara installerade och konfigurerade:
 - **nordpool** – elprissensor
-- **solcast_solar** – solprognos
+- **solcast_solar** – solprognos (valfritt men rekommenderat)
 
-### Steg 1 – Entiteter
-Mappa alla enheter från din anläggning till integration-entiteter.
+### Konfigurationsflöde
 
-**Batteri-inverter:** Integrationen skriver till `number`-entiteter för att styra laddnings- och urladdningseffekt. Använd den entitet som din inverter exponerar (t.ex. Sungrow, Goodwe, Victron, Fronius etc.)
+Konfigurationen sker i fem steg:
 
-**Billaddare:** Exponera en `switch` (aktivera/avaktivera) och en `number` (strömnivå i A). Stöds av t.ex. Easee, Zaptec, Wallbox via deras HACS-integrationer.
+**Steg 1 – Nät & Prissättning**
+- Nordpool-sensor (obligatorisk)
+- Nätmätare per fas (Elm1 L1/L2/L3)
+- Strömgivare per fas (för fasskydd)
+- Max ström per fas (standard 20 A)
+- Nätspänning (standard 230 V)
+- Nätavgifter, energiskatt, moms, försäljningsersättning
+- **Huslaststyrare** – peka på Elm4 för direkt huslastmätning (rekommenderas)
+- **Nätmätare enhet** – välj `kW` om Elm1 rapporterar i kilowatt
+- **EV-laddare effektenhet** – välj `kW` om laddaren rapporterar i kilowatt
 
-### Steg 2 – Nät & Priser
-Ange nätavgifter, energiskatt och momsats för korrekt prisberäkning.
+**Steg 2 – Solceller**
+- Sol-inverter total och per fas (Elm3 / intern invertergivare)
+- Solcast-prognoser idag/imorgon
+
+**Steg 3 – Batteri**
+- SOC-sensor, effektgivare, laddnings- och urladdningsentiteter
+- Kapacitet (kWh) och max effekt (kW)
+- Min/max SOC-gränser
+
+**Steg 4 – Elpanna**
+- Effektgivare (Elm5)
+- Strömbrytare för extra varmvatten (elpatron)
+- Kompressorns fas (1-fas, standard L3) – patronfaserna beräknas automatiskt
+- Elpatronens märkeffekt (kW)
+
+**Steg 5 – Elbilar**
+- Lägg till en eller flera bilar
+- Varje bil: namn, laddare-switch, strömsättningsentitet, SOC-sensor, SOC-mål, antal faser och fas (vid 1-fas)
+- Repetera för varje bil, välj "Klar" när alla bilar är konfigurerade
+
+### Enhetsanmärkning för din anläggning
+
+| Sensor | Enhet i HA | Inställning |
+|---|---|---|
+| Elm1 (nätmätare) | kW | Nätmätare enhet → **kW** |
+| Elm3 / SolInv_prod | W | (standard W) |
+| BatInv_in_out | W, pos=laddning, neg=urladdning | (standard W) |
+| Elm4 (huslast) | W | Huslaststyrare → Elm4 |
+| Elm5 (elpanna) | W | Elpanna effektgivare → Elm5 |
+| Bil_ladd (intern) | kW | EV-laddare effektenhet → **kW** |
 
 ## Loggning
 
@@ -163,10 +243,23 @@ cards:
         name: Sälj SEK/kWh
       - entity: sensor.sem_solar_surplus
         name: Solöverskott W
+      - entity: sensor.sem_house_load
+        name: Huslast W
   - type: gauge
     entity: sensor.sem_battery_charge_power
     name: Batteriladdning W
     max: 5000
+  - type: entities
+    title: Elbilar
+    entities:
+      - entity: sensor.sem_ev_car_0_current
+        name: Bil 1 – laddström A
+      - entity: sensor.sem_ev_car_0_enabled
+        name: Bil 1 – laddning aktiv
+      - entity: sensor.sem_ev_car_1_current
+        name: Bil 2 – laddström A
+      - entity: sensor.sem_ev_car_1_enabled
+        name: Bil 2 – laddning aktiv
   - type: entity
     entity: sensor.sem_decision_reason
     name: Senaste beslut

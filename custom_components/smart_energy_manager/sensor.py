@@ -33,6 +33,7 @@ async def async_setup_entry(
         SmartEnergyDecisionReasonSensor(coordinator, entry),
         SmartEnergyOperatingModeSensor(coordinator, entry),
         SmartEnergySolarSurplusSensor(coordinator, entry),
+        SmartEnergyHouseLoadSensor(coordinator, entry),
     ]
 
     # Dynamic per-car sensors
@@ -227,6 +228,23 @@ class SmartEnergyOperatingModeSensor(_BaseEnergySensor):
     @property
     def native_value(self):
         return self.coordinator.operating_mode
+
+
+class SmartEnergyHouseLoadSensor(_BaseEnergySensor):
+    """Huslast i W – Elm4 direkt om konfigurerat, annars beräknad."""
+    _attr_unique_id = "sem_house_load"
+    _attr_name = "House Load"
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:home-lightning-bolt"
+
+    @property
+    def native_value(self):
+        s = self.coordinator.current_state
+        if not s:
+            return 0
+        return round(s.house_load_w)
 
 
 class SmartEnergySolarSurplusSensor(_BaseEnergySensor):

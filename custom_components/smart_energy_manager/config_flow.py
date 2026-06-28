@@ -34,6 +34,7 @@ from .const import (
     DEFAULT_WINTER_CHEAP_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD,
     DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
+    CONF_HOUSE_LOAD_ENTITY, CONF_GRID_POWER_UNIT, CONF_EV_POWER_UNIT, UNIT_W, UNIT_KW,
     EV_PHASES_OPTIONS,
 )
 
@@ -74,6 +75,19 @@ STEP_GRID_PRICING_SCHEMA = vol.Schema({
     vol.Optional(CONF_ENERGY_TAX, default=DEFAULT_ENERGY_TAX): vol.Coerce(float),
     vol.Optional(CONF_VAT_RATE, default=DEFAULT_VAT_RATE): vol.Coerce(float),
     vol.Optional(CONF_SELL_EXTRA_REVENUE, default=DEFAULT_SELL_EXTRA_REVENUE): vol.Coerce(float),
+    vol.Optional(CONF_HOUSE_LOAD_ENTITY): _entity_selector("sensor"),
+    vol.Optional(CONF_GRID_POWER_UNIT, default=UNIT_W): selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[{"label": "Watt (W)", "value": "W"}, {"label": "Kilowatt (kW)", "value": "kW"}],
+            mode=selector.SelectSelectorMode.LIST,
+        )
+    ),
+    vol.Optional(CONF_EV_POWER_UNIT, default=UNIT_W): selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[{"label": "Watt (W)", "value": "W"}, {"label": "Kilowatt (kW)", "value": "kW"}],
+            mode=selector.SelectSelectorMode.LIST,
+        )
+    ),
 })
 
 STEP_SOLAR_SCHEMA = vol.Schema({

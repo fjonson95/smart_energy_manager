@@ -128,3 +128,13 @@ NEGATIVE_PRICE_THRESHOLD = 0.0  # SEK/kWh
 
 # Phase labels
 PHASES = ["L1", "L2", "L3"]
+# House load direct measurement (e.g. Elm4 – fastigheten exkl. sol/batteri)
+# Om konfigurerad används denna direkt istället för att beräkna från nätmätaren.
+CONF_HOUSE_LOAD_ENTITY = "house_load_entity"
+
+# Enhetsskalning – vissa mätare rapporterar i kW istället för W
+CONF_GRID_POWER_UNIT = "grid_power_unit"   # "W" (default) eller "kW"
+CONF_EV_POWER_UNIT = "ev_power_unit"       # "W" (default) eller "kW"
+
+UNIT_W = "W"
+UNIT_KW = "kW"
