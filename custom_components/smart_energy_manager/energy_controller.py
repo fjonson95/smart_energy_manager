@@ -11,7 +11,7 @@ from .const import (
     MIN_EV_CURRENT, MAX_EV_CURRENT,
     MIN_SOLAR_FOR_EV_1PHASE, MIN_SOLAR_FOR_EV_3PHASE,
     NEGATIVE_PRICE_THRESHOLD,
-    EV_PHASE_L1, EV_PHASE_L2, EV_PHASE_L3,
+    EV_PHASE_L1, NO_CAR_SELECTED,
     MODE_AUTO, MODE_WINTER, MODE_FORCE_CHARGE_EV,
     MODE_FORCE_CHARGE_BATTERY, MODE_MANUAL,
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES,
@@ -23,7 +23,6 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class PhaseLoad:
-    """Estimated grid import per phase in Watts (positive = import)."""
     L1: float = 0.0
     L2: float = 0.0
     L3: float = 0.0
@@ -35,40 +34,87 @@ class PhaseLoad:
         return {"L1": self.L1, "L2": self.L2, "L3": self.L3}
 
 
+# ── Laddare-dataklasser ────────────────────────────────────────────────────────
+
 @dataclass
-class EvCarConfig:
-    """Configuration for a single EV / charging slot."""
+class CarConfig:
+    """Konfiguration för en bil som kan använda en laddare."""
+    name: str
+    ev_soc: Optional[str] = None
+    ev_soc_target: float = 80.0
+    # Fas som bilen laddar på (relevant vid 1-fas laddare)
+    phase: Optional[str] = EV_PHASE_L1
+
+
+@dataclass
+class ChargerConfig:
+    """Statisk konfiguration för en EV-laddare."""
     name: str
     charger_switch: str
     charger_current: str
+    connected_sensor: Optional[str] = None
     charger_power: Optional[str] = None
-    ev_soc: Optional[str] = None
-    ev_soc_target: float = 80.0
-    phases: int = 1                   # 1 or 3
-    phase: Optional[str] = EV_PHASE_L1  # only relevant when phases == 1
+    phases: int = 1
+    phase: Optional[str] = EV_PHASE_L1   # laddarhårdvarans fas (vid 1-fas)
+    cars: list[CarConfig] = field(default_factory=list)
 
 
 @dataclass
-class EvCarState:
-    """Runtime state for one EV car/charger."""
-    config: EvCarConfig
-    charging: bool = False
+class ChargerState:
+    """Körtidsstatus för en laddare."""
+    config: ChargerConfig
+    # Anslutningsstatus från sensor
+    connected: bool = False
+    # Namn på vald bil ("unknown" = ingen vald ännu)
+    active_car_name: str = NO_CAR_SELECTED
+    # Faktisk laddström just nu
     current_a: float = 0.0
+    # Faktisk effekt
     power_w: float = 0.0
+    # SOC för aktiv bil (None om okänd)
     soc_pct: Optional[float] = None
 
+    @property
+    def active_car(self) -> Optional[CarConfig]:
+        """Returnera CarConfig för vald bil, eller None om okänd."""
+        if self.active_car_name == NO_CAR_SELECTED:
+            return None
+        for car in self.config.cars:
+            if car.name == self.active_car_name:
+                return car
+        return None
+
+    @property
+    def soc_target(self) -> float:
+        car = self.active_car
+        return car.ev_soc_target if car else 80.0
+
+    @property
+    def effective_phase(self) -> Optional[str]:
+        """Fas som används: bilens fas (om 1-fas laddare) annars laddarhårdvarans fas."""
+        if self.config.phases == 1:
+            car = self.active_car
+            if car and car.phase:
+                return car.phase
+            return self.config.phase
+        return None  # 3-fas: alla faser
+
 
 @dataclass
-class EvCarDecision:
-    """Control output for one EV car/charger."""
+class ChargerDecision:
+    """Styrningsbeslut för en laddare."""
     enable: bool = False
     current_a: float = 0.0
     reason: str = ""
+    # True om laddaren är ansluten men ingen bil är vald → blockera + notifiera
+    needs_car_selection: bool = False
 
+
+# ── Övrig systemstat ──────────────────────────────────────────────────────────
 
 @dataclass
 class EnergyState:
-    """Current state of the energy system."""
+    """Aktuellt tillstånd för hela energisystemet."""
     # Solar
     solar_power_w: float = 0.0
     solar_power_l1: float = 0.0
@@ -77,34 +123,30 @@ class EnergyState:
     solar_forecast_today_kwh: float = 0.0
     solar_forecast_tomorrow_kwh: float = 0.0
 
-    # Battery
+    # Batteri
     battery_soc_pct: float = 50.0
-    battery_power_w: float = 0.0        # + = charging, – = discharging
+    battery_power_w: float = 0.0
     battery_capacity_kwh: float = 10.0
     battery_max_power_kw: float = 5.0
 
-    # EV: list of per-car states (may be empty)
-    ev_cars: list[EvCarState] = field(default_factory=list)
+    # EV-laddare (ny modell)
+    chargers: list[ChargerState] = field(default_factory=list)
 
-    # Heat pump
-    # Compressor (always 1-phase, e.g. L3)
+    # Elpanna
     heat_pump_power_w: float = 0.0
     heat_pump_on: bool = False
     heat_pump_phase: str = DEFAULT_HEAT_PUMP_PHASE
-    # Heating element / patron (always 2-phase, e.g. L1+L2)
     extra_hot_water_on: bool = False
     heat_pump_patron_phases: list[str] = field(default_factory=lambda: list(DEFAULT_HEAT_PUMP_PATRON_PHASES))
     heat_pump_patron_power_kw: float = DEFAULT_HEAT_PUMP_PATRON_POWER_KW
 
-    # Direkt huslastavläsning (Elm4) i W – 0.0 innebär att koordinatorn beräknar den
-    # Elm4 täcker: övriga laster + elpanna (Elm5)
-    # Elm4 inkluderar INTE billaddaren (bekräftat från mätdata: korr 0.98)
+    # Huslast
     house_load_w: float = 0.0
 
-    # Legionella-desinficering aktiv – åsidosätter extra_hot_water i executor
+    # Legionella
     legionella_active: bool = False
 
-    # Grid (positive = import from grid)
+    # Nät
     grid_power_l1: float = 0.0
     grid_power_l2: float = 0.0
     grid_power_l3: float = 0.0
@@ -112,55 +154,58 @@ class EnergyState:
     grid_current_l2: float = 0.0
     grid_current_l3: float = 0.0
 
-    # Pricing
-    spot_price_sek_kwh: float = 0.0     # raw nordpool spot
-    buy_price_sek_kwh: float = 0.0      # (spot + fees + tax) * vat
-    sell_price_sek_kwh: float = 0.0     # spot + extra revenue
+    # Priser
+    spot_price_sek_kwh: float = 0.0
+    buy_price_sek_kwh: float = 0.0
+    sell_price_sek_kwh: float = 0.0
 
-    # Mode
+    # Driftläge
     operating_mode: str = MODE_AUTO
-    force_ev_charge: bool = False
     winter_mode: bool = False
 
 
 @dataclass
 class ControlDecision:
-    """Actions to take this control cycle."""
-    battery_charge_power_w: float = 0.0    # 0 = idle, >0 = charge at this power
-    battery_discharge_power_w: float = 0.0  # 0 = idle, >0 = discharge at this power
-    # Per-car EV decisions (same order as EnergyState.ev_cars)
-    ev_decisions: list[EvCarDecision] = field(default_factory=list)
+    """Styrningsbeslut för ett kontrollcykel."""
+    battery_charge_power_w: float = 0.0
+    battery_discharge_power_w: float = 0.0
+    charger_decisions: list[ChargerDecision] = field(default_factory=list)
     extra_hot_water: bool = False
     reason: str = ""
     phase_loads: PhaseLoad = field(default_factory=PhaseLoad)
+    # Laddare som behöver bilval (för notifieringar)
+    chargers_needing_selection: list[str] = field(default_factory=list)
 
-    # Convenience: True if at least one car is enabled
     @property
     def any_ev_enabled(self) -> bool:
-        return any(d.enable for d in self.ev_decisions)
+        return any(d.enable for d in self.charger_decisions)
+
+    # Bakåtkompatibilitet med sensor.py som läser ev_decisions
+    @property
+    def ev_decisions(self):
+        return self.charger_decisions
 
 
 class EnergyController:
     """
-    Main energy control logic.
+    Huvudstyrlogik för Smart Energy Manager.
 
-    Phase model
-    ───────────
-    Solar inverter:        3-phase, power split equally across L1/L2/L3
-    Battery inverter:      3-phase, power split equally across L1/L2/L3
-    EV charger hardware:   3-phase hardware, but each car configures independently:
-                             - 1-phase car: full current drawn on one phase (L1/L2/L3)
-                             - 3-phase car: current drawn equally on all three phases
-    Heat pump compressor:  1-phase (configured phase, typically L3)
-    Heating element/patron:2-phase (configured pair, typically L1+L2), equal per phase
+    Fas-modell
+    ──────────
+    Sol-inverter:       3-fas, lika fördelat L1/L2/L3
+    Batteri-inverter:   3-fas, lika fördelat L1/L2/L3
+    1-fas laddare:      ström på bilens konfigurerade fas
+    3-fas laddare:      lika ström på alla tre faser
+    Värmepump:          1-fas (konfigurerbar)
+    Elpatron:           2-fas (de två återstående faserna)
 
-    Priority (auto mode)
+    Prioritet (autoläge)
     ────────────────────
-    1. Cover house load from solar
-    2. Charge EVs from solar surplus
-    3. Charge battery from remaining solar surplus
-    4. Extra hot water when battery full and surplus remains
-    5. Discharge battery to cover house load (when buy price > threshold)
+    1. Täck huslast från sol
+    2. Ladda anslutna bilar från solöverskott
+    3. Ladda batteri från återstående överskott
+    4. Extra varmvatten när batteri fullt och överskott kvar
+    5. Ladda ur batteri för huslast (när köppris > tröskel)
     """
 
     def __init__(
@@ -177,7 +222,7 @@ class EnergyController:
     ):
         self.max_current = max_current_per_phase
         self.voltage = grid_voltage
-        self.max_phase_power = max_current_per_phase * grid_voltage  # W per phase
+        self.max_phase_power = max_current_per_phase * grid_voltage
         self.battery_min_soc = battery_min_soc
         self.battery_max_soc = battery_max_soc
         self.ev_soc_target = ev_soc_target
@@ -186,15 +231,12 @@ class EnergyController:
         self.winter_min_soc = winter_min_soc
         self.winter_max_soc = winter_max_soc
 
-    # ──────────────────────────────────────────────────────────────────
-    # PUBLIC ENTRY POINT
-    # ──────────────────────────────────────────────────────────────────
+    # ── Publik ingångspunkt ───────────────────────────────────────────
+
     def compute(self, state: EnergyState) -> ControlDecision:
-        """Compute control decisions based on current state."""
-        # Initialise one EvCarDecision per car (all disabled by default)
-        n_cars = len(state.ev_cars)
+        n = len(state.chargers)
         decision = ControlDecision(
-            ev_decisions=[EvCarDecision() for _ in range(n_cars)]
+            charger_decisions=[ChargerDecision() for _ in range(n)]
         )
 
         if state.operating_mode == MODE_MANUAL:
@@ -212,15 +254,30 @@ class EnergyController:
 
         return self._auto_mode(state)
 
-    # ──────────────────────────────────────────────────────────────────
-    # AUTO MODE
-    # ──────────────────────────────────────────────────────────────────
+    # ── Bilvalskontroll ───────────────────────────────────────────────
+
+    def _check_car_selection(
+        self, state: EnergyState, decision: ControlDecision
+    ) -> None:
+        """
+        Markera laddare som är anslutna men saknar bilval.
+        Dessa blockeras från laddning och läggs i chargers_needing_selection.
+        """
+        for i, (ch, dec) in enumerate(zip(state.chargers, decision.charger_decisions)):
+            if ch.connected and ch.active_car_name == NO_CAR_SELECTED:
+                dec.enable = False
+                dec.current_a = 0.0
+                dec.needs_car_selection = True
+                dec.reason = f"{ch.config.name}: ansluten men ingen bil vald"
+                decision.chargers_needing_selection.append(ch.config.name)
+
+    # ── Auto-läge ─────────────────────────────────────────────────────
+
     def _auto_mode(self, state: EnergyState) -> ControlDecision:
-        """Self-consumption optimised control."""
-        n_cars = len(state.ev_cars)
+        n = len(state.chargers)
         decision = ControlDecision(
             reason="Auto mode",
-            ev_decisions=[EvCarDecision() for _ in range(n_cars)],
+            charger_decisions=[ChargerDecision() for _ in range(n)],
         )
 
         solar_w = state.solar_power_w
@@ -229,28 +286,15 @@ class EnergyController:
         sell_price = state.sell_price_sek_kwh
         negative_price = sell_price < NEGATIVE_PRICE_THRESHOLD
 
-        # Huslast – Elm4 direkt om konfigurerat, annars beräkna
-        # Elm4 = övriga laster + elpanna (Elm5), EXKL. billaddare
-        if state.house_load_w > 0:
-            house_load_w = state.house_load_w
-        else:
-            house_load_w = max(0.0, (
-                state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3
-                + solar_w
-                + max(0, -state.battery_power_w)
-                - max(0, state.battery_power_w)
-            ))
-
-        # Tillgängligt solöverskott efter huslast
+        house_load_w = self._house_load(state)
         solar_surplus_w = max(0.0, solar_w - house_load_w)
 
         _LOGGER.debug(
-            "Auto: solar=%.0fW house=%.0fW surplus=%.0fW soc=%.0f%% buy=%.3f sell=%.3f neg=%s",
-            solar_w, house_load_w, solar_surplus_w, battery_soc,
-            buy_price, sell_price, negative_price,
+            "Auto: solar=%.0fW house=%.0fW surplus=%.0fW soc=%.0f%% buy=%.3f neg=%s",
+            solar_w, house_load_w, solar_surplus_w, battery_soc, buy_price, negative_price,
         )
 
-        # ── Negative spot price ───────────────────────────────────────
+        # ── Negativa spotpriser ───────────────────────────────────────
         if negative_price and solar_w > 0:
             decision.reason += " | Negative spot – absorbing solar"
             remaining = solar_surplus_w
@@ -263,79 +307,80 @@ class EnergyController:
             if remaining > 500:
                 decision.extra_hot_water = True
 
-            # Offer remaining surplus to each car in priority order
-            for i, car in enumerate(state.ev_cars):
-                min_surplus = (MIN_SOLAR_FOR_EV_1PHASE if car.config.phases == 1
-                               else MIN_SOLAR_FOR_EV_3PHASE)
+            for i, ch in enumerate(state.chargers):
+                if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
+                    continue
+                min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.config.phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
                 if remaining >= min_surplus:
-                    cur = self._surplus_to_ev_current(remaining, car.config)
-                    decision.ev_decisions[i] = EvCarDecision(
-                        enable=True,
-                        current_a=cur,
+                    cur = self._surplus_to_current(remaining, ch.config.phases)
+                    decision.charger_decisions[i] = ChargerDecision(
+                        enable=True, current_a=cur,
                         reason="negative price – solar absorption",
                     )
-                    remaining -= self._ev_power(cur, car.config)
+                    remaining -= self._charger_power(cur, ch.config.phases)
 
+            self._check_car_selection(state, decision)
             return self._apply_phase_limits(state, decision)
 
         # ── Normal auto ───────────────────────────────────────────────
-
-        # Step 1: Charge EVs from solar surplus (priority: car order)
         remaining_surplus = solar_surplus_w
-        for i, car in enumerate(state.ev_cars):
-            if car.soc_pct is not None and car.soc_pct >= car.config.ev_soc_target:
-                decision.ev_decisions[i].reason = f"SOC target reached ({car.soc_pct:.0f}%)"
+
+        for i, ch in enumerate(state.chargers):
+            if not ch.connected:
+                continue
+            if ch.active_car_name == NO_CAR_SELECTED:
+                continue
+            car = ch.active_car
+            if car and ch.soc_pct is not None and ch.soc_pct >= car.ev_soc_target:
+                decision.charger_decisions[i].reason = f"SOC mål nått ({ch.soc_pct:.0f}%)"
                 continue
 
-            min_surplus = (MIN_SOLAR_FOR_EV_1PHASE if car.config.phases == 1
-                           else MIN_SOLAR_FOR_EV_3PHASE)
+            min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.config.phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
             if remaining_surplus >= min_surplus:
-                cur = self._surplus_to_ev_current(remaining_surplus, car.config)
+                cur = self._surplus_to_current(remaining_surplus, ch.config.phases)
                 if cur >= MIN_EV_CURRENT:
-                    consumed = self._ev_power(cur, car.config)
-                    decision.ev_decisions[i] = EvCarDecision(
-                        enable=True,
-                        current_a=cur,
-                        reason=f"solar charge {cur:.0f}A",
+                    consumed = self._charger_power(cur, ch.config.phases)
+                    decision.charger_decisions[i] = ChargerDecision(
+                        enable=True, current_a=cur,
+                        reason=f"solladdar {cur:.0f}A",
                     )
                     remaining_surplus = max(0.0, remaining_surplus - consumed)
-                    decision.reason += f" | {car.config.name} {cur:.0f}A solar"
+                    decision.reason += f" | {ch.config.name} {cur:.0f}A sol"
 
-        # Step 2: Charge battery from remaining surplus
+        # Ladda batteri
         if remaining_surplus > 100 and battery_soc < self.battery_max_soc:
             charge_w = min(state.battery_max_power_kw * 1000, remaining_surplus)
             decision.battery_charge_power_w = charge_w
             remaining_surplus -= charge_w
-            decision.reason += f" | Battery +{charge_w:.0f}W"
+            decision.reason += f" | Batteri +{charge_w:.0f}W"
 
-        # Step 3: Extra hot water (battery full, still surplus)
+        # Extra varmvatten
         if remaining_surplus > 500 and battery_soc >= self.battery_max_soc:
             decision.extra_hot_water = True
-            decision.reason += " | Extra hot water (battery full)"
+            decision.reason += " | Extra varmvatten (batteri fullt)"
 
-        # Step 4: Discharge battery for house load when no solar
+        # Ladda ur batteri
         if solar_w < house_load_w and battery_soc > self.battery_min_soc:
             deficit_w = house_load_w - solar_w
             discharge_w = min(state.battery_max_power_kw * 1000, deficit_w)
             if buy_price > 0.20:
                 decision.battery_discharge_power_w = discharge_w
-                decision.reason += f" | Battery -{discharge_w:.0f}W (cover load)"
+                decision.reason += f" | Batteri -{discharge_w:.0f}W"
 
-        # Step 5: Battery at min SOC – stop discharging
         if battery_soc <= self.battery_min_soc:
             decision.battery_discharge_power_w = 0
-            decision.reason += " | Battery at min SOC"
+            decision.reason += " | Batteri vid min SOC"
 
+        self._check_car_selection(state, decision)
         return self._apply_phase_limits(state, decision)
 
-    # ──────────────────────────────────────────────────────────────────
-    # WINTER MODE
-    # ──────────────────────────────────────────────────────────────────
+    # ── Vinterläge ────────────────────────────────────────────────────
+
     def _winter_mode(self, state: EnergyState) -> ControlDecision:
-        n_cars = len(state.ev_cars)
+        n = len(state.chargers)
         decision = ControlDecision(
             reason="Winter mode",
-            ev_decisions=[EvCarDecision() for _ in range(n_cars)],
+            charger_decisions=[ChargerDecision() for _ in range(n)],
         )
         hour = datetime.now().hour
         buy_price = state.buy_price_sek_kwh
@@ -346,135 +391,105 @@ class EnergyController:
         is_expensive = buy_price >= self.winter_expensive_threshold
         is_night = hour < 6 or hour >= 23
 
-        _LOGGER.debug(
-            "Winter: hour=%d price=%.3f cheap=%s expensive=%s soc=%.0f%%",
-            hour, buy_price, is_cheap, is_expensive, soc,
-        )
-
         if is_cheap and (is_night or buy_price < 0.30):
             if soc < self.winter_max_soc:
                 decision.battery_charge_power_w = state.battery_max_power_kw * 1000
-                decision.reason += f" | Charge battery (cheap {buy_price:.3f} SEK)"
+                decision.reason += f" | Laddar batteri (billigt {buy_price:.3f} SEK)"
         elif is_expensive and soc > self.winter_min_soc:
             decision.battery_discharge_power_w = state.battery_max_power_kw * 1000
-            decision.reason += f" | Discharge battery (expensive {buy_price:.3f} SEK)"
+            decision.reason += f" | Laddar ur batteri (dyrt {buy_price:.3f} SEK)"
         elif solar_w > 100 and soc < self.winter_max_soc:
-            if state.house_load_w > 0:
-                house_load_w = state.house_load_w
-            else:
-                house_load_w = max(0.0,
-                    state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3 + solar_w
-                )
+            house_load_w = self._house_load(state)
             surplus = max(0.0, solar_w - house_load_w)
             if surplus > 100:
-                decision.battery_charge_power_w = min(
-                    state.battery_max_power_kw * 1000, surplus
-                )
-                decision.reason += " | Charge battery from solar (winter)"
+                decision.battery_charge_power_w = min(state.battery_max_power_kw * 1000, surplus)
+                decision.reason += " | Laddar batteri från sol (vinter)"
 
         # EV: endast solöverskott i vinterläge
-        _house = state.house_load_w if state.house_load_w > 0 else max(0.0,
-            state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3 + solar_w
-        )
-        remaining_surplus = max(0.0, solar_w - _house)
-        for i, car in enumerate(state.ev_cars):
-            min_surplus = (MIN_SOLAR_FOR_EV_1PHASE if car.config.phases == 1
-                           else MIN_SOLAR_FOR_EV_3PHASE)
+        house_load_w = self._house_load(state)
+        remaining_surplus = max(0.0, solar_w - house_load_w)
+        for i, ch in enumerate(state.chargers):
+            if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
+                continue
+            min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.config.phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
             if remaining_surplus >= min_surplus:
-                cur = self._surplus_to_ev_current(remaining_surplus, car.config)
+                cur = self._surplus_to_current(remaining_surplus, ch.config.phases)
                 if cur >= MIN_EV_CURRENT:
-                    decision.ev_decisions[i] = EvCarDecision(
-                        enable=True,
-                        current_a=cur,
-                        reason="solar charge (winter)",
+                    decision.charger_decisions[i] = ChargerDecision(
+                        enable=True, current_a=cur, reason="solladdar (vinter)",
                     )
-                    remaining_surplus -= self._ev_power(cur, car.config)
+                    remaining_surplus -= self._charger_power(cur, ch.config.phases)
 
+        self._check_car_selection(state, decision)
         return self._apply_phase_limits(state, decision)
 
-    # ──────────────────────────────────────────────────────────────────
-    # FORCE MODES
-    # ──────────────────────────────────────────────────────────────────
+    # ── Force-lägen ───────────────────────────────────────────────────
+
     def _force_charge_ev(self, state: EnergyState) -> ControlDecision:
-        """Force ALL EVs to charge from grid at max allowed current."""
-        n_cars = len(state.ev_cars)
+        n = len(state.chargers)
         decision = ControlDecision(
             reason="Force charge EVs from grid",
-            ev_decisions=[
-                EvCarDecision(enable=True, current_a=MAX_EV_CURRENT, reason="forced")
-                for _ in range(n_cars)
+            charger_decisions=[
+                ChargerDecision(
+                    enable=ch.connected and ch.active_car_name != NO_CAR_SELECTED,
+                    current_a=MAX_EV_CURRENT,
+                    reason="forced",
+                )
+                for ch in state.chargers
             ],
         )
+        self._check_car_selection(state, decision)
         return self._apply_phase_limits(state, decision)
 
     def _force_charge_battery(self, state: EnergyState) -> ControlDecision:
-        n_cars = len(state.ev_cars)
+        n = len(state.chargers)
         decision = ControlDecision(
             reason="Force charge battery from grid",
-            ev_decisions=[EvCarDecision() for _ in range(n_cars)],
+            charger_decisions=[ChargerDecision() for _ in range(n)],
         )
         if state.battery_soc_pct < self.battery_max_soc:
             decision.battery_charge_power_w = state.battery_max_power_kw * 1000
+        self._check_car_selection(state, decision)
         return self._apply_phase_limits(state, decision)
 
-    # ──────────────────────────────────────────────────────────────────
-    # PHASE LIMIT ENFORCEMENT
-    # ──────────────────────────────────────────────────────────────────
-    def _apply_phase_limits(self, state: EnergyState, decision: ControlDecision) -> ControlDecision:
-        """
-        Enforce max 20 A per phase.
+    # ── Fasbegränsning ────────────────────────────────────────────────
 
-        Phase contribution model
-        ────────────────────────
-        Solar:              –W/3 on each phase  (reduces import)
-        Battery discharge:  –W/3 on each phase
-        Battery charge:     +W/3 on each phase
-        1-phase EV:         +current×V on its configured phase only
-        3-phase EV:         +current×V on each of L1, L2, L3
-        HP compressor:      +W on its configured 1 phase (e.g. L3)
-        HP patron (2-phase):+W/2 on each of the two configured phases (e.g. L1, L2)
-        """
+    def _apply_phase_limits(self, state: EnergyState, decision: ControlDecision) -> ControlDecision:
         solar_per_phase = state.solar_power_w / 3.0
         batt_discharge_per_phase = decision.battery_discharge_power_w / 3.0
         batt_charge_per_phase = decision.battery_charge_power_w / 3.0
 
-        # Initialise phase loads from grid readings (house loads already reflected)
         loads: dict[str, float] = {
             "L1": state.grid_power_l1,
             "L2": state.grid_power_l2,
             "L3": state.grid_power_l3,
         }
 
-        # Apply solar and battery delta (vs. what's already in grid readings)
         for ph in PHASES:
-            loads[ph] += (
-                - solar_per_phase
-                + batt_charge_per_phase
-                - batt_discharge_per_phase
-            )
+            loads[ph] += -solar_per_phase + batt_charge_per_phase - batt_discharge_per_phase
 
-        # ── EV loads ─────────────────────────────────────────────────
+        # EV-lasterna per laddare
         ev_phase_loads: list[dict[str, float]] = []
-        for i, (car, ev_dec) in enumerate(zip(state.ev_cars, decision.ev_decisions)):
+        for i, (ch, dec) in enumerate(zip(state.chargers, decision.charger_decisions)):
             ph_load: dict[str, float] = {p: 0.0 for p in PHASES}
-            if ev_dec.enable and ev_dec.current_a > 0:
-                if car.config.phases == 3:
-                    per_phase_w = ev_dec.current_a * self.voltage
+            if dec.enable and dec.current_a > 0:
+                if ch.config.phases == 3:
+                    per_phase_w = dec.current_a * self.voltage
                     for ph in PHASES:
                         ph_load[ph] = per_phase_w
                 else:
-                    phase = car.config.phase or "L1"
-                    ph_load[phase] = ev_dec.current_a * self.voltage
+                    phase = ch.effective_phase or "L1"
+                    ph_load[phase] = dec.current_a * self.voltage
             ev_phase_loads.append(ph_load)
             for ph in PHASES:
                 loads[ph] += ph_load[ph]
 
-        # ── Heat pump compressor (1-phase) ────────────────────────────
+        # Värmepump kompressor
         if state.heat_pump_on:
             hp_ph = state.heat_pump_phase
             loads[hp_ph] = loads.get(hp_ph, 0.0) + state.heat_pump_power_w
 
-        # ── Heating element/patron (2-phase) ─────────────────────────
+        # Elpatron
         if decision.extra_hot_water:
             patron_phases = state.heat_pump_patron_phases or DEFAULT_HEAT_PUMP_PATRON_PHASES
             patron_total_w = state.heat_pump_patron_power_kw * 1000
@@ -482,73 +497,65 @@ class EnergyController:
             for ph in patron_phases:
                 loads[ph] = loads.get(ph, 0.0) + patron_per_phase_w
 
-        # ── Enforce limits ────────────────────────────────────────────
-        for iteration in range(4):   # max 4 reduction passes
+        # Reduktionspass (max 4)
+        for iteration in range(4):
             any_violation = False
             for ph in PHASES:
                 phase_current = loads[ph] / self.voltage
                 if phase_current <= self.max_current:
                     continue
-
                 any_violation = True
-                over_a = phase_current - self.max_current
-                over_w = over_a * self.voltage
+                over_w = (phase_current - self.max_current) * self.voltage
 
                 _LOGGER.warning(
-                    "Pass %d: Phase %s over limit %.1f A (max %.1f A) – reducing by %.0f W",
-                    iteration, ph, phase_current, self.max_current, over_w,
+                    "Pass %d: fas %s överskriden %.1fA (max %.1fA)",
+                    iteration, ph, phase_current, self.max_current,
                 )
 
-                # Reduction priority 1: EVs on this phase (lowest-priority car first)
-                for i in range(len(state.ev_cars) - 1, -1, -1):
+                # Prio 1: EV (lägst prio sist)
+                for i in range(len(state.chargers) - 1, -1, -1):
                     if over_w <= 0:
                         break
-                    car = state.ev_cars[i]
-                    ev_dec = decision.ev_decisions[i]
-                    if not ev_dec.enable:
+                    ch = state.chargers[i]
+                    dec = decision.charger_decisions[i]
+                    if not dec.enable:
                         continue
 
-                    if car.config.phases == 3:
-                        # 3-phase car: reduce current affects all 3 phases equally
-                        if ph not in PHASES:
-                            continue
-                        max_reduce_a = ev_dec.current_a - MIN_EV_CURRENT
+                    if ch.config.phases == 3:
+                        max_reduce_a = dec.current_a - MIN_EV_CURRENT
                         if max_reduce_a <= 0:
-                            # Can't reduce further – disable
-                            ev_dec.enable = False
-                            ev_dec.current_a = 0
+                            dec.enable = False
+                            dec.current_a = 0
                             for p in PHASES:
                                 loads[p] -= ev_phase_loads[i][p]
                                 ev_phase_loads[i][p] = 0
-                            over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
                         else:
                             reduce_a = min(max_reduce_a, over_w / self.voltage)
-                            ev_dec.current_a -= reduce_a
+                            dec.current_a -= reduce_a
                             for p in PHASES:
                                 delta = reduce_a * self.voltage
                                 loads[p] -= delta
                                 ev_phase_loads[i][p] -= delta
-                            over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
+                        over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
                     else:
-                        # 1-phase car: only applies when the car's phase == violating phase
-                        if car.config.phase != ph:
+                        eff_phase = ch.effective_phase or "L1"
+                        if eff_phase != ph:
                             continue
-                        max_reduce_a = ev_dec.current_a - MIN_EV_CURRENT
+                        max_reduce_a = dec.current_a - MIN_EV_CURRENT
                         if max_reduce_a <= 0:
-                            # Disable the car entirely
-                            ev_dec.enable = False
-                            ev_dec.current_a = 0
+                            dec.enable = False
+                            dec.current_a = 0
                             loads[ph] -= ev_phase_loads[i][ph]
                             ev_phase_loads[i][ph] = 0
                         else:
                             reduce_a = min(max_reduce_a, over_w / self.voltage)
-                            ev_dec.current_a -= reduce_a
+                            dec.current_a -= reduce_a
                             delta = reduce_a * self.voltage
                             loads[ph] -= delta
                             ev_phase_loads[i][ph] -= delta
                         over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
 
-                # Reduction priority 2: battery charging (affects all 3 phases equally)
+                # Prio 2: batteriladdning
                 if over_w > 0 and decision.battery_charge_power_w > 0:
                     reduce_w_total = min(over_w * 3, decision.battery_charge_power_w)
                     decision.battery_charge_power_w -= reduce_w_total
@@ -556,17 +563,15 @@ class EnergyController:
                         loads[p] -= reduce_w_total / 3.0
                     over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
 
-                # Reduction priority 3: extra hot water (patron, 2-phase)
+                # Prio 3: elpatron
                 if over_w > 0 and decision.extra_hot_water:
                     patron_phases = state.heat_pump_patron_phases or DEFAULT_HEAT_PUMP_PATRON_PHASES
                     if ph in patron_phases:
-                        patron_total_w = state.heat_pump_patron_power_kw * 1000
-                        patron_per_phase = patron_total_w / len(patron_phases)
+                        patron_per_phase = state.heat_pump_patron_power_kw * 1000 / len(patron_phases)
                         for pp in patron_phases:
                             loads[pp] -= patron_per_phase
                         decision.extra_hot_water = False
-                        _LOGGER.warning("Disabled extra hot water to stay within phase limit on %s", ph)
-                        over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
+                        _LOGGER.warning("Stänger av elpatron pga fasgräns på %s", ph)
 
             if not any_violation:
                 break
@@ -578,29 +583,27 @@ class EnergyController:
         )
         return decision
 
-    # ──────────────────────────────────────────────────────────────────
-    # HELPERS
-    # ──────────────────────────────────────────────────────────────────
-    def _surplus_to_ev_current(self, surplus_w: float, car_cfg: EvCarConfig) -> float:
-        """Convert available solar surplus to a feasible EV current setpoint."""
-        if car_cfg.phases == 3:
-            current = surplus_w / (self.voltage * 3)
-        else:
-            current = surplus_w / self.voltage
+    # ── Hjälpare ──────────────────────────────────────────────────────
+
+    def _house_load(self, state: EnergyState) -> float:
+        if state.house_load_w > 0:
+            return state.house_load_w
+        return max(0.0, (
+            state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3
+            + state.solar_power_w
+            + max(0, -state.battery_power_w)
+            - max(0, state.battery_power_w)
+        ))
+
+    def _surplus_to_current(self, surplus_w: float, phases: int) -> float:
+        current = surplus_w / (self.voltage * phases)
         return float(min(MAX_EV_CURRENT, max(MIN_EV_CURRENT, round(current))))
 
-    def _ev_power(self, current_a: float, car_cfg: EvCarConfig) -> float:
-        """Total power draw of a car charging at given current."""
-        return current_a * self.voltage * car_cfg.phases
+    def _charger_power(self, current_a: float, phases: int) -> float:
+        return current_a * self.voltage * phases
 
-    def calculate_buy_price(
-        self,
-        spot_price: float,
-        grid_fees: float,
-        energy_tax: float,
-        vat_rate: float,
-    ) -> float:
-        return (spot_price + grid_fees + energy_tax) * (1 + vat_rate)
+    def calculate_buy_price(self, spot: float, grid_fees: float, energy_tax: float, vat: float) -> float:
+        return (spot + grid_fees + energy_tax) * (1 + vat)
 
-    def calculate_sell_price(self, spot_price: float, extra_revenue: float) -> float:
-        return spot_price + extra_revenue
+    def calculate_sell_price(self, spot: float, extra_revenue: float) -> float:
+        return spot + extra_revenue

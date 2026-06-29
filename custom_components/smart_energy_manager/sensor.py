@@ -1,16 +1,14 @@
 """Sensors for Smart Energy Manager."""
 from __future__ import annotations
 
-from homeassistant.components.sensor import (
-    SensorEntity, SensorDeviceClass, SensorStateClass,
-)
+from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import UnitOfPower, UnitOfElectricCurrent
 
-from .const import DOMAIN
+from .const import DOMAIN, NO_CAR_SELECTED
 from .coordinator import SmartEnergyCoordinator
 
 
@@ -39,12 +37,13 @@ async def async_setup_entry(
         SmartEnergyLegionellaNextDueSensor(coordinator, entry),
     ]
 
-    # Dynamic per-car sensors
-    cars_cfg = entry.data.get("ev_cars", [])
-    for i, car in enumerate(cars_cfg):
-        name = car.get("name", f"Car {i+1}")
-        entities.append(SmartEnergyEvCarCurrentSensor(coordinator, entry, i, name))
-        entities.append(SmartEnergyEvCarEnabledSensor(coordinator, entry, i, name))
+    # Dynamiska sensorer per laddare
+    for ch_data in coordinator._get_charger_configs():
+        charger_name = ch_data.get("name", "Laddare")
+        entities.append(ChargerCurrentSensor(coordinator, entry, charger_name))
+        entities.append(ChargerEnabledSensor(coordinator, entry, charger_name))
+        entities.append(ChargerActiveCarSensor(coordinator, entry, charger_name))
+        entities.append(ChargerConnectedSensor(coordinator, entry, charger_name))
 
     async_add_entities(entities)
 
@@ -133,45 +132,101 @@ class SmartEnergyBatteryDischargePowerSensor(_BaseEnergySensor):
         return round(d.battery_discharge_power_w) if d else 0
 
 
-class SmartEnergyEvCarCurrentSensor(_BaseEnergySensor):
-    """Current setpoint sensor for one specific EV car."""
+# ── Laddarsensorer ────────────────────────────────────────────────────────────
+
+class _BaseChargerSensor(_BaseEnergySensor):
+    def __init__(self, coordinator, entry, charger_name: str):
+        super().__init__(coordinator, entry)
+        self._charger_name = charger_name
+        self._safe_name = charger_name.lower().replace(" ", "_")
+
+    def _find_charger_index(self):
+        state = self.coordinator.current_state
+        if not state:
+            return -1
+        for i, ch in enumerate(state.chargers):
+            if ch.config.name == self._charger_name:
+                return i
+        return -1
+
+
+class ChargerCurrentSensor(_BaseChargerSensor):
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
     _attr_device_class = SensorDeviceClass.CURRENT
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:ev-station"
 
-    def __init__(self, coordinator, entry, car_index: int, car_name: str):
-        super().__init__(coordinator, entry)
-        self._car_index = car_index
-        self._attr_unique_id = f"sem_ev_car_{car_index}_current"
-        self._attr_name = f"{car_name} Charge Current Setpoint"
+    def __init__(self, coordinator, entry, charger_name: str):
+        super().__init__(coordinator, entry, charger_name)
+        self._attr_unique_id = f"sem_charger_{self._safe_name}_current"
+        self._attr_name = f"{charger_name} Charge Current Setpoint"
 
     @property
     def native_value(self):
         d = self.coordinator.last_decision
-        if not d or self._car_index >= len(d.ev_decisions):
+        if not d:
             return 0
-        ev_dec = d.ev_decisions[self._car_index]
-        return round(ev_dec.current_a) if ev_dec.enable else 0
+        idx = self._find_charger_index()
+        if idx < 0 or idx >= len(d.charger_decisions):
+            return 0
+        dec = d.charger_decisions[idx]
+        return round(dec.current_a) if dec.enable else 0
 
 
-class SmartEnergyEvCarEnabledSensor(_BaseEnergySensor):
-    """Charging enabled sensor for one specific EV car."""
+class ChargerEnabledSensor(_BaseChargerSensor):
     _attr_icon = "mdi:car-electric"
 
-    def __init__(self, coordinator, entry, car_index: int, car_name: str):
-        super().__init__(coordinator, entry)
-        self._car_index = car_index
-        self._attr_unique_id = f"sem_ev_car_{car_index}_enabled"
-        self._attr_name = f"{car_name} Charging Enabled"
+    def __init__(self, coordinator, entry, charger_name: str):
+        super().__init__(coordinator, entry, charger_name)
+        self._attr_unique_id = f"sem_charger_{self._safe_name}_enabled"
+        self._attr_name = f"{charger_name} Charging Enabled"
 
     @property
     def native_value(self):
         d = self.coordinator.last_decision
-        if not d or self._car_index >= len(d.ev_decisions):
+        if not d:
             return "off"
-        return "on" if d.ev_decisions[self._car_index].enable else "off"
+        idx = self._find_charger_index()
+        if idx < 0 or idx >= len(d.charger_decisions):
+            return "off"
+        return "on" if d.charger_decisions[idx].enable else "off"
 
+
+class ChargerActiveCarSensor(_BaseChargerSensor):
+    """Visar vilken bil som är vald på laddaren."""
+    _attr_icon = "mdi:car-info"
+
+    def __init__(self, coordinator, entry, charger_name: str):
+        super().__init__(coordinator, entry, charger_name)
+        self._attr_unique_id = f"sem_charger_{self._safe_name}_active_car"
+        self._attr_name = f"{charger_name} Active Car"
+
+    @property
+    def native_value(self):
+        return self.coordinator.get_active_car(self._charger_name)
+
+
+class ChargerConnectedSensor(_BaseChargerSensor):
+    """Visar om en bil är fysiskt ansluten till laddaren."""
+    _attr_icon = "mdi:cable-data"
+
+    def __init__(self, coordinator, entry, charger_name: str):
+        super().__init__(coordinator, entry, charger_name)
+        self._attr_unique_id = f"sem_charger_{self._safe_name}_connected"
+        self._attr_name = f"{charger_name} Connected"
+
+    @property
+    def native_value(self):
+        state = self.coordinator.current_state
+        if not state:
+            return "off"
+        idx = self._find_charger_index()
+        if idx < 0:
+            return "off"
+        return "on" if state.chargers[idx].connected else "off"
+
+
+# ── Övriga sensorer ───────────────────────────────────────────────────────────
 
 class SmartEnergyPhaseL1Sensor(_BaseEnergySensor):
     _attr_unique_id = "sem_phase_l1_load"
@@ -233,21 +288,18 @@ class SmartEnergyOperatingModeSensor(_BaseEnergySensor):
         return self.coordinator.operating_mode
 
 
-
 class SmartEnergyLegionellaActiveSensor(_BaseEnergySensor):
-    """Visar om legionelladesinficering pågår."""
     _attr_unique_id = "sem_legionella_active"
     _attr_name = "Legionella Disinfection Active"
     _attr_icon = "mdi:bacteria"
 
     @property
-    def native_value(self) -> str:
+    def native_value(self):
         d = self.coordinator.data
         return "on" if (d and d.get("legionella_active")) else "off"
 
 
 class SmartEnergyLegionellaDaysSinceSensor(_BaseEnergySensor):
-    """Dagar sedan senaste legionellakörning."""
     _attr_unique_id = "sem_legionella_days_since"
     _attr_name = "Legionella Days Since Last Run"
     _attr_native_unit_of_measurement = "d"
@@ -264,7 +316,6 @@ class SmartEnergyLegionellaDaysSinceSensor(_BaseEnergySensor):
 
 
 class SmartEnergyLegionellaNextDueSensor(_BaseEnergySensor):
-    """Datum för nästa planerade legionellakörning."""
     _attr_unique_id = "sem_legionella_next_due"
     _attr_name = "Legionella Next Due"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -277,7 +328,6 @@ class SmartEnergyLegionellaNextDueSensor(_BaseEnergySensor):
 
 
 class SmartEnergyHouseLoadSensor(_BaseEnergySensor):
-    """Huslast i W – Elm4 direkt om konfigurerat, annars beräknad."""
     _attr_unique_id = "sem_house_load"
     _attr_name = "House Load"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -288,9 +338,7 @@ class SmartEnergyHouseLoadSensor(_BaseEnergySensor):
     @property
     def native_value(self):
         s = self.coordinator.current_state
-        if not s:
-            return 0
-        return round(s.house_load_w)
+        return round(s.house_load_w) if s else 0
 
 
 class SmartEnergySolarSurplusSensor(_BaseEnergySensor):

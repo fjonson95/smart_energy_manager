@@ -15,7 +15,7 @@ from .const import (
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
     CONF_SOLAR_INVERTER_TOTAL,
     CONF_SOLAR_INVERTER_POWER_L1, CONF_SOLAR_INVERTER_POWER_L2, CONF_SOLAR_INVERTER_POWER_L3,
-    CONF_EV_CARS,
+    CONF_EV_CHARGERS, CONF_EV_CARS,
     CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_SWITCH, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
     CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
     CONF_GRID_POWER_L1, CONF_GRID_POWER_L2, CONF_GRID_POWER_L3,
@@ -27,8 +27,7 @@ from .const import (
     CONF_WINTER_MODE_ENABLED,
     CONF_WINTER_CHEAP_HOUR_THRESHOLD, CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD,
     CONF_WINTER_MIN_SOC, CONF_WINTER_MAX_SOC,
-    CONF_HOUSE_LOAD_ENTITY,
-    CONF_GRID_POWER_UNIT, CONF_EV_POWER_UNIT,
+    CONF_HOUSE_LOAD_ENTITY, CONF_GRID_POWER_UNIT, CONF_EV_POWER_UNIT,
     UNIT_W, UNIT_KW,
     DEFAULT_MAX_CURRENT, DEFAULT_GRID_VOLTAGE, DEFAULT_VAT_RATE,
     DEFAULT_GRID_FEES, DEFAULT_ENERGY_TAX, DEFAULT_SELL_EXTRA_REVENUE,
@@ -36,25 +35,51 @@ from .const import (
     DEFAULT_WINTER_CHEAP_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD,
     DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
+    CHARGER_CONNECTED_STATES, NO_CAR_SELECTED,
     MODE_AUTO,
 )
 from .energy_controller import (
     EnergyController, EnergyState, ControlDecision,
-    EvCarConfig, EvCarState,
+    ChargerConfig, CarConfig, ChargerState,
 )
 from .legionella import LegionellaManager
 
 _LOGGER = logging.getLogger(__name__)
 
 
+def _migrate_ev_cars_to_chargers(ev_cars: list[dict]) -> list[dict]:
+    """
+    Bakåtkompatibilitet: konvertera gamla ev_cars-strukturen till nya ev_chargers.
+    Varje gammal bil blir en laddare med en bil i sin car-lista.
+    """
+    chargers = []
+    for car in ev_cars:
+        chargers.append({
+            "name": car.get("name", "Laddare"),
+            "connected_sensor": None,
+            "charger_switch": car.get("charger_switch", ""),
+            "charger_current": car.get("charger_current", ""),
+            "charger_power": car.get("charger_power"),
+            "phases": car.get("phases", 1),
+            "phase": car.get("phase"),
+            "cars": [{
+                "name": car.get("name", "Bil"),
+                "ev_soc": car.get("ev_soc"),
+                "ev_soc_target": car.get("ev_soc_target", 80.0),
+                "phase": car.get("phase"),
+            }],
+            # Vid migration: sätt bilen som automatiskt vald (bara 1 bil per laddare)
+            "_auto_select_car": car.get("name", "Bil"),
+        })
+    return chargers
+
+
 class SmartEnergyCoordinator(DataUpdateCoordinator):
-    """Coordinator that reads state and executes control decisions."""
+    """Koordinator som läser tillstånd och utför styrningsbeslut."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry):
         super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
+            hass, _LOGGER, name=DOMAIN,
             update_interval=timedelta(seconds=UPDATE_INTERVAL),
         )
         self.entry = entry
@@ -67,6 +92,29 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
         self._grid_scale = 1000.0 if self._config.get(CONF_GRID_POWER_UNIT, UNIT_W) == UNIT_KW else 1.0
         self._ev_scale   = 1000.0 if self._config.get(CONF_EV_POWER_UNIT,   UNIT_W) == UNIT_KW else 1.0
+
+        # active_car[charger_name] = car_name eller NO_CAR_SELECTED
+        # Styrs av select-entiteten i select.py
+        self._active_cars: dict[str, str] = {}
+        self._init_active_cars()
+
+    def _init_active_cars(self) -> None:
+        """Initiera bilval för alla laddare."""
+        chargers = self._get_charger_configs()
+        for ch_data in chargers:
+            name = ch_data.get("name", "")
+            # Vid migration med _auto_select_car: välj bilen direkt
+            auto = ch_data.get("_auto_select_car")
+            if name not in self._active_cars:
+                self._active_cars[name] = auto if auto else NO_CAR_SELECTED
+
+    def _get_charger_configs(self) -> list[dict]:
+        """Hämta laddarkonfiguration, med fallback till gamla ev_cars."""
+        if CONF_EV_CHARGERS in self._config:
+            return self._config[CONF_EV_CHARGERS]
+        # Bakåtkompatibilitet
+        ev_cars = self._config.get(CONF_EV_CARS, [])
+        return _migrate_ev_cars_to_chargers(ev_cars)
 
     async def async_config_entry_first_refresh(self):
         await self._legionella.async_load()
@@ -106,12 +154,19 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             return False
         return state.state.lower() in ("on", "true", "1", "home", "charging")
 
+    def _is_charger_connected(self, entity_id: Optional[str]) -> bool:
+        """Kontrollera om laddarsensorn indikerar att en bil är ansluten."""
+        if not entity_id:
+            return False
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unavailable", "unknown"):
+            return False
+        return state.state.lower() in CHARGER_CONNECTED_STATES
+
     def _get_grid_power_w(self, entity_id: Optional[str]) -> float:
-        """Läs näteffekt och konvertera kW→W om nödvändigt (Elm1 är i kW)."""
         return self._get_state_float(entity_id) * self._grid_scale
 
     def _get_ev_power_w(self, entity_id: Optional[str]) -> float:
-        """Läs EV-laddeffekt och konvertera kW→W om nödvändigt."""
         return self._get_state_float(entity_id) * self._ev_scale
 
     def _get_nordpool_price(self) -> float:
@@ -126,58 +181,85 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         except (ValueError, TypeError):
             return 0.0
 
-    def _get_house_load_w(self, grid_l1: float, grid_l2: float, grid_l3: float,
-                          solar_w: float, battery_power_w: float,
-                          ev_power_w: float) -> float:
-        """Beräkna huslast i W.
+    def _build_charger_states(self) -> list[ChargerState]:
+        charger_cfgs = self._get_charger_configs()
+        result: list[ChargerState] = []
 
-        Topologi (bekräftad från mätdata):
-          Elm1(nät) = Elm4(fastighet) + Bil_ladd - Sol - Bat_urladdning + Bat_laddning
+        for ch_data in charger_cfgs:
+            cars = [
+                CarConfig(
+                    name=car.get("name", "Bil"),
+                    ev_soc=car.get("ev_soc") or None,
+                    ev_soc_target=float(car.get("ev_soc_target", 80.0)),
+                    phase=car.get("phase") or None,
+                )
+                for car in ch_data.get("cars", [])
+            ]
 
-          Elm4 inkluderar: övriga laster + elpanna (Elm5)
-          Elm4 inkluderar INTE: billaddare, sol, batteri
+            cfg = ChargerConfig(
+                name=ch_data.get("name", "Laddare"),
+                charger_switch=ch_data.get("charger_switch", ""),
+                charger_current=ch_data.get("charger_current", ""),
+                connected_sensor=ch_data.get("connected_sensor") or None,
+                charger_power=ch_data.get("charger_power") or None,
+                phases=int(ch_data.get("phases", 1)),
+                phase=ch_data.get("phase") or None,
+                cars=cars,
+            )
 
-        Prioritet:
-          1. Elm4 direkt om konfigurerad (mest exakt, korr 0.98 mot Elm1)
-          2. Beräknad från Elm1 + kända laster (fallback)
-        """
+            connected = self._is_charger_connected(cfg.connected_sensor)
+            active_car_name = self._active_cars.get(cfg.name, NO_CAR_SELECTED)
+
+            # SOC för aktiv bil
+            soc_pct: Optional[float] = None
+            for car in cars:
+                if car.name == active_car_name and car.ev_soc:
+                    raw = self._get_state_float(car.ev_soc, default=-1.0)
+                    if raw >= 0:
+                        soc_pct = raw
+                    break
+
+            power_w = self._get_ev_power_w(cfg.charger_power) if cfg.charger_power else 0.0
+
+            result.append(ChargerState(
+                config=cfg,
+                connected=connected,
+                active_car_name=active_car_name,
+                current_a=self._get_state_float(cfg.charger_current),
+                power_w=power_w,
+                soc_pct=soc_pct,
+            ))
+
+        return result
+
+    def _get_house_load_w(self, grid_l1, grid_l2, grid_l3, solar_w, battery_power_w, ev_total_w) -> float:
         house_entity = self._config.get(CONF_HOUSE_LOAD_ENTITY)
         if house_entity:
             val = self._get_state_float(house_entity)
             if val > 0:
                 return val
-
-        # Fallback: Elm1 + Sol + Bat_urladdning - Bat_laddning - Bil
-        # grid = import (pos) / export (neg)
         grid_total = grid_l1 + grid_l2 + grid_l3
         bat_charge    = max(0.0,  battery_power_w)
         bat_discharge = max(0.0, -battery_power_w)
-        return max(0.0, grid_total + solar_w - bat_discharge + bat_charge - ev_power_w)
+        return max(0.0, grid_total + solar_w - bat_discharge + bat_charge - ev_total_w)
 
-    def _build_ev_car_states(self) -> list[EvCarState]:
-        cars_cfg: list[dict] = self._config.get(CONF_EV_CARS, [])
-        result: list[EvCarState] = []
-        for car_data in cars_cfg:
-            cfg = EvCarConfig(
-                name=car_data.get("name", "Car"),
-                charger_switch=car_data.get("charger_switch", ""),
-                charger_current=car_data.get("charger_current", ""),
-                charger_power=car_data.get("charger_power") or None,
-                ev_soc=car_data.get("ev_soc") or None,
-                ev_soc_target=float(car_data.get("ev_soc_target", 80.0)),
-                phases=int(car_data.get("phases", 1)),
-                phase=car_data.get("phase", "L1"),
-            )
-            soc_raw = self._get_state_float(cfg.ev_soc, default=-1.0)
-            power_w = self._get_ev_power_w(cfg.charger_power) if cfg.charger_power else 0.0
-            result.append(EvCarState(
-                config=cfg,
-                charging=self._get_state_bool(cfg.charger_switch),
-                current_a=self._get_state_float(cfg.charger_current),
-                power_w=power_w,
-                soc_pct=soc_raw if soc_raw >= 0 else None,
-            ))
-        return result
+    # ── Bilval ────────────────────────────────────────────────────────
+
+    def set_active_car(self, charger_name: str, car_name: str) -> None:
+        """Anropas av select-entiteten när användaren väljer bil."""
+        self._active_cars[charger_name] = car_name
+        _LOGGER.info("Laddare '%s': bil vald → '%s'", charger_name, car_name)
+
+    def get_active_car(self, charger_name: str) -> str:
+        return self._active_cars.get(charger_name, NO_CAR_SELECTED)
+
+    def get_charger_car_options(self, charger_name: str) -> list[str]:
+        """Returnera lista av bilnamn för en given laddare + sentinel."""
+        for ch_data in self._get_charger_configs():
+            if ch_data.get("name") == charger_name:
+                names = [car.get("name", "Bil") for car in ch_data.get("cars", [])]
+                return [NO_CAR_SELECTED] + names
+        return [NO_CAR_SELECTED]
 
     # ── Huvuduppdatering ──────────────────────────────────────────────
 
@@ -199,19 +281,15 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
             solar_w       = self._get_state_float(c.get(CONF_SOLAR_INVERTER_TOTAL))
             battery_pwr_w = self._get_state_float(c.get(CONF_BATTERY_INVERTER_POWER))
-            ev_cars       = self._build_ev_car_states()
+            chargers      = self._build_charger_states()
 
-            # Total EV-effekt för huslastvberäkning (exkluderas från Elm4)
-            ev_total_w = sum(car.power_w for car in ev_cars)
-
+            ev_total_w = sum(ch.power_w for ch in chargers)
             house_load_w = self._get_house_load_w(
                 grid_l1, grid_l2, grid_l3, solar_w, battery_pwr_w, ev_total_w
             )
-
-            # Solöverskott (efter huslast, exkl. bil) – används av legionella
             solar_surplus_w = max(0.0, solar_w - house_load_w)
 
-            # ── Legionella ────────────────────────────────────────────
+            # Legionella
             now = datetime.now().astimezone()
             legionella_active, legionella_reason = self._legionella.should_run_now(
                 now, solar_surplus_w, buy_price
@@ -230,7 +308,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 battery_capacity_kwh=float(c.get(CONF_BATTERY_CAPACITY_KWH, 10.0)),
                 battery_max_power_kw=float(c.get(CONF_BATTERY_MAX_POWER_KW, 5.0)),
 
-                ev_cars=ev_cars,
+                chargers=chargers,
 
                 heat_pump_power_w=self._get_state_float(c.get(CONF_HEAT_PUMP_POWER)),
                 heat_pump_on=self._get_state_bool(c.get(CONF_HEAT_PUMP_SWITCH)),
@@ -239,7 +317,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 heat_pump_patron_phases=c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES),
                 heat_pump_patron_power_kw=float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
 
-                # Legionella åsidosätter extra_hot_water om aktiv
                 legionella_active=legionella_active,
 
                 grid_power_l1=grid_l1,
@@ -263,9 +340,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             decision = self._controller.compute(state)
             self._last_decision = decision
 
-            # Legionella-orsak läggs in i decision om aktiv
             if legionella_active:
                 decision.reason = legionella_reason + " | " + decision.reason
+
+            # Skicka HA-notifieringar för laddare utan bilval
+            if decision.chargers_needing_selection:
+                await self._notify_car_selection_needed(decision.chargers_needing_selection)
 
             await self._execute_decision(state, decision)
 
@@ -281,14 +361,32 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "legionella_last_run": self._legionella.last_run,
                 "legionella_days_since": self._legionella.days_since_last_run,
                 "legionella_next_due": self._legionella.next_due(),
+                "chargers_needing_selection": decision.chargers_needing_selection,
             }
 
         except Exception as err:
-            _LOGGER.exception("Error updating Smart Energy Manager")
+            _LOGGER.exception("Fel vid uppdatering av Smart Energy Manager")
             raise UpdateFailed(f"Error updating Smart Energy Manager: {err}") from err
 
+    async def _notify_car_selection_needed(self, charger_names: list[str]) -> None:
+        """Skicka persistent HA-notifiering för laddare som behöver bilval."""
+        for name in charger_names:
+            notification_id = f"sem_car_selection_{name.lower().replace(' ', '_')}"
+            await self.hass.services.async_call(
+                "persistent_notification", "create",
+                {
+                    "title": f"⚡ Smart Energy Manager – Välj bil",
+                    "message": (
+                        f"Laddare **{name}** är ansluten men ingen bil är vald.\n\n"
+                        f"Välj bil i entiteten `select.sem_charger_{name.lower().replace(' ', '_')}_active_car` "
+                        f"för att starta laddning."
+                    ),
+                    "notification_id": notification_id,
+                },
+                blocking=False,
+            )
+
     async def _execute_decision(self, state: EnergyState, decision: ControlDecision) -> None:
-        """Applicera styrningsbeslut på faktiska enheter."""
         charge_entity    = self._config.get(CONF_BATTERY_INVERTER_CHARGE)
         discharge_entity = self._config.get(CONF_BATTERY_INVERTER_DISCHARGE)
 
@@ -305,23 +403,33 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 blocking=False,
             )
 
-        for car_state, ev_dec in zip(state.ev_cars, decision.ev_decisions):
-            cfg = car_state.config
-            if ev_dec.enable and ev_dec.current_a > 0 and cfg.charger_current:
+        for ch_state, ch_dec in zip(state.chargers, decision.charger_decisions):
+            cfg = ch_state.config
+            if ch_dec.enable and ch_dec.current_a > 0 and cfg.charger_current:
                 await self.hass.services.async_call(
                     "number", "set_value",
-                    {"entity_id": cfg.charger_current, "value": round(ev_dec.current_a)},
+                    {"entity_id": cfg.charger_current, "value": round(ch_dec.current_a)},
                     blocking=False,
                 )
             if cfg.charger_switch:
-                service = "turn_on" if ev_dec.enable else "turn_off"
+                service = "turn_on" if ch_dec.enable else "turn_off"
                 await self.hass.services.async_call(
                     "switch", service,
                     {"entity_id": cfg.charger_switch},
                     blocking=False,
                 )
 
-        # Extra varmvatten: aktiveras av styrlogik ELLER legionella
+        # Stäng av notifiering för laddare som inte längre behöver bilval
+        for ch_state in state.chargers:
+            if ch_state.config.name not in decision.chargers_needing_selection:
+                notification_id = f"sem_car_selection_{ch_state.config.name.lower().replace(' ', '_')}"
+                await self.hass.services.async_call(
+                    "persistent_notification", "dismiss",
+                    {"notification_id": notification_id},
+                    blocking=False,
+                )
+
+        # Extra varmvatten / legionella
         hot_water_entity = self._config.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)
         if hot_water_entity:
             activate = decision.extra_hot_water or state.legionella_active
@@ -331,6 +439,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 {"entity_id": hot_water_entity},
                 blocking=False,
             )
+
+    # ── Properties ────────────────────────────────────────────────────
 
     @property
     def last_decision(self) -> Optional[ControlDecision]:
