@@ -50,6 +50,18 @@ async def async_setup_entry(
     if coordinator._config.get(CONF_HOT_WATER_TEMP_ENTITY):
         entities.append(SmartEnergyHotWaterTempSensor(coordinator, entry))
 
+    # Prisschema-sensorer
+    entities += [
+        SmartEnergyNegativeSlotsAheadSensor(coordinator, entry),
+        SmartEnergyBestDischargePriceSensor(coordinator, entry),
+        SmartEnergyBestChargePriceSensor(coordinator, entry),
+    ]
+
+    # Gårdagsförbrukning om konfigurerad
+    from .const import CONF_YESTERDAY_CONSUMPTION_ENTITY
+    if coordinator._config.get(CONF_YESTERDAY_CONSUMPTION_ENTITY):
+        entities.append(SmartEnergyYesterdayConsumptionSensor(coordinator, entry))
+
     async_add_entities(entities)
 
 
@@ -389,3 +401,102 @@ class SmartEnergyLegionellaTempConfirmedSensor(_BaseEnergySensor):
     @property
     def native_value(self) -> str:
         return "on" if self.coordinator.legionella._temp_confirmed else "off"
+
+
+# ── Prisschema-sensorer ───────────────────────────────────────────────────────
+
+class SmartEnergyNegativeSlotsAheadSensor(_BaseEnergySensor):
+    """Antal kvartstimmar med negativt säljpris kommande 8h."""
+    _attr_unique_id = "sem_negative_slots_ahead"
+    _attr_name = "Negative Price Slots Ahead"
+    _attr_native_unit_of_measurement = "slots"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:clock-alert"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return d.get("negative_slots_ahead", 0) if d else 0
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data
+        ps = d.get("price_schedule") if d else None
+        if not ps:
+            return {}
+        return {
+            "low_price_slots_ahead": ps.low_price_slots_ahead,
+            "should_absorb_proactively": ps.should_absorb_proactively,
+            "recommended_headroom_pct": round(ps.recommended_headroom * 100, 1),
+            "avg_price_next_4h_sek": round(ps.avg_price_next_4h, 4),
+            "max_price_next_12h_sek": round(ps.max_price_next_12h, 4),
+            "min_price_next_12h_sek": round(ps.min_price_next_12h, 4),
+        }
+
+
+class SmartEnergyBestDischargePriceSensor(_BaseEnergySensor):
+    """Bästa köppris för batteridischarge kommande 12h."""
+    _attr_unique_id = "sem_best_discharge_price"
+    _attr_name = "Best Discharge Price Next 12h"
+    _attr_native_unit_of_measurement = "SEK/kWh"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:battery-arrow-down"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        val = d.get("best_discharge_price") if d else None
+        return round(val, 4) if val is not None else None
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data
+        ps = d.get("price_schedule") if d else None
+        if not ps or not ps.best_discharge_slot:
+            return {}
+        return {
+            "best_discharge_time": ps.best_discharge_slot.start.isoformat(),
+        }
+
+
+class SmartEnergyBestChargePriceSensor(_BaseEnergySensor):
+    """Lägsta köppris för batteriladdning kommande 12h."""
+    _attr_unique_id = "sem_best_charge_price"
+    _attr_name = "Best Charge Price Next 12h"
+    _attr_native_unit_of_measurement = "SEK/kWh"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:battery-arrow-up"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        val = d.get("best_charge_price") if d else None
+        return round(val, 4) if val is not None else None
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data
+        ps = d.get("price_schedule") if d else None
+        if not ps or not ps.best_charge_slot:
+            return {}
+        return {
+            "best_charge_time": ps.best_charge_slot.start.isoformat(),
+        }
+
+
+class SmartEnergyYesterdayConsumptionSensor(_BaseEnergySensor):
+    """Gårdagens förbrukning exkl. EV-laddning."""
+    _attr_unique_id = "sem_yesterday_consumption"
+    _attr_name = "Yesterday Consumption (excl. EV)"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:home-lightning-bolt-outline"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        val = d.get("yesterday_consumption_kwh") if d else None
+        return round(val, 2) if val is not None else None

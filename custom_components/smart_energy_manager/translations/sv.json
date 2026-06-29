@@ -20,7 +20,8 @@
           "sell_extra_revenue": "Ersättning vid försäljning (SEK/kWh)",
           "house_load_entity": "Huslaststyrare (Elm4 – direkt mätare)",
           "grid_power_unit": "Nätmätare enhet (W eller kW)",
-          "ev_power_unit": "EV-laddare effektenhet (W eller kW)"
+          "ev_power_unit": "EV-laddare effektenhet (W eller kW)",
+          "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)"
         }
       },
       "solar": {
@@ -125,7 +126,8 @@
           "sell_extra_revenue": "Ersättning vid försäljning (SEK/kWh)",
           "house_load_entity": "Huslaststyrare (Elm4 – direkt mätare)",
           "grid_power_unit": "Nätmätare enhet (W eller kW)",
-          "ev_power_unit": "EV-laddare effektenhet (W eller kW)"
+          "ev_power_unit": "EV-laddare effektenhet (W eller kW)",
+          "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)"
         }
       },
       "solar_opts": {

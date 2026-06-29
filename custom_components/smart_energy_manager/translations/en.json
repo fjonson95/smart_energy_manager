@@ -20,7 +20,8 @@
           "sell_extra_revenue": "Extra sell revenue (SEK/kWh)",
           "house_load_entity": "House load sensor (Elm4 – direct meter)",
           "grid_power_unit": "Grid power unit (W or kW)",
-          "ev_power_unit": "EV charger power unit (W or kW)"
+          "ev_power_unit": "EV charger power unit (W or kW)",
+          "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)"
         }
       },
       "solar": {
@@ -125,7 +126,8 @@
           "sell_extra_revenue": "Extra sell revenue (SEK/kWh)",
           "house_load_entity": "House load sensor (Elm4 – direct meter)",
           "grid_power_unit": "Grid power unit (W or kW)",
-          "ev_power_unit": "EV charger power unit (W or kW)"
+          "ev_power_unit": "EV charger power unit (W or kW)",
+          "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)"
         }
       },
       "solar_opts": {

@@ -167,3 +167,11 @@ CONF_LEGIONELLA_TARGET_TEMP = "legionella_target_temp"
 
 DEFAULT_EXTRA_HOT_WATER_MAX_TEMP = 70.0   # °C – stoppa extra varmvatten över denna nivå
 DEFAULT_LEGIONELLA_TARGET_TEMP = 65.0     # °C – bekräfta legionella klar när temp nått detta
+
+# ── Prisplanering ─────────────────────────────────────────────────────────────
+CONF_YESTERDAY_CONSUMPTION_ENTITY = "yesterday_consumption_entity"
+CONF_NEGATIVE_PRICE_THRESHOLD = "negative_price_threshold_sek"
+CONF_PROACTIVE_ABSORPTION_SLOTS = "proactive_absorption_slots"
+
+DEFAULT_NEGATIVE_PRICE_THRESHOLD = 0.0   # SEK/kWh
+DEFAULT_PROACTIVE_ABSORPTION_SLOTS = 4   # Antal negativa kvartstimmar inom 2h för att reagera

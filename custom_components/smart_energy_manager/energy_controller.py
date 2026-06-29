@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
 
+from .price_scheduler import PriceSchedule
 from .const import (
     PHASES, DEFAULT_MAX_CURRENT, DEFAULT_GRID_VOLTAGE,
     MIN_EV_CURRENT, MAX_EV_CURRENT,
@@ -189,6 +190,12 @@ class EnergyState:
     buy_price_sek_kwh: float = 0.0
     sell_price_sek_kwh: float = 0.0
 
+    # Prisschema (kvartstimmar framåt från Nordpool)
+    price_schedule: Optional[PriceSchedule] = None
+
+    # Gårdagens förbrukning exkl. EV-laddning (kWh)
+    yesterday_consumption_kwh: Optional[float] = None
+
     # Driftläge
     operating_mode: str = MODE_AUTO
     winter_mode: bool = False
@@ -324,7 +331,41 @@ class EnergyController:
             solar_w, house_load_w, solar_surplus_w, battery_soc, buy_price, negative_price,
         )
 
-        # ── Negativa spotpriser ───────────────────────────────────────
+        # ── Proaktiv absorption: negativa priser väntar inom 2h ─────
+        ps = state.price_schedule
+        if ps and ps.should_absorb_proactively and not negative_price:
+            decision.reason += f" | Proaktiv absorption ({ps.negative_slots_ahead} neg slots inom 8h)"
+            # Skapa utrymme: ladda INTE upp batteriet om det är nära fullt
+            # och vi vill ha headroom för kommande sol
+            effective_max_soc = self.battery_max_soc - (ps.recommended_headroom * 100)
+            if battery_soc > effective_max_soc:
+                decision.battery_charge_power_w = 0
+                decision.reason += f" | Håller {ps.recommended_headroom*100:.0f}% headroom"
+            # Aktivera extra varmvatten och EV-laddning proaktivt för att tömma utrymme
+            if self._can_start_extra_hot_water(state):
+                decision.extra_hot_water = True
+                decision.reason += " | Proaktiv varmvatten"
+            # EV: ladda med all tillgänglig sol nu, vi vill inte ha överskott sen
+            remaining_surplus = solar_surplus_w
+            for i, ch in enumerate(state.chargers):
+                if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
+                    continue
+                car = ch.active_car
+                if car and ch.soc_pct is not None and ch.soc_pct >= car.ev_soc_target:
+                    continue
+                min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.car_phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
+                if remaining_surplus >= min_surplus:
+                    cur = self._surplus_to_current(remaining_surplus, ch.car_phases)
+                    if cur >= MIN_EV_CURRENT:
+                        decision.charger_decisions[i] = ChargerDecision(
+                            enable=True, current_a=cur,
+                            reason=f"proaktiv sol-laddning inför neg pris",
+                        )
+                        remaining_surplus -= self._charger_power(cur, ch.car_phases)
+            self._check_car_selection(state, decision)
+            return self._apply_phase_limits(state, decision)
+
+        # ── Negativa spotpriser just nu ───────────────────────────────
         if negative_price and solar_w > 0:
             decision.reason += " | Negative spot – absorbing solar"
             remaining = solar_surplus_w
@@ -394,7 +435,15 @@ class EnergyController:
         if solar_w < house_load_w and battery_soc > self.battery_min_soc:
             deficit_w = house_load_w - solar_w
             discharge_w = min(state.battery_max_power_kw * 1000, deficit_w)
-            if buy_price > 0.20:
+            ps = state.price_schedule
+            # Ladda ur om: priset är tillräckligt högt ELLER detta är bästa timmen kommande 12h
+            is_good_discharge = buy_price > 0.20
+            if ps and ps.best_discharge_slot:
+                is_peak_now = abs((ps.best_discharge_slot.start - datetime.now().astimezone()).total_seconds()) < 900
+                if is_peak_now:
+                    is_good_discharge = True
+                    decision.reason += " | Bästa urladdningstimmen"
+            if is_good_discharge:
                 decision.battery_discharge_power_w = discharge_w
                 decision.reason += f" | Batteri -{discharge_w:.0f}W"
 
@@ -422,13 +471,32 @@ class EnergyController:
         is_expensive = buy_price >= self.winter_expensive_threshold
         is_night = hour < 6 or hour >= 23
 
-        if is_cheap and (is_night or buy_price < 0.30):
+        # Prisschema: är nu det bästa laddningstillfället kommande 12h?
+        ps = state.price_schedule
+        is_best_charge_now = (
+            ps is not None
+            and ps.best_charge_slot is not None
+            and abs((ps.best_charge_slot.start - datetime.now().astimezone()).total_seconds()) < 900
+        )
+        is_best_discharge_now = (
+            ps is not None
+            and ps.best_discharge_slot is not None
+            and abs((ps.best_discharge_slot.start - datetime.now().astimezone()).total_seconds()) < 900
+        )
+
+        if (is_cheap or is_best_charge_now) and (is_night or buy_price < 0.30):
             if soc < self.winter_max_soc:
                 decision.battery_charge_power_w = state.battery_max_power_kw * 1000
-                decision.reason += f" | Laddar batteri (billigt {buy_price:.3f} SEK)"
-        elif is_expensive and soc > self.winter_min_soc:
+                decision.reason += f" | Laddar batteri (billigt {buy_price:.3f} SEK"
+                if is_best_charge_now:
+                    decision.reason += ", bästa timmen"
+                decision.reason += ")"
+        elif (is_expensive or is_best_discharge_now) and soc > self.winter_min_soc:
             decision.battery_discharge_power_w = state.battery_max_power_kw * 1000
-            decision.reason += f" | Laddar ur batteri (dyrt {buy_price:.3f} SEK)"
+            decision.reason += f" | Laddar ur batteri (dyrt {buy_price:.3f} SEK"
+            if is_best_discharge_now:
+                decision.reason += ", bästa timmen"
+            decision.reason += ")"
         elif solar_w > 100 and soc < self.winter_max_soc:
             house_load_w = self._house_load(state)
             surplus = max(0.0, solar_w - house_load_w)

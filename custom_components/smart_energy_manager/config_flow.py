@@ -42,6 +42,7 @@ from .const import (
     EV_PHASES_OPTIONS,
     DEFAULT_WINTER_CHEAP_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD,
     DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
+    CONF_YESTERDAY_CONSUMPTION_ENTITY,
     CONF_WINTER_CHEAP_HOUR_THRESHOLD, CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD,
     CONF_WINTER_MIN_SOC, CONF_WINTER_MAX_SOC,
 )
@@ -102,6 +103,7 @@ def _grid_schema(d: dict) -> vol.Schema:
                 mode=selector.SelectSelectorMode.LIST,
             )
         ),
+        vol.Optional(CONF_YESTERDAY_CONSUMPTION_ENTITY, default=_d(d, CONF_YESTERDAY_CONSUMPTION_ENTITY, "")): _opt_entity_selector(),
     })
 
 
@@ -159,7 +161,7 @@ def _legionella_schema(d: dict) -> vol.Schema:
 def _charger_schema(d: dict) -> vol.Schema:
     """Schema för en laddare (hårdvara)."""
     return vol.Schema({
-        vol.Required("charger_name", default=_d(d, "name", "")): str,
+        vol.Required("charger_name", default=_d(d, "charger_name", "") or _d(d, "name", "")): str,
         vol.Optional("connected_sensor", default=_d(d, "connected_sensor", "")): _opt_entity_selector(),
         vol.Required("charger_switch", default=_d(d, "charger_switch", "")): _opt_entity_selector(),
         vol.Required("charger_current", default=_d(d, "charger_current", "")): _opt_entity_selector(),
@@ -442,7 +444,12 @@ class SmartEnergyOptionsFlow(config_entries.OptionsFlow):
                 ch = self._chargers[idx]
                 self._current_charger_ui = {
                     "charger_name": ch.get("name", ""),
-                    **{k: ch.get(k, "") for k in ["connected_sensor", "charger_switch", "charger_current", "charger_power", "phase"]},
+                    "name": ch.get("name", ""),   # alias så _charger_schema hittar det
+                    "connected_sensor": ch.get("connected_sensor") or "",
+                    "charger_switch": ch.get("charger_switch") or "",
+                    "charger_current": ch.get("charger_current") or "",
+                    "charger_power": ch.get("charger_power") or "",
+                    "phase": ch.get("phase") or "L1",
                     "phases": str(ch.get("phases", 1)),
                 }
                 self._current_charger_cars = list(ch.get("cars", []))

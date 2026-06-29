@@ -39,8 +39,10 @@ from .const import (
     DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     CHARGER_CONNECTED_STATES, NO_CAR_SELECTED,
+    CONF_YESTERDAY_CONSUMPTION_ENTITY,
     MODE_AUTO,
 )
+from .price_scheduler import PriceScheduler
 from .energy_controller import (
     EnergyController, EnergyState, ControlDecision,
     ChargerConfig, CarConfig, ChargerState,
@@ -93,6 +95,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._state: Optional[EnergyState] = None
         self._controller = self._build_controller()
         self._legionella = LegionellaManager(hass, self._config)
+        self._price_scheduler = PriceScheduler(
+            grid_fees_sek=float(self._config.get(CONF_GRID_FEES, DEFAULT_GRID_FEES)),
+            energy_tax_sek=float(self._config.get(CONF_ENERGY_TAX, DEFAULT_ENERGY_TAX)),
+            vat_rate=float(self._config.get(CONF_VAT_RATE, DEFAULT_VAT_RATE)),
+            extra_revenue_sek=float(self._config.get(CONF_SELL_EXTRA_REVENUE, DEFAULT_SELL_EXTRA_REVENUE)),
+        )
 
         self._grid_scale = 1000.0 if self._config.get(CONF_GRID_POWER_UNIT, UNIT_W) == UNIT_KW else 1.0
         self._ev_scale   = 1000.0 if self._config.get(CONF_EV_POWER_UNIT,   UNIT_W) == UNIT_KW else 1.0
@@ -294,8 +302,27 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             )
             solar_surplus_w = max(0.0, solar_w - house_load_w)
 
-            # Legionella – läs switch och temp
+            # Prisschema från Nordpool-attributen
             now = datetime.now().astimezone()
+            nordpool_entity = c.get(CONF_NORDPOOL_ENTITY)
+            price_schedule = None
+            if nordpool_entity:
+                nordpool_state = self.hass.states.get(nordpool_entity)
+                if nordpool_state and nordpool_state.attributes:
+                    try:
+                        price_schedule = self._price_scheduler.compute(
+                            nordpool_state.attributes, now
+                        )
+                    except Exception as e:
+                        _LOGGER.warning("Kunde inte beräkna prisschema: %s", e)
+
+            # Gårdagens förbrukning (valfri sensor)
+            yesterday_kwh: Optional[float] = None
+            yest_entity = c.get(CONF_YESTERDAY_CONSUMPTION_ENTITY)
+            if yest_entity:
+                yesterday_kwh = self._get_state_float(yest_entity) or None
+
+            # Legionella – läs switch och temp
             legionella_switch_on = self._get_state_bool(c.get(CONF_LEGIONELLA_SWITCH))
             hot_water_temp = self._get_hot_water_temp()
             legionella_active, legionella_reason = self._legionella.should_run_now(
@@ -345,6 +372,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
                 operating_mode=self.operating_mode,
                 winter_mode=bool(c.get(CONF_WINTER_MODE_ENABLED, False)),
+                price_schedule=price_schedule,
+                yesterday_consumption_kwh=yesterday_kwh,
             )
             self._state = state
 
@@ -373,6 +402,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "legionella_days_since": self._legionella.days_since_last_run,
                 "legionella_next_due": self._legionella.next_due(),
                 "chargers_needing_selection": decision.chargers_needing_selection,
+                "price_schedule": price_schedule,
+                "yesterday_consumption_kwh": yesterday_kwh,
+                "negative_slots_ahead": price_schedule.negative_slots_ahead if price_schedule else 0,
+                "best_discharge_price": price_schedule.best_discharge_slot.buy_sek if price_schedule and price_schedule.best_discharge_slot else None,
+                "best_charge_price": price_schedule.best_charge_slot.buy_sek if price_schedule and price_schedule.best_charge_slot else None,
             }
 
         except Exception as err:
