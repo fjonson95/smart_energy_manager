@@ -143,6 +143,10 @@ class EnergyState:
     # Huslast
     house_load_w: float = 0.0
 
+    # Varmvattentemperatur (ackumulatortank)
+    hot_water_temp_c: Optional[float] = None      # None om sensor ej konfigurerad
+    extra_hot_water_max_temp: float = 70.0        # stoppa extra varmvatten över detta (°C)
+
     # Legionella
     legionella_active: bool = False
 
@@ -304,7 +308,7 @@ class EnergyController:
                 decision.battery_charge_power_w = charge_w
                 remaining -= charge_w
 
-            if remaining > 500:
+            if remaining > 500 and self._can_start_extra_hot_water(state):
                 decision.extra_hot_water = True
 
             for i, ch in enumerate(state.chargers):
@@ -355,9 +359,10 @@ class EnergyController:
             decision.reason += f" | Batteri +{charge_w:.0f}W"
 
         # Extra varmvatten
-        if remaining_surplus > 500 and battery_soc >= self.battery_max_soc:
+        if remaining_surplus > 500 and battery_soc >= self.battery_max_soc and self._can_start_extra_hot_water(state):
             decision.extra_hot_water = True
-            decision.reason += " | Extra varmvatten (batteri fullt)"
+            temp_str = f" (tank {state.hot_water_temp_c:.0f}°C)" if state.hot_water_temp_c is not None else ""
+            decision.reason += f" | Extra varmvatten (batteri fullt{temp_str})"
 
         # Ladda ur batteri
         if solar_w < house_load_w and battery_soc > self.battery_min_soc:
@@ -594,6 +599,13 @@ class EnergyController:
             + max(0, -state.battery_power_w)
             - max(0, state.battery_power_w)
         ))
+
+
+    def _can_start_extra_hot_water(self, state) -> bool:
+        """Returnera True om extra varmvatten är tillåtet baserat på temperatur."""
+        if state.hot_water_temp_c is None:
+            return True  # Ingen sensor konfigurerad – tillåt alltid
+        return state.hot_water_temp_c < state.extra_hot_water_max_temp
 
     def _surplus_to_current(self, surplus_w: float, phases: int) -> float:
         current = surplus_w / (self.voltage * phases)

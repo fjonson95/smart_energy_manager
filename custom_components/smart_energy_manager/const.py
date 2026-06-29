@@ -158,3 +158,12 @@ MAX_EV_CURRENT = 16
 NEGATIVE_PRICE_THRESHOLD = 0.0
 UNIT_W = "W"
 UNIT_KW = "kW"
+
+# ── Ackumulatortank & varmvattenstyrning ──────────────────────────────────────
+CONF_HOT_WATER_TEMP_ENTITY = "hot_water_temp_entity"
+CONF_LEGIONELLA_SWITCH = "legionella_switch_entity"
+CONF_EXTRA_HOT_WATER_MAX_TEMP = "extra_hot_water_max_temp"
+CONF_LEGIONELLA_TARGET_TEMP = "legionella_target_temp"
+
+DEFAULT_EXTRA_HOT_WATER_MAX_TEMP = 70.0   # °C – stoppa extra varmvatten över denna nivå
+DEFAULT_LEGIONELLA_TARGET_TEMP = 65.0     # °C – bekräfta legionella klar när temp nått detta

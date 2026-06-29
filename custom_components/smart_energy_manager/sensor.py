@@ -45,6 +45,11 @@ async def async_setup_entry(
         entities.append(ChargerActiveCarSensor(coordinator, entry, charger_name))
         entities.append(ChargerConnectedSensor(coordinator, entry, charger_name))
 
+    # Temperatursensor om konfigurerad
+    from .const import CONF_HOT_WATER_TEMP_ENTITY
+    if coordinator._config.get(CONF_HOT_WATER_TEMP_ENTITY):
+        entities.append(SmartEnergyHotWaterTempSensor(coordinator, entry))
+
     async_add_entities(entities)
 
 
@@ -356,3 +361,31 @@ class SmartEnergySolarSurplusSensor(_BaseEnergySensor):
             return 0
         house_load = max(0.0, s.grid_power_l1 + s.grid_power_l2 + s.grid_power_l3 + s.solar_power_w)
         return round(max(0.0, s.solar_power_w - house_load))
+
+
+class SmartEnergyHotWaterTempSensor(_BaseEnergySensor):
+    """Ackumulatortankens temperatur."""
+    _attr_unique_id = "sem_hot_water_temp"
+    _attr_name = "Hot Water Temperature"
+    _attr_native_unit_of_measurement = "°C"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:thermometer-water"
+
+    @property
+    def native_value(self):
+        s = self.coordinator.current_state
+        if not s or s.hot_water_temp_c is None:
+            return None
+        return round(s.hot_water_temp_c, 1)
+
+
+class SmartEnergyLegionellaTempConfirmedSensor(_BaseEnergySensor):
+    """Visar om legionella-körningen bekräftats via temperatur."""
+    _attr_unique_id = "sem_legionella_temp_confirmed"
+    _attr_name = "Legionella Temperature Confirmed"
+    _attr_icon = "mdi:thermometer-check"
+
+    @property
+    def native_value(self) -> str:
+        return "on" if self.coordinator.legionella._temp_confirmed else "off"

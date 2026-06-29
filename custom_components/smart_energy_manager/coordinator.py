@@ -10,6 +10,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CONF_HOT_WATER_TEMP_ENTITY, CONF_LEGIONELLA_SWITCH,
+    CONF_EXTRA_HOT_WATER_MAX_TEMP, CONF_LEGIONELLA_TARGET_TEMP,
+    DEFAULT_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_LEGIONELLA_TARGET_TEMP,
     DOMAIN, UPDATE_INTERVAL,
     CONF_BATTERY_SOC, CONF_BATTERY_INVERTER_CHARGE, CONF_BATTERY_INVERTER_DISCHARGE,
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
@@ -289,10 +292,14 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             )
             solar_surplus_w = max(0.0, solar_w - house_load_w)
 
-            # Legionella
+            # Legionella – läs switch och temp
             now = datetime.now().astimezone()
+            legionella_switch_on = self._get_state_bool(c.get(CONF_LEGIONELLA_SWITCH))
+            hot_water_temp = self._get_hot_water_temp()
             legionella_active, legionella_reason = self._legionella.should_run_now(
-                now, solar_surplus_w, buy_price
+                now, solar_surplus_w, buy_price,
+                switch_is_on=legionella_switch_on,
+                water_temp=hot_water_temp,
             )
 
             state = EnergyState(
@@ -327,6 +334,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 grid_current_l3=self._get_state_float(c.get(CONF_GRID_CURRENT_L3)),
 
                 house_load_w=house_load_w,
+                hot_water_temp_c=hot_water_temp,
+                extra_hot_water_max_temp=float(c.get(CONF_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_EXTRA_HOT_WATER_MAX_TEMP)),
 
                 spot_price_sek_kwh=spot_price,
                 buy_price_sek_kwh=buy_price,
@@ -429,16 +438,41 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     blocking=False,
                 )
 
-        # Extra varmvatten / legionella
+        # Extra varmvatten (elpatron) – styrs av styrlogik
         hot_water_entity = self._config.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)
         if hot_water_entity:
-            activate = decision.extra_hot_water or state.legionella_active
-            service = "turn_on" if activate else "turn_off"
+            service = "turn_on" if decision.extra_hot_water else "turn_off"
             await self.hass.services.async_call(
                 "switch", service,
                 {"entity_id": hot_water_entity},
                 blocking=False,
             )
+
+        # Legionella-switch – separat switch som pannan äger av-sidan
+        # Vi slår bara PÅ; pannan slår AV när programmet är klart.
+        legionella_switch = self._config.get(CONF_LEGIONELLA_SWITCH)
+        if legionella_switch and state.legionella_active:
+            # Kontrollera om switchen redan är på för att undvika onödiga anrop
+            current = self.hass.states.get(legionella_switch)
+            if current and current.state != "on":
+                await self.hass.services.async_call(
+                    "switch", "turn_on",
+                    {"entity_id": legionella_switch},
+                    blocking=False,
+                )
+
+    def _get_hot_water_temp(self) -> Optional[float]:
+        """Läs ackumulatortankens temperatur. Returnerar None om ingen sensor konfigurerad."""
+        entity_id = self._config.get(CONF_HOT_WATER_TEMP_ENTITY)
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unavailable", "unknown"):
+            return None
+        try:
+            return float(state.state)
+        except (ValueError, TypeError):
+            return None
 
     # ── Properties ────────────────────────────────────────────────────
 

@@ -57,7 +57,9 @@
           "heat_pump_switch_entity": "Heat pump switch",
           "heat_pump_extra_hot_water_entity": "Extra hot water (heating element)",
           "heat_pump_phase": "Compressor phase (1-phase)",
-          "heat_pump_patron_power_kw": "Heating element power (kW)"
+          "heat_pump_patron_power_kw": "Heating element power (kW)",
+          "hot_water_temp_entity": "Hot water tank temperature sensor (°C)",
+          "extra_hot_water_max_temp": "Max temp for extra hot water (°C)"
         }
       },
       "legionella": {
@@ -69,7 +71,9 @@
           "legionella_preferred_hour_start": "Preferred start hour (0-23)",
           "legionella_preferred_hour_end": "Preferred end hour (0-23)",
           "legionella_max_price_sek_kwh": "Max price for run (SEK/kWh)",
-          "legionella_duration_minutes": "Run duration (minutes)"
+          "legionella_duration_minutes": "Run duration (minutes)",
+          "legionella_switch_entity": "Legionella switch (boiler program)",
+          "legionella_target_temp": "Legionella confirmation temperature (°C)"
         }
       },
       "ev_menu": {
@@ -157,7 +161,9 @@
           "heat_pump_switch_entity": "Heat pump switch",
           "heat_pump_extra_hot_water_entity": "Extra hot water (heating element)",
           "heat_pump_phase": "Compressor phase (1-phase)",
-          "heat_pump_patron_power_kw": "Heating element power (kW)"
+          "heat_pump_patron_power_kw": "Heating element power (kW)",
+          "hot_water_temp_entity": "Hot water tank temperature sensor (°C)",
+          "extra_hot_water_max_temp": "Max temp for extra hot water (°C)"
         }
       },
       "legionella_opts": {
@@ -169,7 +175,9 @@
           "legionella_preferred_hour_start": "Preferred start hour (0-23)",
           "legionella_preferred_hour_end": "Preferred end hour (0-23)",
           "legionella_max_price_sek_kwh": "Max price for run (SEK/kWh)",
-          "legionella_duration_minutes": "Run duration (minutes)"
+          "legionella_duration_minutes": "Run duration (minutes)",
+          "legionella_switch_entity": "Legionella switch (boiler program)",
+          "legionella_target_temp": "Legionella confirmation temperature (°C)"
         }
       },
       "ev_menu_opts": {

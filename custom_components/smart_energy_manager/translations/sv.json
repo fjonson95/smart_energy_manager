@@ -57,7 +57,9 @@
           "heat_pump_switch_entity": "Värmepump strömbrytare",
           "heat_pump_extra_hot_water_entity": "Extra varmvatten (elpatron)",
           "heat_pump_phase": "Kompressorns fas (1-fas)",
-          "heat_pump_patron_power_kw": "Elpatronens effekt (kW)"
+          "heat_pump_patron_power_kw": "Elpatronens effekt (kW)",
+          "hot_water_temp_entity": "Ackumulatortank temperatur (°C)",
+          "extra_hot_water_max_temp": "Max temp för extra varmvatten (°C)"
         }
       },
       "legionella": {
@@ -69,7 +71,9 @@
           "legionella_preferred_hour_start": "Önskat starttimme (0-23)",
           "legionella_preferred_hour_end": "Önskat sluttimme (0-23)",
           "legionella_max_price_sek_kwh": "Max pris för körning (SEK/kWh)",
-          "legionella_duration_minutes": "Körtid (minuter)"
+          "legionella_duration_minutes": "Körtid (minuter)",
+          "legionella_switch_entity": "Legionella-switch (pannans program)",
+          "legionella_target_temp": "Bekräftelsetemp för legionella (°C)"
         }
       },
       "ev_menu": {
@@ -157,7 +161,9 @@
           "heat_pump_switch_entity": "Värmepump strömbrytare",
           "heat_pump_extra_hot_water_entity": "Extra varmvatten (elpatron)",
           "heat_pump_phase": "Kompressorns fas (1-fas)",
-          "heat_pump_patron_power_kw": "Elpatronens effekt (kW)"
+          "heat_pump_patron_power_kw": "Elpatronens effekt (kW)",
+          "hot_water_temp_entity": "Ackumulatortank temperatur (°C)",
+          "extra_hot_water_max_temp": "Max temp för extra varmvatten (°C)"
         }
       },
       "legionella_opts": {
@@ -169,7 +175,9 @@
           "legionella_preferred_hour_start": "Önskat starttimme (0-23)",
           "legionella_preferred_hour_end": "Önskat sluttimme (0-23)",
           "legionella_max_price_sek_kwh": "Max pris för körning (SEK/kWh)",
-          "legionella_duration_minutes": "Körtid (minuter)"
+          "legionella_duration_minutes": "Körtid (minuter)",
+          "legionella_switch_entity": "Legionella-switch (pannans program)",
+          "legionella_target_temp": "Bekräftelsetemp för legionella (°C)"
         }
       },
       "ev_menu_opts": {
