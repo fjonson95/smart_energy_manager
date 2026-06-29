@@ -60,6 +60,18 @@
           "heat_pump_patron_power_kw": "Elpatronens effekt (kW)"
         }
       },
+      "legionella": {
+        "title": "Legionella-desinficering",
+        "description": "Kör elpatronen 1 gång/vecka för att värma varmvattnet till ≥60°C. Prioriterar solöverskott, annars lågt elpris.",
+        "data": {
+          "legionella_enabled": "Aktivera legionella-desinficering",
+          "legionella_interval_days": "Intervall (dagar)",
+          "legionella_preferred_hour_start": "Önskat starttimme (0-23)",
+          "legionella_preferred_hour_end": "Önskat sluttimme (0-23)",
+          "legionella_max_price_sek_kwh": "Max pris för körning (SEK/kWh)",
+          "legionella_duration_minutes": "Körtid (minuter)"
+        }
+      },
       "ev_menu": {
         "title": "Elbilar ({count} tillagda)",
         "description": "Lägg till en elbil eller gå vidare",
@@ -80,18 +92,6 @@
           "phases": "Antal faser",
           "phase": "Fas (vid 1-fas)"
         }
-      },
-      "legionella": {
-        "title": "Legionella-desinficering",
-        "description": "Kör elpatronen 1 gång/vecka för att värma varmvattnet till ≥60°C. Prioriterar solöverskott, annars lågt elpris.",
-        "data": {
-          "legionella_enabled": "Aktivera legionella-desinficering",
-          "legionella_interval_days": "Intervall (dagar)",
-          "legionella_preferred_hour_start": "Önskat starttimme (0-23)",
-          "legionella_preferred_hour_end": "Önskat sluttimme (0-23)",
-          "legionella_max_price_sek_kwh": "Max pris för körning (SEK/kWh)",
-          "legionella_duration_minutes": "Körtid (minuter)"
-        }
       }
     },
     "error": {
@@ -103,39 +103,91 @@
     "step": {
       "init": {
         "title": "Nät & Prissättning",
+        "description": "Redigera nätmätare och prisinformation",
         "data": {
-          "nordpool_entity": "Nordpool sensor",
+          "nordpool_entity": "Nordpool sensor (spotpris)",
+          "grid_power_l1_entity": "Näteffekt L1",
+          "grid_power_l2_entity": "Näteffekt L2",
+          "grid_power_l3_entity": "Näteffekt L3",
+          "grid_current_l1_entity": "Nätström L1",
+          "grid_current_l2_entity": "Nätström L2",
+          "grid_current_l3_entity": "Nätström L3",
+          "max_current_per_phase": "Max ström per fas (A)",
+          "grid_voltage": "Nätspänning (V)",
           "grid_fees_sek_kwh": "Nätavgift (SEK/kWh)",
           "energy_tax_sek_kwh": "Energiskatt (SEK/kWh)",
-          "vat_rate": "Moms",
-          "sell_extra_revenue": "Försäljningsersättning (SEK/kWh)",
-          "max_current_per_phase": "Max ström per fas (A)",
-          "grid_voltage": "Nätspänning (V)"
+          "vat_rate": "Moms (0.25 = 25%)",
+          "sell_extra_revenue": "Ersättning vid försäljning (SEK/kWh)",
+          "house_load_entity": "Huslaststyrare (Elm4 – direkt mätare)",
+          "grid_power_unit": "Nätmätare enhet (W eller kW)",
+          "ev_power_unit": "EV-laddare effektenhet (W eller kW)"
+        }
+      },
+      "solar_opts": {
+        "title": "Solceller",
+        "description": "Redigera solpanelernas mätare",
+        "data": {
+          "solar_power_total_entity": "Total soleffekt",
+          "solar_power_l1_entity": "Soleffekt L1",
+          "solar_power_l2_entity": "Soleffekt L2",
+          "solar_power_l3_entity": "Soleffekt L3",
+          "solcast_today_entity": "Solcast prognos idag (kWh)",
+          "solcast_tomorrow_entity": "Solcast prognos imorgon (kWh)"
         }
       },
       "battery_opts": {
-        "title": "Batterigränser",
+        "title": "Batteri",
+        "description": "Redigera batterimätare och gränsvärden",
         "data": {
+          "battery_soc_entity": "Batteri SOC (%)",
+          "battery_inverter_power_entity": "Batteri effekt (W)",
+          "battery_inverter_charge_entity": "Laddningssetpunkt",
+          "battery_inverter_discharge_entity": "Urladdningssetpunkt",
+          "battery_capacity_kwh": "Batterikapacitet (kWh)",
+          "battery_max_power_kw": "Max effekt (kW)",
           "battery_min_soc": "Min SOC (%)",
-          "battery_max_soc": "Max SOC (%)",
-          "battery_capacity_kwh": "Kapacitet (kWh)",
-          "battery_max_power_kw": "Max effekt (kW)"
+          "battery_max_soc": "Max SOC (%)"
+        }
+      },
+      "heat_pump_opts": {
+        "title": "Elpanna / Värmepump",
+        "description": "Värmepump: 1-fas kompressor. Elpatron: 2-fas (beräknas automatiskt).",
+        "data": {
+          "heat_pump_power_entity": "Värmepump effektsensor",
+          "heat_pump_switch_entity": "Värmepump strömbrytare",
+          "heat_pump_extra_hot_water_entity": "Extra varmvatten (elpatron)",
+          "heat_pump_phase": "Kompressorns fas (1-fas)",
+          "heat_pump_patron_power_kw": "Elpatronens effekt (kW)"
+        }
+      },
+      "legionella_opts": {
+        "title": "Legionella-desinficering",
+        "description": "Kör elpatronen 1 gång/vecka för att värma varmvattnet till ≥60°C.",
+        "data": {
+          "legionella_enabled": "Aktivera legionella-desinficering",
+          "legionella_interval_days": "Intervall (dagar)",
+          "legionella_preferred_hour_start": "Önskat starttimme (0-23)",
+          "legionella_preferred_hour_end": "Önskat sluttimme (0-23)",
+          "legionella_max_price_sek_kwh": "Max pris för körning (SEK/kWh)",
+          "legionella_duration_minutes": "Körtid (minuter)"
         }
       },
       "ev_menu_opts": {
         "title": "Elbilar ({count} konfigurerade)",
+        "description": "Redigera, ta bort eller lägg till elbilar",
         "data": {
-          "add_car": "Lägg till elbil"
+          "action": "Välj åtgärd"
         }
       },
       "ev_car_opts": {
-        "title": "Lägg till elbil",
+        "title": "Elbil – {title}",
+        "description": "Konfigurera laddare och fas för denna bil",
         "data": {
-          "car_name": "Namn",
+          "car_name": "Namn på bilen",
           "charger_switch": "Laddare strömbrytare",
           "charger_current": "Laddström setpunkt",
-          "charger_power": "Laddeffekt sensor",
-          "ev_soc": "Bilens SOC sensor",
+          "charger_power": "Laddeffekt sensor (valfritt)",
+          "ev_soc": "Bilens batteri SOC (valfritt)",
           "ev_soc_target": "Mål-SOC (%)",
           "phases": "Antal faser",
           "phase": "Fas (vid 1-fas)"
@@ -143,6 +195,7 @@
       }
     },
     "error": {
+      "required": "Detta fält är obligatoriskt",
       "required_fields": "Namn, strömbrytare och strömsetpunkt krävs"
     }
   }
