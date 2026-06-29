@@ -173,6 +173,7 @@ class EnergyState:
     # Varmvattentemperatur (ackumulatortank)
     hot_water_temp_c: Optional[float] = None      # None om sensor ej konfigurerad
     extra_hot_water_max_temp: float = 70.0        # stoppa extra varmvatten över detta (°C)
+    extra_hot_water_min_temp: float = 65.0        # starta inte extra varmvatten förrän temp är under detta (°C)
 
     # Legionella
     legionella_active: bool = False
@@ -685,10 +686,20 @@ class EnergyController:
 
 
     def _can_start_extra_hot_water(self, state) -> bool:
-        """Returnera True om extra varmvatten är tillåtet baserat på temperatur."""
+        """Returnera True om extra varmvatten är tillåtet baserat på temperatur.
+
+        Två gränser:
+          min_temp: starta inte om tanken redan är varm (> min_temp)
+          max_temp: stäng av om tanken är för het (> max_temp)
+        """
         if state.hot_water_temp_c is None:
             return True  # Ingen sensor konfigurerad – tillåt alltid
-        return state.hot_water_temp_c < state.extra_hot_water_max_temp
+        temp = state.hot_water_temp_c
+        if temp >= state.extra_hot_water_max_temp:
+            return False   # För varmt – stäng av
+        if temp >= state.extra_hot_water_min_temp:
+            return False   # Redan tillräckligt varmt – vänta
+        return True
 
     def _surplus_to_current(self, surplus_w: float, phases: int) -> float:
         """Beräkna laddström från solöverskott baserat på antal faser."""

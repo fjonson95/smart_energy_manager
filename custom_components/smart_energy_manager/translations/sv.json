@@ -60,7 +60,8 @@
           "heat_pump_phase": "Kompressorns fas (1-fas)",
           "heat_pump_patron_power_kw": "Elpatronens effekt (kW)",
           "hot_water_temp_entity": "Ackumulatortank temperatur (°C)",
-          "extra_hot_water_max_temp": "Max temp för extra varmvatten (°C)"
+          "extra_hot_water_max_temp": "Max temp för extra varmvatten (°C)",
+          "extra_hot_water_min_temp": "Min temp för extra varmvatten (°C)"
         }
       },
       "legionella": {
@@ -166,7 +167,8 @@
           "heat_pump_phase": "Kompressorns fas (1-fas)",
           "heat_pump_patron_power_kw": "Elpatronens effekt (kW)",
           "hot_water_temp_entity": "Ackumulatortank temperatur (°C)",
-          "extra_hot_water_max_temp": "Max temp för extra varmvatten (°C)"
+          "extra_hot_water_max_temp": "Max temp för extra varmvatten (°C)",
+          "extra_hot_water_min_temp": "Min temp för extra varmvatten (°C)"
         }
       },
       "legionella_opts": {

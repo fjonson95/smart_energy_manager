@@ -11,8 +11,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     CONF_HOT_WATER_TEMP_ENTITY, CONF_LEGIONELLA_SWITCH,
-    CONF_EXTRA_HOT_WATER_MAX_TEMP, CONF_LEGIONELLA_TARGET_TEMP,
-    DEFAULT_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_LEGIONELLA_TARGET_TEMP,
+    CONF_EXTRA_HOT_WATER_MAX_TEMP, CONF_EXTRA_HOT_WATER_MIN_TEMP, CONF_LEGIONELLA_TARGET_TEMP,
+    DEFAULT_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_EXTRA_HOT_WATER_MIN_TEMP, DEFAULT_LEGIONELLA_TARGET_TEMP,
     DOMAIN, UPDATE_INTERVAL,
     CONF_BATTERY_SOC, CONF_BATTERY_INVERTER_CHARGE, CONF_BATTERY_INVERTER_DISCHARGE,
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
@@ -365,6 +365,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 house_load_w=house_load_w,
                 hot_water_temp_c=hot_water_temp,
                 extra_hot_water_max_temp=float(c.get(CONF_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_EXTRA_HOT_WATER_MAX_TEMP)),
+                extra_hot_water_min_temp=float(c.get(CONF_EXTRA_HOT_WATER_MIN_TEMP, DEFAULT_EXTRA_HOT_WATER_MIN_TEMP)),
 
                 spot_price_sek_kwh=spot_price,
                 buy_price_sek_kwh=buy_price,
