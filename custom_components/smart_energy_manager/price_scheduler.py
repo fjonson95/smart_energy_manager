@@ -105,19 +105,45 @@ class PriceScheduler:
         """
         Parsa raw_today och raw_tomorrow från Nordpool-attributen.
         Returnerar sorterad lista av PriceSlot framåt i tid.
+
+        Hanterar:
+          - MappingProxyType (HA cachar attribut som immutable mappings)
+          - Både öre/kWh och SEK/kWh beroende på Nordpool-version
+          - Tidszoner (slots från Nordpool har UTC-offset, t.ex. +02:00)
         """
         slots: list[PriceSlot] = []
+        now_aware = now if now.tzinfo else now.astimezone()
 
+        # Detektera enhet – om price_in_cents=True är värdet i öre
+        price_in_cents = attributes.get("price_in_cents", True)
+        scale = OERE_TO_SEK if price_in_cents else 1.0
+
+        parsed_count = 0
         for key in ("raw_today", "raw_tomorrow"):
             raw = attributes.get(key, [])
             if not raw:
+                _LOGGER.debug("PriceScheduler: attribut '%s' saknas eller tomt", key)
                 continue
             for entry in raw:
                 try:
-                    start = datetime.fromisoformat(entry["start"])
-                    end   = datetime.fromisoformat(entry["end"])
-                    # Nordpool rapporterar i öre/kWh
-                    spot_sek = float(entry["value"]) * OERE_TO_SEK
+                    # Stöd både dict och MappingProxyType
+                    start_str = entry.get("start") if hasattr(entry, "get") else entry["start"]
+                    end_str   = entry.get("end")   if hasattr(entry, "get") else entry["end"]
+                    value     = entry.get("value") if hasattr(entry, "get") else entry["value"]
+
+                    if start_str is None or end_str is None or value is None:
+                        continue
+
+                    start = datetime.fromisoformat(str(start_str))
+                    end   = datetime.fromisoformat(str(end_str))
+
+                    # Säkerställ att start/end är timezone-aware
+                    if start.tzinfo is None:
+                        start = start.astimezone()
+                    if end.tzinfo is None:
+                        end = end.astimezone()
+
+                    spot_sek = float(value) * scale
                     slot = PriceSlot(
                         start=start,
                         end=end,
@@ -126,13 +152,28 @@ class PriceScheduler:
                         sell_sek=self._sell_price(spot_sek),
                     )
                     slots.append(slot)
-                except (KeyError, ValueError, TypeError) as e:
-                    _LOGGER.debug("Kunde inte parsa Nordpool-slot: %s – %s", entry, e)
+                    parsed_count += 1
+                except (KeyError, ValueError, TypeError, AttributeError) as e:
+                    _LOGGER.debug("Kunde inte parsa Nordpool-slot %s: %s", entry, e)
 
-        # Sortera och filtrera framåt i tid (inkludera pågående slot)
+        _LOGGER.debug("PriceScheduler: parsade %d slots totalt", parsed_count)
+
+        if not slots:
+            _LOGGER.warning(
+                "PriceScheduler: inga slots parsades – kontrollera att Nordpool-sensorn "
+                "har attributen raw_today/raw_tomorrow. Tillgängliga attribut: %s",
+                list(attributes.keys()),
+            )
+            return []
+
+        # Sortera och filtrera: behåll pågående och framtida slots
         slots.sort(key=lambda s: s.start)
-        now_aware = now if now.tzinfo else now.astimezone()
-        return [s for s in slots if s.end > now_aware]
+        future = [s for s in slots if s.end > now_aware]
+        _LOGGER.debug(
+            "PriceScheduler: %d slots framåt (av %d totalt), nu=%s",
+            len(future), len(slots), now_aware.isoformat()
+        )
+        return future
 
     def compute(self, attributes: dict, now: datetime) -> PriceSchedule:
         """

@@ -445,19 +445,24 @@ class SmartEnergyBestDischargePriceSensor(_BaseEnergySensor):
 
     @property
     def native_value(self):
-        d = self.coordinator.data
-        val = d.get("best_discharge_price") if d else None
-        return round(val, 4) if val is not None else None
+        ps = self._get_schedule()
+        if ps is None or ps.best_discharge_slot is None:
+            return None
+        return round(ps.best_discharge_slot.buy_sek, 4)
 
     @property
     def extra_state_attributes(self):
-        d = self.coordinator.data
-        ps = d.get("price_schedule") if d else None
+        ps = self._get_schedule()
         if not ps or not ps.best_discharge_slot:
             return {}
         return {
             "best_discharge_time": ps.best_discharge_slot.start.isoformat(),
+            "best_discharge_spot_sek": round(ps.best_discharge_slot.spot_sek, 4),
         }
+
+    def _get_schedule(self):
+        d = self.coordinator.data
+        return d.get("price_schedule") if d else None
 
 
 class SmartEnergyBestChargePriceSensor(_BaseEnergySensor):
@@ -471,19 +476,24 @@ class SmartEnergyBestChargePriceSensor(_BaseEnergySensor):
 
     @property
     def native_value(self):
-        d = self.coordinator.data
-        val = d.get("best_charge_price") if d else None
-        return round(val, 4) if val is not None else None
+        ps = self._get_schedule()
+        if ps is None or ps.best_charge_slot is None:
+            return None
+        return round(ps.best_charge_slot.buy_sek, 4)
 
     @property
     def extra_state_attributes(self):
-        d = self.coordinator.data
-        ps = d.get("price_schedule") if d else None
+        ps = self._get_schedule()
         if not ps or not ps.best_charge_slot:
             return {}
         return {
             "best_charge_time": ps.best_charge_slot.start.isoformat(),
+            "best_charge_spot_sek": round(ps.best_charge_slot.spot_sek, 4),
         }
+
+    def _get_schedule(self):
+        d = self.coordinator.data
+        return d.get("price_schedule") if d else None
 
 
 class SmartEnergyYesterdayConsumptionSensor(_BaseEnergySensor):
