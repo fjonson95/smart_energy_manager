@@ -182,6 +182,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         return self._get_state_float(entity_id) * self._ev_scale
 
     def _get_nordpool_price(self) -> float:
+        """Läs Nordpool spotpris och returnera i SEK/kWh.
+
+        Nordpool HACS-integrationen rapporterar state i öre/kWh när
+        attributet price_in_cents=True (standard). Vi konverterar till SEK/kWh.
+        """
         entity_id = self._config.get(CONF_NORDPOOL_ENTITY)
         if not entity_id:
             return 0.0
@@ -189,7 +194,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         if state is None or state.state in ("unavailable", "unknown"):
             return 0.0
         try:
-            return float(state.state)
+            raw = float(state.state)
+            # Konvertera öre → SEK om sensorn rapporterar i öre (price_in_cents=True)
+            price_in_cents = state.attributes.get("price_in_cents", True)
+            return raw / 100.0 if price_in_cents else raw
         except (ValueError, TypeError):
             return 0.0
 

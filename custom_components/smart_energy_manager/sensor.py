@@ -87,7 +87,6 @@ class SmartEnergyBuyPriceSensor(_BaseEnergySensor):
     _attr_name = "Buy Price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:currency-usd"
 
     @property
@@ -100,7 +99,6 @@ class SmartEnergySellPriceSensor(_BaseEnergySensor):
     _attr_name = "Sell Price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:currency-usd"
 
     @property
@@ -113,7 +111,6 @@ class SmartEnergySpotPriceSensor(_BaseEnergySensor):
     _attr_name = "Spot Price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:flash"
 
     @property
@@ -440,7 +437,6 @@ class SmartEnergyBestDischargePriceSensor(_BaseEnergySensor):
     _attr_name = "Best Discharge Price Next 12h"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:battery-arrow-down"
 
     @property
@@ -471,7 +467,6 @@ class SmartEnergyBestChargePriceSensor(_BaseEnergySensor):
     _attr_name = "Best Charge Price Next 12h"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:battery-arrow-up"
 
     @property
@@ -502,7 +497,7 @@ class SmartEnergyYesterdayConsumptionSensor(_BaseEnergySensor):
     _attr_name = "Yesterday Consumption (excl. EV)"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:home-lightning-bolt-outline"
 
     @property

@@ -127,17 +127,25 @@ class PriceScheduler:
             for entry in raw:
                 try:
                     # Stöd både dict och MappingProxyType
-                    start_str = entry.get("start") if hasattr(entry, "get") else entry["start"]
-                    end_str   = entry.get("end")   if hasattr(entry, "get") else entry["end"]
+                    start_raw = entry.get("start") if hasattr(entry, "get") else entry["start"]
+                    end_raw   = entry.get("end")   if hasattr(entry, "get") else entry["end"]
                     value     = entry.get("value") if hasattr(entry, "get") else entry["value"]
 
-                    if start_str is None or end_str is None or value is None:
+                    if start_raw is None or end_raw is None or value is None:
                         continue
 
-                    start = datetime.fromisoformat(str(start_str))
-                    end   = datetime.fromisoformat(str(end_str))
+                    # Nordpool kan returnera antingen datetime-objekt eller ISO-strängar
+                    if isinstance(start_raw, datetime):
+                        start = start_raw
+                    else:
+                        start = datetime.fromisoformat(str(start_raw))
 
-                    # Säkerställ att start/end är timezone-aware
+                    if isinstance(end_raw, datetime):
+                        end = end_raw
+                    else:
+                        end = datetime.fromisoformat(str(end_raw))
+
+                    # Säkerställ timezone-aware
                     if start.tzinfo is None:
                         start = start.astimezone()
                     if end.tzinfo is None:
