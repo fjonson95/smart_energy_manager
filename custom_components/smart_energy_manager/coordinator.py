@@ -69,6 +69,7 @@ def _migrate_ev_cars_to_chargers(ev_cars: list[dict]) -> list[dict]:
                 "name": car.get("name", "Bil"),
                 "ev_soc": car.get("ev_soc"),
                 "ev_soc_target": car.get("ev_soc_target", 80.0),
+                "car_phases": car.get("phases", 1),  # migration: gammal bil-fas → car_phases
                 "phase": car.get("phase"),
             }],
             # Vid migration: sätt bilen som automatiskt vald (bara 1 bil per laddare)
@@ -194,6 +195,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     name=car.get("name", "Bil"),
                     ev_soc=car.get("ev_soc") or None,
                     ev_soc_target=float(car.get("ev_soc_target", 80.0)),
+                    car_phases=int(car.get("car_phases", 1)),
                     phase=car.get("phase") or None,
                 )
                 for car in ch_data.get("cars", [])

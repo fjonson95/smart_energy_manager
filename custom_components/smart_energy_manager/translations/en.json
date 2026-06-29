@@ -94,7 +94,8 @@
           "ev_soc": "Car battery SOC (optional)",
           "ev_soc_target": "Target SOC (%)",
           "phases": "Number of phases",
-          "phase": "Phase (for 1-phase)"
+          "phase": "Start phase (L1/L2/L3)",
+          "car_phases": "Car onboard charger (number of phases)"
         }
       }
     },
@@ -198,7 +199,8 @@
           "ev_soc": "Car battery SOC (optional)",
           "ev_soc_target": "Target SOC (%)",
           "phases": "Number of phases",
-          "phase": "Phase (for 1-phase)"
+          "phase": "Start phase (L1/L2/L3)",
+          "car_phases": "Car onboard charger (number of phases)"
         }
       }
     },

@@ -177,13 +177,30 @@ def _charger_schema(d: dict) -> vol.Schema:
 
 
 def _car_schema(d: dict) -> vol.Schema:
-    """Schema för en bil (kopplad till en laddare)."""
+    """Schema för en bil (kopplad till en laddare).
+
+    car_phases: bilens inbyggda laddare (1-fas, 2-fas eller 3-fas)
+    phase:      vilken fas bilen laddar på – relevant vid 1-fas och 2-fas bilar
+    """
     return vol.Schema({
         vol.Required("car_name", default=_d(d, "name", "")): str,
         vol.Optional("ev_soc", default=_d(d, "ev_soc", "")): _opt_entity_selector(),
         vol.Optional("ev_soc_target", default=_d(d, "ev_soc_target", 80.0)): vol.Coerce(float),
+        vol.Required("car_phases", default=str(_d(d, "car_phases", 1))): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"label": "1-fas (t.ex. KIA Ceed, Renault Zoe)", "value": "1"},
+                    {"label": "2-fas", "value": "2"},
+                    {"label": "3-fas (t.ex. Tesla, Hyundai Ioniq)", "value": "3"},
+                ],
+                mode=selector.SelectSelectorMode.LIST,
+            )
+        ),
         vol.Optional("phase", default=_d(d, "phase", "L1") or "L1"): selector.SelectSelector(
-            selector.SelectSelectorConfig(options=EV_PHASES_OPTIONS, mode=selector.SelectSelectorMode.LIST)
+            selector.SelectSelectorConfig(
+                options=EV_PHASES_OPTIONS,
+                mode=selector.SelectSelectorMode.LIST,
+            )
         ),
     })
 
@@ -203,11 +220,14 @@ def _charger_dict_from_input(ui: dict, cars: list[dict]) -> dict:
 
 
 def _car_dict_from_input(ui: dict) -> dict:
+    car_phases = int(ui.get("car_phases", 1))
     return {
         "name": ui["car_name"],
         "ev_soc": ui.get("ev_soc") or None,
         "ev_soc_target": float(ui.get("ev_soc_target", 80.0)),
-        "phase": ui.get("phase") or None,
+        "car_phases": car_phases,
+        # Fas är relevant för 1-fas och 2-fas bilar; 3-fas bilar använder alla faser
+        "phase": ui.get("phase") or "L1" if car_phases < 3 else None,
     }
 
 

@@ -42,7 +42,9 @@ class CarConfig:
     name: str
     ev_soc: Optional[str] = None
     ev_soc_target: float = 80.0
-    # Fas som bilen laddar på (relevant vid 1-fas laddare)
+    # Bilens inbyggda laddare: 1, 2 eller 3 faser
+    car_phases: int = 1
+    # Startfas – vid 1-fas: den enda fasen; vid 2-fas: första fasen (nästa fas = fas+1)
     phase: Optional[str] = EV_PHASE_L1
 
 
@@ -90,14 +92,38 @@ class ChargerState:
         return car.ev_soc_target if car else 80.0
 
     @property
+    def effective_phases(self) -> list[str]:
+        """
+        Returnera lista av faser som bilen faktiskt laddar på.
+        Bestäms av bilens inbyggda laddare (car_phases), inte laddarhårdvaran.
+          1-fas bil: [car.phase]
+          2-fas bil: [car.phase, nästa fas]   t.ex. L1 → [L1, L2]
+          3-fas bil: [L1, L2, L3]
+        """
+        car = self.active_car
+        car_phases = car.car_phases if car else 1
+        start_phase = (car.phase if car and car.phase else self.config.phase) or "L1"
+
+        if car_phases >= 3:
+            return ["L1", "L2", "L3"]
+        elif car_phases == 2:
+            phase_order = ["L1", "L2", "L3"]
+            idx = phase_order.index(start_phase) if start_phase in phase_order else 0
+            return [phase_order[idx], phase_order[(idx + 1) % 3]]
+        else:
+            return [start_phase]
+
+    @property
     def effective_phase(self) -> Optional[str]:
-        """Fas som används: bilens fas (om 1-fas laddare) annars laddarhårdvarans fas."""
-        if self.config.phases == 1:
-            car = self.active_car
-            if car and car.phase:
-                return car.phase
-            return self.config.phase
-        return None  # 3-fas: alla faser
+        """Bakåtkompatibilitet – returnerar första fasen eller None vid 3-fas."""
+        phases = self.effective_phases
+        return phases[0] if len(phases) == 1 else None
+
+    @property
+    def car_phases(self) -> int:
+        """Antal faser bilens inbyggda laddare använder."""
+        car = self.active_car
+        return car.car_phases if car else 1
 
 
 @dataclass
@@ -314,14 +340,14 @@ class EnergyController:
             for i, ch in enumerate(state.chargers):
                 if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
                     continue
-                min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.config.phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
+                min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.car_phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
                 if remaining >= min_surplus:
-                    cur = self._surplus_to_current(remaining, ch.config.phases)
+                    cur = self._surplus_to_current(remaining, ch.car_phases)
                     decision.charger_decisions[i] = ChargerDecision(
                         enable=True, current_a=cur,
                         reason="negative price – solar absorption",
                     )
-                    remaining -= self._charger_power(cur, ch.config.phases)
+                    remaining -= self._charger_power(cur, ch.car_phases)
 
             self._check_car_selection(state, decision)
             return self._apply_phase_limits(state, decision)
@@ -339,11 +365,11 @@ class EnergyController:
                 decision.charger_decisions[i].reason = f"SOC mål nått ({ch.soc_pct:.0f}%)"
                 continue
 
-            min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.config.phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
+            min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.car_phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
             if remaining_surplus >= min_surplus:
-                cur = self._surplus_to_current(remaining_surplus, ch.config.phases)
+                cur = self._surplus_to_current(remaining_surplus, ch.car_phases)
                 if cur >= MIN_EV_CURRENT:
-                    consumed = self._charger_power(cur, ch.config.phases)
+                    consumed = self._charger_power(cur, ch.car_phases)
                     decision.charger_decisions[i] = ChargerDecision(
                         enable=True, current_a=cur,
                         reason=f"solladdar {cur:.0f}A",
@@ -416,14 +442,14 @@ class EnergyController:
         for i, ch in enumerate(state.chargers):
             if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
                 continue
-            min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.config.phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
+            min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.car_phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
             if remaining_surplus >= min_surplus:
-                cur = self._surplus_to_current(remaining_surplus, ch.config.phases)
+                cur = self._surplus_to_current(remaining_surplus, ch.car_phases)
                 if cur >= MIN_EV_CURRENT:
                     decision.charger_decisions[i] = ChargerDecision(
                         enable=True, current_a=cur, reason="solladdar (vinter)",
                     )
-                    remaining_surplus -= self._charger_power(cur, ch.config.phases)
+                    remaining_surplus -= self._charger_power(cur, ch.car_phases)
 
         self._check_car_selection(state, decision)
         return self._apply_phase_limits(state, decision)
@@ -474,17 +500,16 @@ class EnergyController:
             loads[ph] += -solar_per_phase + batt_charge_per_phase - batt_discharge_per_phase
 
         # EV-lasterna per laddare
+        # Fasbelastningen bestäms av BILENS inbyggda laddare (car_phases),
+        # inte laddarhårdvarans fasantal.
         ev_phase_loads: list[dict[str, float]] = []
         for i, (ch, dec) in enumerate(zip(state.chargers, decision.charger_decisions)):
             ph_load: dict[str, float] = {p: 0.0 for p in PHASES}
             if dec.enable and dec.current_a > 0:
-                if ch.config.phases == 3:
-                    per_phase_w = dec.current_a * self.voltage
-                    for ph in PHASES:
-                        ph_load[ph] = per_phase_w
-                else:
-                    phase = ch.effective_phase or "L1"
-                    ph_load[phase] = dec.current_a * self.voltage
+                active_phases = ch.effective_phases  # [L1], [L1,L2] eller [L1,L2,L3]
+                per_phase_w = dec.current_a * self.voltage
+                for ph in active_phases:
+                    ph_load[ph] = per_phase_w
             ev_phase_loads.append(ph_load)
             for ph in PHASES:
                 loads[ph] += ph_load[ph]
@@ -526,39 +551,29 @@ class EnergyController:
                     if not dec.enable:
                         continue
 
-                    if ch.config.phases == 3:
-                        max_reduce_a = dec.current_a - MIN_EV_CURRENT
-                        if max_reduce_a <= 0:
-                            dec.enable = False
-                            dec.current_a = 0
-                            for p in PHASES:
-                                loads[p] -= ev_phase_loads[i][p]
-                                ev_phase_loads[i][p] = 0
-                        else:
-                            reduce_a = min(max_reduce_a, over_w / self.voltage)
-                            dec.current_a -= reduce_a
-                            for p in PHASES:
-                                delta = reduce_a * self.voltage
-                                loads[p] -= delta
-                                ev_phase_loads[i][p] -= delta
-                        over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
+                    active_phases = ch.effective_phases  # [L1], [L1,L2] eller [L1,L2,L3]
+
+                    # Påverkar denna laddare den överbelastade fasen?
+                    if ph not in active_phases:
+                        continue
+
+                    max_reduce_a = dec.current_a - MIN_EV_CURRENT
+                    if max_reduce_a <= 0:
+                        # Stäng av laddaren helt
+                        dec.enable = False
+                        dec.current_a = 0
+                        for p in active_phases:
+                            loads[p] -= ev_phase_loads[i][p]
+                            ev_phase_loads[i][p] = 0
                     else:
-                        eff_phase = ch.effective_phase or "L1"
-                        if eff_phase != ph:
-                            continue
-                        max_reduce_a = dec.current_a - MIN_EV_CURRENT
-                        if max_reduce_a <= 0:
-                            dec.enable = False
-                            dec.current_a = 0
-                            loads[ph] -= ev_phase_loads[i][ph]
-                            ev_phase_loads[i][ph] = 0
-                        else:
-                            reduce_a = min(max_reduce_a, over_w / self.voltage)
-                            dec.current_a -= reduce_a
+                        # Minska strömmen – påverkar alla bilens aktiva faser lika
+                        reduce_a = min(max_reduce_a, over_w / self.voltage)
+                        dec.current_a -= reduce_a
+                        for p in active_phases:
                             delta = reduce_a * self.voltage
-                            loads[ph] -= delta
-                            ev_phase_loads[i][ph] -= delta
-                        over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
+                            loads[p] -= delta
+                            ev_phase_loads[i][p] -= delta
+                    over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
 
                 # Prio 2: batteriladdning
                 if over_w > 0 and decision.battery_charge_power_w > 0:
@@ -608,10 +623,12 @@ class EnergyController:
         return state.hot_water_temp_c < state.extra_hot_water_max_temp
 
     def _surplus_to_current(self, surplus_w: float, phases: int) -> float:
+        """Beräkna laddström från solöverskott baserat på antal faser."""
         current = surplus_w / (self.voltage * phases)
         return float(min(MAX_EV_CURRENT, max(MIN_EV_CURRENT, round(current))))
 
     def _charger_power(self, current_a: float, phases: int) -> float:
+        """Total effekt för en laddare vid given ström och fasantal."""
         return current_a * self.voltage * phases
 
     def calculate_buy_price(self, spot: float, grid_fees: float, energy_tax: float, vat: float) -> float:

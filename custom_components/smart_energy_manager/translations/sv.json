@@ -94,7 +94,8 @@
           "ev_soc": "Bilens batteri SOC (valfritt)",
           "ev_soc_target": "Mål-SOC (%)",
           "phases": "Antal faser",
-          "phase": "Fas (vid 1-fas)"
+          "phase": "Startfas (L1/L2/L3)",
+          "car_phases": "Bilens laddare (antal faser)"
         }
       }
     },
@@ -198,7 +199,8 @@
           "ev_soc": "Bilens batteri SOC (valfritt)",
           "ev_soc_target": "Mål-SOC (%)",
           "phases": "Antal faser",
-          "phase": "Fas (vid 1-fas)"
+          "phase": "Startfas (L1/L2/L3)",
+          "car_phases": "Bilens laddare (antal faser)"
         }
       }
     },
