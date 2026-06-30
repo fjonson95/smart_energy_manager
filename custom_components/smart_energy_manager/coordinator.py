@@ -12,7 +12,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_HOT_WATER_TEMP_ENTITY, CONF_LEGIONELLA_SWITCH,
     CONF_EXTRA_HOT_WATER_MAX_TEMP, CONF_EXTRA_HOT_WATER_MIN_TEMP, CONF_LEGIONELLA_TARGET_TEMP,
+    CONF_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
     DEFAULT_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_EXTRA_HOT_WATER_MIN_TEMP, DEFAULT_LEGIONELLA_TARGET_TEMP,
+    DEFAULT_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
     DOMAIN, UPDATE_INTERVAL,
     CONF_BATTERY_SOC, CONF_BATTERY_INVERTER_CHARGE, CONF_BATTERY_INVERTER_DISCHARGE,
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
@@ -109,6 +111,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # Styrs av select-entiteten i select.py
         self._active_cars: dict[str, str] = {}
         self._init_active_cars()
+
+        # Minimitid-spärr för extra varmvatten (förhindrar flimmer på/av)
+        self._extra_hot_water_started_at: Optional[datetime] = None
+        self._extra_hot_water_actual_state: bool = False
 
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
@@ -392,6 +398,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             if legionella_active:
                 decision.reason = legionella_reason + " | " + decision.reason
 
+            # Applicera minimitid-spärr på extra varmvatten innan exekvering
+            self._apply_extra_hot_water_min_runtime(decision, now)
+
             # Skicka HA-notifieringar för laddare utan bilval
             if decision.chargers_needing_selection:
                 await self._notify_car_selection_needed(decision.chargers_needing_selection)
@@ -505,6 +514,50 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     {"entity_id": legionella_switch},
                     blocking=False,
                 )
+
+    def _apply_extra_hot_water_min_runtime(self, decision, now: datetime) -> None:
+        """
+        Förhindra att extra varmvatten flimrar på/av.
+
+        Om styrlogiken nyss slog PÅ extra varmvatten och minimitiden inte
+        har passerat, tvingar vi decision.extra_hot_water = True även om
+        styrlogiken nu vill stänga av det. Minimitiden börjar räknas från
+        den faktiska start-tidpunkten, inte varje cykel.
+        """
+        min_runtime_min = float(self._config.get(
+            CONF_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
+            DEFAULT_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
+        ))
+
+        wants_on = decision.extra_hot_water
+
+        if wants_on and not self._extra_hot_water_actual_state:
+            # Övergång AV → PÅ: starta timern
+            self._extra_hot_water_started_at = now
+            self._extra_hot_water_actual_state = True
+            return
+
+        if not wants_on and self._extra_hot_water_actual_state:
+            # Styrlogiken vill stänga av – kolla om minimitiden har passerat
+            if self._extra_hot_water_started_at is not None:
+                elapsed_min = (now - self._extra_hot_water_started_at).total_seconds() / 60
+                if elapsed_min < min_runtime_min:
+                    # Tvinga kvar PÅ tills minimitiden är uppnådd
+                    decision.extra_hot_water = True
+                    decision.reason += (
+                        f" | Extra varmvatten låst PÅ ({elapsed_min:.1f}/{min_runtime_min:.0f} min)"
+                    )
+                    return
+            # Minimitiden har passerat – tillåt avstängning
+            self._extra_hot_water_actual_state = False
+            self._extra_hot_water_started_at = None
+            return
+
+        if wants_on and self._extra_hot_water_actual_state:
+            # Fortsätter vara på – inget att göra
+            return
+
+        # not wants_on and not self._extra_hot_water_actual_state – redan av, inget att göra
 
     def _get_hot_water_temp(self) -> Optional[float]:
         """Läs ackumulatortankens temperatur. Returnerar None om ingen sensor konfigurerad."""

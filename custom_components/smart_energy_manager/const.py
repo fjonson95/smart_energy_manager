@@ -177,3 +177,7 @@ CONF_PROACTIVE_ABSORPTION_SLOTS = "proactive_absorption_slots"
 
 DEFAULT_NEGATIVE_PRICE_THRESHOLD = 0.0   # SEK/kWh
 DEFAULT_PROACTIVE_ABSORPTION_SLOTS = 4   # Antal negativa kvartstimmar inom 2h för att reagera
+
+# ── Minimitid för extra varmvatten ──────────────────────────────────────────────
+CONF_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES = "extra_hot_water_min_runtime_minutes"
+DEFAULT_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES = 5

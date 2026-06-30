@@ -61,7 +61,8 @@
           "heat_pump_patron_power_kw": "Heating element power (kW)",
           "hot_water_temp_entity": "Hot water tank temperature sensor (°C)",
           "extra_hot_water_max_temp": "Max temp for extra hot water (°C)",
-          "extra_hot_water_min_temp": "Min temp to start extra hot water (°C)"
+          "extra_hot_water_min_temp": "Min temp to start extra hot water (°C)",
+          "extra_hot_water_min_runtime_minutes": "Min runtime for extra hot water (minutes)"
         }
       },
       "legionella": {
@@ -168,7 +169,8 @@
           "heat_pump_patron_power_kw": "Heating element power (kW)",
           "hot_water_temp_entity": "Hot water tank temperature sensor (°C)",
           "extra_hot_water_max_temp": "Max temp for extra hot water (°C)",
-          "extra_hot_water_min_temp": "Min temp to start extra hot water (°C)"
+          "extra_hot_water_min_temp": "Min temp to start extra hot water (°C)",
+          "extra_hot_water_min_runtime_minutes": "Min runtime for extra hot water (minutes)"
         }
       },
       "legionella_opts": {
