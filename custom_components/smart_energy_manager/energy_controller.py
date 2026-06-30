@@ -257,6 +257,7 @@ class EnergyController:
         winter_expensive_threshold: float = 1.50,
         winter_min_soc: float = 20.0,
         winter_max_soc: float = 95.0,
+        auto_discharge_threshold_sek: float = 0.20,
     ):
         self.max_current = max_current_per_phase
         self.voltage = grid_voltage
@@ -268,6 +269,7 @@ class EnergyController:
         self.winter_expensive_threshold = winter_expensive_threshold
         self.winter_min_soc = winter_min_soc
         self.winter_max_soc = winter_max_soc
+        self.auto_discharge_threshold = auto_discharge_threshold_sek
 
     # ── Publik ingångspunkt ───────────────────────────────────────────
 
@@ -437,10 +439,11 @@ class EnergyController:
             deficit_w = house_load_w - solar_w
             discharge_w = min(state.battery_max_power_kw * 1000, deficit_w)
             ps = state.price_schedule
+            now = datetime.now().astimezone()
             # Ladda ur om: priset är tillräckligt högt ELLER detta är bästa timmen kommande 12h
-            is_good_discharge = buy_price > 0.20
+            is_good_discharge = buy_price > self.auto_discharge_threshold
             if ps and ps.best_discharge_slot:
-                is_peak_now = abs((ps.best_discharge_slot.start - datetime.now().astimezone()).total_seconds()) < 900
+                is_peak_now = abs((ps.best_discharge_slot.start - now).total_seconds()) < 900
                 if is_peak_now:
                     is_good_discharge = True
                     decision.reason += " | Bästa urladdningstimmen"
@@ -474,15 +477,16 @@ class EnergyController:
 
         # Prisschema: är nu det bästa laddningstillfället kommande 12h?
         ps = state.price_schedule
+        now = datetime.now().astimezone()
         is_best_charge_now = (
             ps is not None
             and ps.best_charge_slot is not None
-            and abs((ps.best_charge_slot.start - datetime.now().astimezone()).total_seconds()) < 900
+            and abs((ps.best_charge_slot.start - now).total_seconds()) < 900
         )
         is_best_discharge_now = (
             ps is not None
             and ps.best_discharge_slot is not None
-            and abs((ps.best_discharge_slot.start - datetime.now().astimezone()).total_seconds()) < 900
+            and abs((ps.best_discharge_slot.start - now).total_seconds()) < 900
         )
 
         if (is_cheap or is_best_charge_now) and (is_night or buy_price < 0.30):
@@ -702,9 +706,15 @@ class EnergyController:
         return True
 
     def _surplus_to_current(self, surplus_w: float, phases: int) -> float:
-        """Beräkna laddström från solöverskott baserat på antal faser."""
-        current = surplus_w / (self.voltage * phases)
-        return float(min(MAX_EV_CURRENT, max(MIN_EV_CURRENT, round(current))))
+        """Beräkna laddström från solöverskott baserat på antal faser.
+
+        Returnerar 0 om överskottet inte räcker till minimiströmmen,
+        så att anroparens `cur >= MIN_EV_CURRENT`-kontroll är meningsfull.
+        """
+        current = round(surplus_w / (self.voltage * phases))
+        if current < MIN_EV_CURRENT:
+            return 0.0
+        return float(min(MAX_EV_CURRENT, current))
 
     def _charger_power(self, current_a: float, phases: int) -> float:
         """Total effekt för en laddare vid given ström och fasantal."""

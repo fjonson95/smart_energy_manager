@@ -7,22 +7,24 @@ En HACS-integration för Home Assistant som optimerar egenförbrukning av solene
 ```
 Elnät (3-fas, max 20A/fas)
     │
-    │   Batteri-inverter (3-fas)      Sol-inverter (3-fas)
-    │          │                             │
-    └──────────┴─────────────────────────────┴──── Elmätare 4 (huslast) ────┬──── Övriga laster
-                                                                             │
-                                                                        Elmätare 5
-                                                                             │
-                                                                          Elpanna
-                                                                        (1-fas kompressor
-                                                                       +2-fas elpatron
-                                                                       +ackumulatortank)
+    │    Batteri-inverter (3-fas)      Sol-inverter (3-fas)
+    │           │                             │
+    └─────┬─────┴─────────────────────────────┴──── Elmätare 4 (huslast) ────┬──── Övriga laster
+          │                                                                  │
+          │                                                              Elmätare 5
+          │                                                                   │
+          │                                                                Elpanna
+          │                                                              (1-fas kompressor
+          │                                                             +2-fas elpatron
+          └────┐                                                        +ackumulatortank)
                │
            EV-laddare
         (1- eller 3-fas hårdvara,
          flera bilar turas om,
          bilval via HA-entitet)
 ```
+
+> **OBS:** Laddarens fasantal (hårdvaran) och bilens fasantal (`car_phases`, 1/2/3-fas) är två separata inställningar. Fasbelastningen i fasskyddet styrs alltid av **bilens** inbyggda laddare, inte av laddarhårdvarans fasantal – se [EV-laddare och bilval](#ev-laddare-och-bilval).
 
 ### Elmätarroller
 
@@ -45,8 +47,14 @@ Elnät (3-fas, max 20A/fas)
 2. **Ladda bilar från sol** – när solöverskott ≥ 1 400 W (1-fas) eller 4 140 W (3-fas); ström justeras dynamiskt
 3. **Ladda batteri från solöverskott**
 4. **Extra varmvatten via elpatron** – när batteriet är fullt, sol finns kvar och tanktemperaturen är under konfigurerat max (standard 70°C)
-5. **Ladda ur batteriet** – när priserna är höga och ingen sol finns
+5. **Ladda ur batteriet** – när köppriset överstiger 0,20 SEK/kWh, *eller* när det är den bästa urladdningstimmen kommande 12h enligt prisplaneringen
 6. **Negativa elpriser** – absorbera all möjlig solel i batteri, bilar och varmvatten
+
+### Prisplanering (kvartstimmar framåt)
+Baserat på Nordpools `raw_today`/`raw_tomorrow`-attribut beräknas varje cykel:
+- **Bästa laddnings-/urladdningstimme** kommande 12h – styr batteribeslut i både auto- och vinterläge
+- **Proaktiv absorption** – om ≥ 4 kvartstimmar med negativt säljpris väntar inom 2h, hålls batteriet inte fulladdat (headroom upp till 30%) och extra varmvatten/EV-laddning startas proaktivt för att skapa utrymme innan de negativa priserna inträffar
+- Resultatet exponeras via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price` och `sensor.sem_best_charge_price`
 
 ### Vinterläge
 - Ladda batteri nattetid när priset underskrider konfigurerbar gräns
@@ -56,6 +64,9 @@ Elnät (3-fas, max 20A/fas)
 ### Forcelägen
 - **Force EV Charge** – ladda alla anslutna bilar från elnät (max ström, fasbegränsad)
 - **Force Battery Charge** – ladda batteri från elnät
+
+### Manuellt läge
+- **Manual** – stänger av all automatisk styrning. Inga beslut fattas; används när du vill styra batteri/laddare/varmvatten manuellt via egna automationer. Väljs via `select.sem_operating_mode` (finns ingen egen switch för detta läget).
 
 ### Fasskydd
 Beräknar fasbelastning per fas och reducerar i prioritetsordning:
@@ -74,9 +85,11 @@ Varje EV-laddare konfigureras som en **hårdvaruenhet** med en lista av bilar so
 ```
 Laddare A (3-fas hårdvara)
 ├── Anslutningssensor: sensor.charger_status
-├── Bil 1: Volvo XC40  (SOC-sensor, mål 80%, fas L1)
-└── Bil 2: Tesla Model 3 (SOC-sensor, mål 90%, fas L2)
+├── Bil 1: Volvo XC40    (SOC-sensor, mål 80%, 1-fas billaddare, fas L1)
+└── Bil 2: Tesla Model 3 (SOC-sensor, mål 90%, 3-fas billaddare)
 ```
+
+Fasbelastningen som fasskyddet räknar på bestäms alltid av **bilens** `car_phases` (1/2/3-fas), inte av laddarhårdvarans fasantal. En 1-fas bil belastar bara sin valda fas; en 2-fas bil belastar sin fas + nästa (t.ex. L1+L2); en 3-fas bil belastar alla tre faser lika.
 
 ### Bilvalsflöde
 
@@ -104,7 +117,8 @@ Laddare A (3-fas hårdvara)
 | Namn | Visningsnamn för bilen |
 | SOC-sensor | Bilens batterisensor (valfri) |
 | Mål-SOC | Laddningsmål i % (standard 80%) |
-| Fas | Vilken fas bilen laddar på (vid 1-fas laddare) |
+| Antal faser (bilens laddare) | 1-fas, 2-fas eller 3-fas – bilens **inbyggda** laddare, styr fasbelastningen |
+| Fas | Startfas bilen laddar på (relevant vid 1- och 2-fas bilar) |
 
 ---
 
@@ -123,8 +137,13 @@ Patronfaserna beräknas automatiskt som de två faser som *inte* används av kom
 
 En temperatursensor på ackumulatortanken används för att förhindra onödig uppvärmning:
 
-- **Max-temp** (standard 70°C): extra varmvatten startar inte om tanktemperaturen redan är över detta värde
+- **Max-temp** (standard 70°C): stänger av extra varmvatten om tanken når denna nivå
+- **Min-temp** (standard 65°C): startar inte extra varmvatten förrän tanken är under denna nivå (även om allt annat tillåter det)
 - Temperaturen visas i `sensor.sem_hot_water_temp`
+
+### Minimitid (anti-flimmer)
+
+För att förhindra att elpatronen slås på/av varje 30-sekunderscykel tvingas extra varmvatten att stanna PÅ i minst **5 minuter** (standard, konfigurerbart) från den faktiska starttidpunkten, även om styrlogiken vill stänga av det tidigare.
 
 ---
 
@@ -195,6 +214,10 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 | `sensor.sem_legionella_days_since` | Dagar sedan senaste bekräftade körning |
 | `sensor.sem_legionella_next_due` | Datum för nästa planerad körning |
 | `sensor.sem_legionella_temp_confirmed` | `on` om temp bekräftad under pågående körning |
+| `sensor.sem_negative_slots_ahead` | Antal kvartstimmar med negativt säljpris kommande 8h |
+| `sensor.sem_best_discharge_price` | Bästa (högsta) köppris för urladdning kommande 12h, med tidpunkt som attribut |
+| `sensor.sem_best_charge_price` | Lägsta köppris för laddning kommande 12h, med tidpunkt som attribut |
+| `sensor.sem_yesterday_consumption` | Gårdagens förbrukning exkl. EV-laddning (kWh) – kräver konfigurerad sensor |
 
 **Per laddare** (ersätt `<laddare>` med laddarens namn i gemener):
 
@@ -267,6 +290,7 @@ Konfigurationen sker i sex steg:
 - Huslaststyrare – peka på Elm4 för direkt huslastmätning (rekommenderas)
 - Nätmätare enhet – välj `kW` om Elm1 rapporterar i kilowatt
 - EV-laddare effektenhet – välj `kW` om laddaren rapporterar i kilowatt
+- Gårdagens förbrukning – valfri sensor för `sensor.sem_yesterday_consumption`
 
 **Steg 2 – Solceller**
 - Sol-inverter total och per fas
@@ -284,6 +308,8 @@ Konfigurationen sker i sex steg:
 - Elpatronens märkeffekt (kW)
 - **Ackumulatortank temperatursensor** (valfri)
 - **Max-temp för extra varmvatten** (standard 70°C)
+- **Min-temp för extra varmvatten** (standard 65°C)
+- **Minimitid extra varmvatten** (standard 5 min) – förhindrar flimmer på/av
 
 **Steg 5 – Legionella-desinficering**
 - Aktivera/avaktivera funktionen
@@ -296,8 +322,8 @@ Konfigurationen sker i sex steg:
 
 **Steg 6 – EV-laddare**
 - Lägg till en eller flera laddare
-- Per laddare: namn, anslutningssensor, switch, strömsättningsentitet, faser
-- Per bil på laddaren: namn, SOC-sensor, SOC-mål, fas (vid 1-fas laddare)
+- Per laddare: namn, anslutningssensor, switch, strömsättningsentitet, laddarens fasantal (1-fas eller 3-fas hårdvara)
+- Per bil på laddaren: namn, SOC-sensor, SOC-mål, **bilens fasantal** (1/2/3-fas inbyggd laddare – styr fasbelastningen), fas (vid 1- och 2-fas bilar)
 - Repetera för varje laddare
 
 Alla inställningar kan redigeras i efterhand via **Inställningar → Integrationer → Smart Energy Manager → Konfigurera**.

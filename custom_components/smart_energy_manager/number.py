@@ -43,6 +43,7 @@ class _BaseSEMNumber(CoordinatorEntity, NumberEntity):
     def __init__(self, coordinator: SmartEnergyCoordinator, entry: ConfigEntry):
         super().__init__(coordinator)
         self._entry = entry
+        self._config: dict = {**entry.data, **entry.options}
         self._value: float = self._attr_native_min_value
 
     @property
@@ -78,7 +79,7 @@ class BatteryMinSocNumber(_BaseSEMNumber):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self._value = float(entry.data.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC))
+        self._value = float(self._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC))
 
     def _update_controller(self):
         self.coordinator._controller.battery_min_soc = self._value
@@ -95,7 +96,7 @@ class BatteryMaxSocNumber(_BaseSEMNumber):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self._value = float(entry.data.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC))
+        self._value = float(self._config.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC))
 
     def _update_controller(self):
         self.coordinator._controller.battery_max_soc = self._value
@@ -112,7 +113,7 @@ class EvSocTargetNumber(_BaseSEMNumber):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self._value = float(entry.data.get(CONF_EV_SOC_TARGET, DEFAULT_EV_SOC_TARGET))
+        self._value = float(self._config.get(CONF_EV_SOC_TARGET, DEFAULT_EV_SOC_TARGET))
 
     def _update_controller(self):
         self.coordinator._controller.ev_soc_target = self._value
@@ -129,7 +130,7 @@ class WinterCheapThresholdNumber(_BaseSEMNumber):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self._value = float(entry.data.get(CONF_WINTER_CHEAP_HOUR_THRESHOLD, DEFAULT_WINTER_CHEAP_THRESHOLD))
+        self._value = float(self._config.get(CONF_WINTER_CHEAP_HOUR_THRESHOLD, DEFAULT_WINTER_CHEAP_THRESHOLD))
 
     def _update_controller(self):
         self.coordinator._controller.winter_cheap_threshold = self._value
@@ -146,7 +147,7 @@ class WinterExpensiveThresholdNumber(_BaseSEMNumber):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self._value = float(entry.data.get(CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD))
+        self._value = float(self._config.get(CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD))
 
     def _update_controller(self):
         self.coordinator._controller.winter_expensive_threshold = self._value
@@ -163,7 +164,7 @@ class WinterMinSocNumber(_BaseSEMNumber):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self._value = float(entry.data.get(CONF_WINTER_MIN_SOC, DEFAULT_WINTER_MIN_SOC))
+        self._value = float(self._config.get(CONF_WINTER_MIN_SOC, DEFAULT_WINTER_MIN_SOC))
 
     def _update_controller(self):
         self.coordinator._controller.winter_min_soc = self._value
@@ -180,7 +181,7 @@ class WinterMaxSocNumber(_BaseSEMNumber):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self._value = float(entry.data.get(CONF_WINTER_MAX_SOC, DEFAULT_WINTER_MAX_SOC))
+        self._value = float(self._config.get(CONF_WINTER_MAX_SOC, DEFAULT_WINTER_MAX_SOC))
 
     def _update_controller(self):
         self.coordinator._controller.winter_max_soc = self._value

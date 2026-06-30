@@ -35,6 +35,7 @@ async def async_setup_entry(
         SmartEnergyLegionellaActiveSensor(coordinator, entry),
         SmartEnergyLegionellaDaysSinceSensor(coordinator, entry),
         SmartEnergyLegionellaNextDueSensor(coordinator, entry),
+        SmartEnergyLegionellaTempConfirmedSensor(coordinator, entry),
     ]
 
     # Dynamiska sensorer per laddare
@@ -365,11 +366,8 @@ class SmartEnergySolarSurplusSensor(_BaseEnergySensor):
 
     @property
     def native_value(self):
-        s = self.coordinator.current_state
-        if not s:
-            return 0
-        house_load = max(0.0, s.grid_power_l1 + s.grid_power_l2 + s.grid_power_l3 + s.solar_power_w)
-        return round(max(0.0, s.solar_power_w - house_load))
+        d = self.coordinator.data
+        return round(d.get("solar_surplus_w", 0.0)) if d else 0
 
 
 class SmartEnergyHotWaterTempSensor(_BaseEnergySensor):
