@@ -144,7 +144,7 @@ OPERATING_MODES = [MODE_AUTO, MODE_WINTER, MODE_FORCE_CHARGE_EV, MODE_FORCE_CHAR
 
 # ── Laddarsensorvärden som räknas som "ansluten" ──────────────────────────────
 CHARGER_CONNECTED_STATES = {"connected", "charging", "plugged_in", "pluggedin", "waiting",
-                             "ready", "preparing", "suspended_ev", "suspended_evse"}
+                             "ready", "preparing", "suspended_ev", "suspended_evse","ev connected"}
 
 # Sentinel för "ingen bil vald" på en laddare
 NO_CAR_SELECTED = "unknown"
