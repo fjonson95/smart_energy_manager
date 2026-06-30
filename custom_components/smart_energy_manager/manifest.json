@@ -1,11 +1,11 @@
 {
   "domain": "smart_energy_manager",
   "name": "Smart Energy Manager",
-  "version": "0.5.2",
+  "codeowners": ["@fjonson95"],
   "config_flow": true,
-  "documentation": "https://github.com/local/smart_energy_manager",
+  "documentation": "https://github.com/fjonson95/smart_energy_manager",
+  "issue_tracker": "https://github.com/fjonson95/smart_energy_manager/issues",
+  "iot_class": "local_polling",
   "requirements": [],
-  "dependencies": [],
-  "codeowners": [],
-  "iot_class": "local_polling"
+  "version": "0.5.3"
 }
