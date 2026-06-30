@@ -55,7 +55,6 @@
         "description": "Compressor: 1-phase. Heating element: 2-phase (auto-calculated as the remaining two phases).",
         "data": {
           "heat_pump_power_entity": "Heat pump power sensor",
-          "heat_pump_switch_entity": "Heat pump switch",
           "heat_pump_extra_hot_water_entity": "Extra hot water (heating element)",
           "heat_pump_phase": "Compressor phase (1-phase)",
           "heat_pump_patron_power_kw": "Heating element power (kW)",
@@ -163,7 +162,6 @@
         "description": "Compressor: 1-phase. Heating element: 2-phase (auto-calculated).",
         "data": {
           "heat_pump_power_entity": "Heat pump power sensor",
-          "heat_pump_switch_entity": "Heat pump switch",
           "heat_pump_extra_hot_water_entity": "Extra hot water (heating element)",
           "heat_pump_phase": "Compressor phase (1-phase)",
           "heat_pump_patron_power_kw": "Heating element power (kW)",

@@ -42,7 +42,6 @@ CONF_BATTERY_MAX_SOC = "battery_max_soc"
 
 # ── Elpanna / värmepump ───────────────────────────────────────────────────────
 CONF_HEAT_PUMP_POWER = "heat_pump_power_entity"
-CONF_HEAT_PUMP_SWITCH = "heat_pump_switch_entity"
 CONF_HEAT_PUMP_EXTRA_HOT_WATER = "heat_pump_extra_hot_water_entity"
 CONF_HEAT_PUMP_PHASE = "heat_pump_phase"
 CONF_HEAT_PUMP_PATRON_PHASES = "heat_pump_patron_phases"

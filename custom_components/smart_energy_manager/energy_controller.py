@@ -161,7 +161,6 @@ class EnergyState:
 
     # Elpanna
     heat_pump_power_w: float = 0.0
-    heat_pump_on: bool = False
     heat_pump_phase: str = DEFAULT_HEAT_PUMP_PHASE
     extra_hot_water_on: bool = False
     heat_pump_patron_phases: list[str] = field(default_factory=lambda: list(DEFAULT_HEAT_PUMP_PATRON_PHASES))
@@ -588,7 +587,7 @@ class EnergyController:
                 loads[ph] += ph_load[ph]
 
         # Värmepump kompressor
-        if state.heat_pump_on:
+        if state.heat_pump_power_w:
             hp_ph = state.heat_pump_phase
             loads[hp_ph] = loads.get(hp_ph, 0.0) + state.heat_pump_power_w
 

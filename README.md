@@ -302,7 +302,7 @@ Konfigurationen sker i sex steg:
 - Min/max SOC-gränser
 
 **Steg 4 – Elpanna / Värmepump**
-- Effektgivare (Elm5) och kompressorswitch
+- Effektgivare (Elm5) – kompressorns på/av-status avläses från effekten, ingen separat switch behövs
 - Switch för extra varmvatten (elpatron)
 - Kompressorns fas (1-fas, standard L3) – patronfaserna beräknas automatiskt
 - Elpatronens märkeffekt (kW)

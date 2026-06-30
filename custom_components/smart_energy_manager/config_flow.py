@@ -17,7 +17,7 @@ from .const import (
     CONF_SOLAR_INVERTER_TOTAL,
     CONF_SOLAR_INVERTER_POWER_L1, CONF_SOLAR_INVERTER_POWER_L2, CONF_SOLAR_INVERTER_POWER_L3,
     CONF_EV_CHARGERS,
-    CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_SWITCH, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
+    CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
     CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
     CONF_GRID_POWER_L1, CONF_GRID_POWER_L2, CONF_GRID_POWER_L3,
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
@@ -136,7 +136,6 @@ def _battery_schema(d: dict) -> vol.Schema:
 def _heat_pump_schema(d: dict) -> vol.Schema:
     return vol.Schema({
         vol.Optional(CONF_HEAT_PUMP_POWER, default=_d(d, CONF_HEAT_PUMP_POWER, "")): _opt_entity_selector(),
-        vol.Optional(CONF_HEAT_PUMP_SWITCH, default=_d(d, CONF_HEAT_PUMP_SWITCH, "")): _opt_entity_selector(),
         vol.Optional(CONF_HEAT_PUMP_EXTRA_HOT_WATER, default=_d(d, CONF_HEAT_PUMP_EXTRA_HOT_WATER, "")): _opt_entity_selector(),
         vol.Optional(CONF_HEAT_PUMP_PHASE, default=_d(d, CONF_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PHASE)): selector.SelectSelector(
             selector.SelectSelectorConfig(options=EV_PHASES_OPTIONS, mode=selector.SelectSelectorMode.LIST)
