@@ -1,8 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
+![Version](https://img.shields.io/badge/version-0.5.4-blue)
+
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
-Läs detta på svenska: [README.sv.md]
+Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/README.sv.md)
+
+## What's New in 0.5.4
+
+- **Auto-clear active car after full charge** – when a car reaches its SOC target the active car selection is automatically reset to "unknown", so the charger is ready for the next session without manual intervention.
 
 ## System Overview
 

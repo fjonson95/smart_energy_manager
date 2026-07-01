@@ -1,6 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
+![Version](https://img.shields.io/badge/version-0.5.4-blue)
+
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.4
+
+- **Automatisk återställning av aktiv bil efter full laddning** – när en bil når sitt SOC-mål återställs bilvalet automatiskt till "unknown", så laddaren är redo för nästa session utan manuell åtgärd.
 
 ## Systemöversikt
 

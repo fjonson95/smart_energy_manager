@@ -246,6 +246,19 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         soc_pct = raw
                     break
 
+            # Rensa bilval automatiskt när SOC-mål är uppnått
+            if active_car_name != NO_CAR_SELECTED and soc_pct is not None:
+                for car in cars:
+                    if car.name == active_car_name and soc_pct >= car.ev_soc_target:
+                        _LOGGER.info(
+                            "Laddare '%s': %s nådde SOC-mål %.0f%% – återställer bilval",
+                            cfg.name, active_car_name, soc_pct,
+                        )
+                        self._active_cars[cfg.name] = NO_CAR_SELECTED
+                        active_car_name = NO_CAR_SELECTED
+                        soc_pct = None
+                        break
+
             power_w = self._get_ev_power_w(cfg.charger_power) if cfg.charger_power else 0.0
 
             result.append(ChargerState(
