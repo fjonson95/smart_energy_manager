@@ -1,347 +1,349 @@
 # Smart Energy Manager – HACS Integration
 
-En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
-## Systemöversikt
+Läs detta på svenska: [README.sv.md]
+
+## System Overview
 
 ```
-Elnät (3-fas, max 20A/fas)
+Grid (3-phase, max 20A/phase)
     │
-    │    Batteri-inverter (3-fas)      Sol-inverter (3-fas)
+    │    Battery inverter (3-phase)     Solar inverter (3-phase)
     │           │                             │
-    └─────┬─────┴─────────────────────────────┴──── Elmätare 4 (huslast) ────┬──── Övriga laster
+    └─────┬─────┴─────────────────────────────┴──── Meter 4 (house load) ────┬──── Other loads
           │                                                                  │
-          │                                                              Elmätare 5
+          │                                                              Meter 5
           │                                                                   │
-          │                                                                Elpanna
-          │                                                              (1-fas kompressor
-          │                                                             +2-fas elpatron
-          └────┐                                                        +ackumulatortank)
+          │                                                                Boiler
+          │                                                              (1-phase compressor
+          │                                                             +2-phase heating element
+          └────┐                                                        +buffer tank)
                │
-           EV-laddare
-        (1- eller 3-fas hårdvara,
-         flera bilar turas om,
-         bilval via HA-entitet)
+           EV charger
+        (1- or 3-phase hardware,
+         multiple cars take turns,
+         car selection via HA entity)
 ```
 
-> **OBS:** Laddarens fasantal (hårdvaran) och bilens fasantal (`car_phases`, 1/2/3-fas) är två separata inställningar. Fasbelastningen i fasskyddet styrs alltid av **bilens** inbyggda laddare, inte av laddarhårdvarans fasantal – se [EV-laddare och bilval](#ev-laddare-och-bilval).
+> **NOTE:** The charger's number of phases (hardware) and the car's number of phases (`car_phases`, 1/2/3-phase) are two separate settings. Phase load in the phase protection is always governed by the **car's** built-in charger, not by the charger hardware's phase count – see [EV Charger and Car Selection](#ev-charger-and-car-selection).
 
-### Elmätarroller
+### Electricity Meter Roles
 
-| Mätare | Placering | Tecken | Enhet |
+| Meter | Location | Sign | Unit |
 |---|---|---|---|
-| Elmätare 1 | Nätanslutning | Negativ = export, Positiv = import | kW |
-| Elmätare 2 | Batteri-inverter AC-sida | Negativ = förbrukning | W |
-| Elmätare 3 | Sol-inverter | Positiv = produktion | W |
-| Elmätare 4 | Fastighetslast (exkl. sol, batteri och EV-laddare) | Positiv = förbrukning | W |
-| Elmätare 5 | Elpanna | Positiv = förbrukning | W |
+| Meter 1 | Grid connection | Negative = export, Positive = import | kW |
+| Meter 2 | Battery inverter AC side | Negative = consumption | W |
+| Meter 3 | Solar inverter | Positive = production | W |
+| Meter 4 | Property load (excl. solar, battery, and EV charger) | Positive = consumption | W |
+| Meter 5 | Boiler | Positive = consumption | W |
 
-> **OBS:** Elm1 rapporterar i **kW** – välj enheten `kW` i konfigurationen. EV-laddare (intern mätare) rapporterar också i **kW**.
-
----
-
-## Funktioner
-
-### Autoläge (Självkonsumtion)
-1. **Täck hushållslast** – prioritet 1
-2. **Ladda bilar från sol** – när solöverskott ≥ 1 400 W (1-fas) eller 4 140 W (3-fas); ström justeras dynamiskt
-3. **Ladda batteri från solöverskott**
-4. **Extra varmvatten via elpatron** – när batteriet är fullt, sol finns kvar och tanktemperaturen är under konfigurerat max (standard 70°C)
-5. **Ladda ur batteriet** – när köppriset överstiger 0,20 SEK/kWh, *eller* när det är den bästa urladdningstimmen kommande 12h enligt prisplaneringen
-6. **Negativa elpriser** – absorbera all möjlig solel i batteri, bilar och varmvatten
-
-### Prisplanering (kvartstimmar framåt)
-Baserat på Nordpools `raw_today`/`raw_tomorrow`-attribut beräknas varje cykel:
-- **Bästa laddnings-/urladdningstimme** kommande 12h – styr batteribeslut i både auto- och vinterläge
-- **Proaktiv absorption** – om ≥ 4 kvartstimmar med negativt säljpris väntar inom 2h, hålls batteriet inte fulladdat (headroom upp till 30%) och extra varmvatten/EV-laddning startas proaktivt för att skapa utrymme innan de negativa priserna inträffar
-- Resultatet exponeras via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price` och `sensor.sem_best_charge_price`
-
-### Vinterläge
-- Ladda batteri nattetid när priset underskrider konfigurerbar gräns
-- Ladda ur batteri under dyra timmar (kvällspeak)
-- Ladda alltid från sol när möjligt
-
-### Forcelägen
-- **Force EV Charge** – ladda alla anslutna bilar från elnät (max ström, fasbegränsad)
-- **Force Battery Charge** – ladda batteri från elnät
-
-### Manuellt läge
-- **Manual** – stänger av all automatisk styrning. Inga beslut fattas; används när du vill styra batteri/laddare/varmvatten manuellt via egna automationer. Väljs via `select.sem_operating_mode` (finns ingen egen switch för detta läget).
-
-### Fasskydd
-Beräknar fasbelastning per fas och reducerar i prioritetsordning:
-1. Minskar EV-laddningsström (laddare med lägst prioritet först)
-2. Minskar batteriladdning
-3. Stänger av extra varmvatten (elpatron)
+> **NOTE:** Meter 1 reports in **kW** – select the unit `kW` in the configuration. The EV charger (internal meter) also reports in **kW**.
 
 ---
 
-## EV-laddare och bilval
+## Features
 
-### Laddare → Bilar-modellen
+### Auto Mode (Self-Consumption)
+1. **Cover household load** – priority 1
+2. **Charge cars from solar** – when solar surplus ≥ 1,400 W (1-phase) or 4,140 W (3-phase); current adjusted dynamically
+3. **Charge battery from solar surplus**
+4. **Extra hot water via heating element** – when the battery is full, solar surplus remains, and tank temperature is below the configured maximum (default 70°C)
+5. **Discharge the battery** – when the buy price exceeds SEK 0.20/kWh, *or* when it is the best discharge hour in the coming 12h according to the price planning
+6. **Negative electricity prices** – absorb all possible solar power into battery, cars, and hot water
 
-Varje EV-laddare konfigureras som en **hårdvaruenhet** med en lista av bilar som kan använda den. När en bil ansluts väljer användaren vilken bil det är via en `select`-entitet i dashboarden.
+### Price Planning (quarter-hours ahead)
+Based on Nord Pool's `raw_today`/`raw_tomorrow` attributes, the following are calculated each cycle:
+- **Best charging/discharging hour** for the coming 12h – governs battery decisions in both auto and winter mode
+- **Proactive absorption** – if ≥ 4 quarter-hours with negative sell price are expected within 2h, the battery is not kept fully charged (headroom up to 30%) and extra hot water/EV charging is started proactively to create room before the negative prices occur
+- Results are exposed via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price`, and `sensor.sem_best_charge_price`
+
+### Winter Mode
+- Charge battery overnight when the price is below a configurable limit
+- Discharge battery during expensive hours (evening peak)
+- Always charge from solar when possible
+
+### Force Modes
+- **Force EV Charge** – charge all connected cars from the grid (max current, phase-limited)
+- **Force Battery Charge** – charge battery from the grid
+
+### Manual Mode
+- **Manual** – disables all automatic control. No decisions are made; used when you want to control battery/charger/hot water manually via your own automations. Selected via `select.sem_operating_mode` (there is no dedicated switch for this mode).
+
+### Phase Protection
+Calculates phase load per phase and reduces in priority order:
+1. Reduces EV charging current (lowest-priority charger first)
+2. Reduces battery charging
+3. Turns off extra hot water (heating element)
+
+---
+
+## EV Charger and Car Selection
+
+### Charger → Cars Model
+
+Each EV charger is configured as a **hardware unit** with a list of cars that can use it. When a car is connected, the user selects which car it is via a `select` entity in the dashboard.
 
 ```
-Laddare A (3-fas hårdvara)
-├── Anslutningssensor: sensor.charger_status
-├── Bil 1: Volvo XC40    (SOC-sensor, mål 80%, 1-fas billaddare, fas L1)
-└── Bil 2: Tesla Model 3 (SOC-sensor, mål 90%, 3-fas billaddare)
+Charger A (3-phase hardware)
+├── Connection sensor: sensor.charger_status
+├── Car 1: Volvo XC40    (SOC sensor, target 80%, 1-phase car charger, phase L1)
+└── Car 2: Tesla Model 3 (SOC sensor, target 90%, 3-phase car charger)
 ```
 
-Fasbelastningen som fasskyddet räknar på bestäms alltid av **bilens** `car_phases` (1/2/3-fas), inte av laddarhårdvarans fasantal. En 1-fas bil belastar bara sin valda fas; en 2-fas bil belastar sin fas + nästa (t.ex. L1+L2); en 3-fas bil belastar alla tre faser lika.
+The phase load that the phase protection calculates is always determined by the **car's** `car_phases` (1/2/3-phase), not by the charger hardware's phase count. A 1-phase car only loads its selected phase; a 2-phase car loads its phase plus the next one (e.g., L1+L2); a 3-phase car loads all three phases equally.
 
-### Bilvalsflöde
+### Car Selection Flow
 
-1. Bil ansluts → `sensor.sem_charger_a_connected` → `on`
-2. Systemet pausar laddning och skickar en persistent HA-notifiering
-3. Användaren väljer bil i `select.sem_charger_a_active_car`
-4. Systemet laddar med rätt SOC-mål och fasinställning för den valda bilen
-5. Notifieringen stängs automatiskt
+1. Car is connected → `sensor.sem_charger_a_connected` → `on`
+2. The system pauses charging and sends a persistent HA notification
+3. The user selects the car in `select.sem_charger_a_active_car`
+4. The system charges using the correct SOC target and phase setting for the selected car
+5. The notification closes automatically
 
-### Konfiguration per laddare
+### Configuration per Charger
 
-| Inställning | Beskrivning |
+| Setting | Description |
 |---|---|
-| Namn | Visningsnamn för laddaren |
-| Anslutningssensor | Sensor som visar `connected`/`charging`/`disconnected` |
-| Laddare switch | Switch för att aktivera/avaktivera laddning |
-| Laddström setpunkt | Number-entitet för strömsättning (A) |
-| Laddeffekt sensor | Sensor för faktisk laddeffekt (valfri) |
-| Antal faser | 1-fas eller 3-fas (hårdvara) |
+| Name | Display name for the charger |
+| Connection sensor | Sensor showing `connected`/`charging`/`disconnected` |
+| Charger switch | Switch to enable/disable charging |
+| Charging current setpoint | Number entity for current setting (A) |
+| Charging power sensor | Sensor for actual charging power (optional) |
+| Number of phases | 1-phase or 3-phase (hardware) |
 
-### Konfiguration per bil
+### Configuration per Car
 
-| Inställning | Beskrivning |
+| Setting | Description |
 |---|---|
-| Namn | Visningsnamn för bilen |
-| SOC-sensor | Bilens batterisensor (valfri) |
-| Mål-SOC | Laddningsmål i % (standard 80%) |
-| Antal faser (bilens laddare) | 1-fas, 2-fas eller 3-fas – bilens **inbyggda** laddare, styr fasbelastningen |
-| Fas | Startfas bilen laddar på (relevant vid 1- och 2-fas bilar) |
+| Name | Display name for the car |
+| SOC sensor | The car's battery sensor (optional) |
+| Target SOC | Charging target in % (default 80%) |
+| Number of phases (car's charger) | 1-phase, 2-phase, or 3-phase – the car's **built-in** charger, governs phase load |
+| Phase | Starting phase the car charges on (relevant for 1- and 2-phase cars) |
 
 ---
 
-## Elpanna – fasmodell och temperaturstyrning
+## Electric Boiler – Phase Model and Temperature Control
 
-Elpannan har två separata kretsar:
+The boiler has two separate circuits:
 
-| Krets | Drift | Faser | Typisk effekt |
+| Circuit | Operation | Phases | Typical power |
 |---|---|---|---|
-| Värmepump (kompressor) | Normal husvärme | **1-fas** (konfigurerbar, standard L3) | 500–1 500 W |
-| Elpatron | Extra varmvatten | **2-fas** (de två övriga faserna, standard L1+L2) | 3 000–6 000 W |
+| Heat pump (compressor) | Normal house heating | **1-phase** (configurable, default L3) | 500–1,500 W |
+| Heating element | Extra hot water | **2-phase** (the two remaining phases, default L1+L2) | 3,000–6,000 W |
 
-Patronfaserna beräknas automatiskt som de två faser som *inte* används av kompressorn.
+The element phases are calculated automatically as the two phases *not* used by the compressor.
 
-### Temperaturstyrning för extra varmvatten
+### Temperature Control for Extra Hot Water
 
-En temperatursensor på ackumulatortanken används för att förhindra onödig uppvärmning:
+A temperature sensor on the buffer tank is used to prevent unnecessary heating:
 
-- **Max-temp** (standard 70°C): stänger av extra varmvatten om tanken når denna nivå
-- **Min-temp** (standard 65°C): startar inte extra varmvatten förrän tanken är under denna nivå (även om allt annat tillåter det)
-- Temperaturen visas i `sensor.sem_hot_water_temp`
+- **Max temp** (default 70°C): turns off extra hot water if the tank reaches this level
+- **Min temp** (default 65°C): does not start extra hot water until the tank is below this level (even if everything else allows it)
+- The temperature is shown in `sensor.sem_hot_water_temp`
 
-### Minimitid (anti-flimmer)
+### Minimum Runtime (anti-flicker)
 
-För att förhindra att elpatronen slås på/av varje 30-sekunderscykel tvingas extra varmvatten att stanna PÅ i minst **5 minuter** (standard, konfigurerbart) från den faktiska starttidpunkten, även om styrlogiken vill stänga av det tidigare.
+To prevent the heating element from switching on/off every 30-second cycle, extra hot water is forced to stay ON for at least **5 minutes** (default, configurable) from the actual start time, even if the control logic wants to turn it off earlier.
 
 ---
 
-## Legionella-desinficering
+## Legionella Disinfection
 
-Pannans inbyggda legionellaprogram körs automatiskt ca 1 gång/vecka för att värma varmvattnet till ≥ 65°C (konfigurerbart) och eliminera legionellabakterier.
+The boiler's built-in Legionella program runs automatically about once a week to heat the hot water to ≥ 65°C (configurable) and eliminate Legionella bacteria.
 
-### Hur det fungerar
+### How It Works
 
-Systemet använder en **separat digital switch** för att starta pannans legionellaprogram:
+The system uses a **separate digital switch** to start the boiler's Legionella program:
 
-- Vi slår **PÅ** switchen för att starta programmet
-- Pannan avslutar programmet och slår **AV** switchen automatiskt när klart
-- Om switchen slås av i förtid avbryts cykeln och körningen räknas inte som lyckad
-- Körningen bekräftas via temperatursensorn – når temperaturen inte målvärdet registreras körningen inte som lyckad
+- We turn the switch **ON** to start the program
+- The boiler finishes the program and turns the switch **OFF** automatically when done
+- If the switch is turned off prematurely, the cycle is aborted and the run is not counted as successful
+- The run is confirmed via the temperature sensor – if the temperature does not reach the target value, the run is not registered as successful
 
-### Prioritetsordning för start
+### Start Priority Order
 
-| Prioritet | Villkor | Beskrivning |
+| Priority | Condition | Description |
 |---|---|---|
-| 1 | Solöverskott ≥ 3 000 W inom önskat tidsfönster | Gratis solel driver programmet |
-| 2 | Elpris ≤ konfigurerat maxpris inom önskat tidsfönster | Körs på billig nätström |
-| 3 | Intervallet överskridits med 50% (nödkörning) | Kör oavsett pris, undviker natten 23–06 |
+| 1 | Solar surplus ≥ 3,000 W within the desired time window | Free solar power drives the program |
+| 2 | Electricity price ≤ configured max price within the desired time window | Runs on cheap grid power |
+| 3 | Interval exceeded by 50% (emergency run) | Runs regardless of price, avoids the night 23:00–06:00 |
 
-### Inställningar
+### Settings
 
-| Inställning | Standard | Beskrivning |
+| Setting | Default | Description |
 |---|---|---|
-| Aktiverad | Ja | Slå av/på funktionen |
-| Legionella-switch | – | Pannans digitala programswitch |
-| Bekräftelsetemp | 65°C | Temperatur som bekräftar lyckad körning |
-| Intervall | 7 dagar | Hur ofta desinficering ska ske |
-| Önskat tidsfönster | 10–15 | Timmar då sol normalt är tillgänglig |
-| Max pris | 1,50 SEK/kWh | Kör ej på nätström om dyrare |
-| Körtid | 60 min | Referenstid (pannan styr faktisk tid) |
+| Enabled | Yes | Turn the feature on/off |
+| Legionella switch | – | The boiler's digital program switch |
+| Confirmation temp | 65°C | Temperature that confirms a successful run |
+| Interval | 7 days | How often disinfection should occur |
+| Desired time window | 10–15 | Hours when solar is normally available |
+| Max price | SEK 1.50/kWh | Do not run on grid power if more expensive |
+| Run time | 60 min | Reference time (the boiler controls the actual time) |
 
 ---
 
-## Prissättning
+## Pricing
 
-| | Formel |
+| | Formula |
 |---|---|
-| **Köppris** | `(spotpris + nätavgifter + energiskatt) × (1 + moms)` |
-| **Säljpris** | `spotpris + extraintäkt (elcertifikat etc.)` |
+| **Buy price** | `(spot price + grid fees + energy tax) × (1 + VAT)` |
+| **Sell price** | `spot price + extra revenue (electricity certificates, etc.)` |
 
 ---
 
-## Entiteter
+## Entities
 
-### Sensorer
+### Sensors
 
-| Entitet | Beskrivning |
+| Entity | Description |
 |---|---|
-| `sensor.sem_buy_price` | Aktuellt köppris SEK/kWh |
-| `sensor.sem_sell_price` | Aktuellt säljpris SEK/kWh |
-| `sensor.sem_spot_price` | Nordpool spotpris |
-| `sensor.sem_battery_charge_power` | Batteri laddnings-setpoint (W) |
-| `sensor.sem_battery_discharge_power` | Batteri urladdnings-setpoint (W) |
-| `sensor.sem_phase_l1_load` | Beräknad fasbelastning L1 (W) |
-| `sensor.sem_phase_l2_load` | Beräknad fasbelastning L2 (W) |
-| `sensor.sem_phase_l3_load` | Beräknad fasbelastning L3 (W) |
-| `sensor.sem_house_load` | Huslast W – Elm4 direkt eller beräknad |
-| `sensor.sem_solar_surplus` | Solöverskott (W) |
-| `sensor.sem_hot_water_temp` | Ackumulatortankens temperatur (°C) |
-| `sensor.sem_decision_reason` | Textförklaring senaste beslut |
-| `sensor.sem_operating_mode` | Aktivt driftläge |
-| `sensor.sem_legionella_active` | `on` när legionellaprogrammet pågår |
-| `sensor.sem_legionella_days_since` | Dagar sedan senaste bekräftade körning |
-| `sensor.sem_legionella_next_due` | Datum för nästa planerad körning |
-| `sensor.sem_legionella_temp_confirmed` | `on` om temp bekräftad under pågående körning |
-| `sensor.sem_negative_slots_ahead` | Antal kvartstimmar med negativt säljpris kommande 8h |
-| `sensor.sem_best_discharge_price` | Bästa (högsta) köppris för urladdning kommande 12h, med tidpunkt som attribut |
-| `sensor.sem_best_charge_price` | Lägsta köppris för laddning kommande 12h, med tidpunkt som attribut |
-| `sensor.sem_yesterday_consumption` | Gårdagens förbrukning exkl. EV-laddning (kWh) – kräver konfigurerad sensor |
+| `sensor.sem_buy_price` | Current buy price SEK/kWh |
+| `sensor.sem_sell_price` | Current sell price SEK/kWh |
+| `sensor.sem_spot_price` | Nord Pool spot price |
+| `sensor.sem_battery_charge_power` | Battery charging setpoint (W) |
+| `sensor.sem_battery_discharge_power` | Battery discharging setpoint (W) |
+| `sensor.sem_phase_l1_load` | Calculated phase load L1 (W) |
+| `sensor.sem_phase_l2_load` | Calculated phase load L2 (W) |
+| `sensor.sem_phase_l3_load` | Calculated phase load L3 (W) |
+| `sensor.sem_house_load` | House load W – Meter 4 direct or calculated |
+| `sensor.sem_solar_surplus` | Solar surplus (W) |
+| `sensor.sem_hot_water_temp` | Buffer tank temperature (°C) |
+| `sensor.sem_decision_reason` | Text explanation of the latest decision |
+| `sensor.sem_operating_mode` | Active operating mode |
+| `sensor.sem_legionella_active` | `on` when the Legionella program is running |
+| `sensor.sem_legionella_days_since` | Days since the last confirmed run |
+| `sensor.sem_legionella_next_due` | Date of the next planned run |
+| `sensor.sem_legionella_temp_confirmed` | `on` if temp is confirmed during an ongoing run |
+| `sensor.sem_negative_slots_ahead` | Number of quarter-hours with negative sell price in the coming 8h |
+| `sensor.sem_best_discharge_price` | Best (highest) buy price for discharging in the coming 12h, with timestamp as attribute |
+| `sensor.sem_best_charge_price` | Lowest buy price for charging in the coming 12h, with timestamp as attribute |
+| `sensor.sem_yesterday_consumption` | Yesterday's consumption excl. EV charging (kWh) – requires a configured sensor |
 
-**Per laddare** (ersätt `<laddare>` med laddarens namn i gemener):
+**Per charger** (replace `<charger>` with the charger's name in lowercase):
 
-| Entitet | Beskrivning |
+| Entity | Description |
 |---|---|
-| `sensor.sem_charger_<laddare>_connected` | `on`/`off` – bil fysiskt ansluten |
-| `sensor.sem_charger_<laddare>_active_car` | Namn på vald bil |
-| `sensor.sem_charger_<laddare>_current` | Laddström setpoint (A) |
-| `sensor.sem_charger_<laddare>_enabled` | Laddning aktiv `on`/`off` |
+| `sensor.sem_charger_<charger>_connected` | `on`/`off` – car physically connected |
+| `sensor.sem_charger_<charger>_active_car` | Name of the selected car |
+| `sensor.sem_charger_<charger>_current` | Charging current setpoint (A) |
+| `sensor.sem_charger_<charger>_enabled` | Charging active `on`/`off` |
 
-> `sensor.sem_phase_lX_load` är en **prognos**, inte en mätning – den speglar beräknad fasbelastning *efter* att styrningsbesluten verkställts.
+> `sensor.sem_phase_lX_load` is a **forecast**, not a measurement – it reflects the calculated phase load *after* the control decisions have been executed.
 
 ### Switches
 
-| Entitet | Funktion |
+| Entity | Function |
 |---|---|
-| `switch.sem_force_ev_charge_from_grid` | Forcera EV-laddning från nät |
-| `switch.sem_winter_mode` | Aktivera vinterläge |
-| `switch.sem_force_charge_battery_from_grid` | Forcera batteriladdning |
+| `switch.sem_force_ev_charge_from_grid` | Force EV charging from the grid |
+| `switch.sem_winter_mode` | Enable winter mode |
+| `switch.sem_force_charge_battery_from_grid` | Force battery charging |
 
 ### Select
 
-| Entitet | Funktion |
+| Entity | Function |
 |---|---|
-| `select.sem_operating_mode` | Välj driftläge: `auto` / `winter` / `force_charge_ev` / `force_charge_battery` / `manual` |
-| `select.sem_charger_<laddare>_active_car` | Välj vilken bil som är inkopplad på laddaren |
+| `select.sem_operating_mode` | Select operating mode: `auto` / `winter` / `force_charge_ev` / `force_charge_battery` / `manual` |
+| `select.sem_charger_<charger>_active_car` | Select which car is connected to the charger |
 
-### Number (justerbart i realtid)
+### Number (adjustable in real time)
 
-| Entitet | Funktion |
+| Entity | Function |
 |---|---|
-| `number.sem_battery_min_soc` | Batteri min SOC % |
-| `number.sem_battery_max_soc` | Batteri max SOC % |
-| `number.sem_ev_soc_target` | Global standard laddningsmål % |
-| `number.sem_winter_cheap_threshold` | Prisgräns billigt (SEK/kWh) |
-| `number.sem_winter_expensive_threshold` | Prisgräns dyrt (SEK/kWh) |
-| `number.sem_winter_min_soc` | Vinter min SOC % |
-| `number.sem_winter_max_soc` | Vinter max SOC % |
+| `number.sem_battery_min_soc` | Battery min SOC % |
+| `number.sem_battery_max_soc` | Battery max SOC % |
+| `number.sem_ev_soc_target` | Global default charging target % |
+| `number.sem_winter_cheap_threshold` | Cheap price threshold (SEK/kWh) |
+| `number.sem_winter_expensive_threshold` | Expensive price threshold (SEK/kWh) |
+| `number.sem_winter_min_soc` | Winter min SOC % |
+| `number.sem_winter_max_soc` | Winter max SOC % |
 
 ---
 
 ## Installation via HACS
 
-1. Gå till HACS → Integrationer → ⋮ → Custom repositories
-2. Lägg till `https://github.com/fjonson95/smart_energy_manager`, kategori: Integration
-3. Installera "Smart Energy Manager"
-4. Starta om Home Assistant
-5. Inställningar → Integrationer → Lägg till → Smart Energy Manager
+1. Go to HACS → Integrations → ⋮ → Custom repositories
+2. Add `https://github.com/fjonson95/smart_energy_manager`, category: Integration
+3. Install "Smart Energy Manager"
+4. Restart Home Assistant
+5. Settings → Integrations → Add → Smart Energy Manager
 
 ---
 
-## Konfiguration
+## Configuration
 
-### Beroenden
-Dessa HACS-integrationer måste vara installerade och konfigurerade:
-- **nordpool** – elprissensor
-- **solcast_solar** – solprognos (valfritt men rekommenderat)
+### Dependencies
+These HACS integrations must be installed and configured:
+- **nordpool** – electricity price sensor
+- **solcast_solar** – solar forecast (optional but recommended)
 
-### Konfigurationsflöde
+### Configuration Flow
 
-Konfigurationen sker i sex steg:
+Configuration takes place in six steps:
 
-**Steg 1 – Nät & Prissättning**
-- Nordpool-sensor (obligatorisk)
-- Nätmätare per fas (L1/L2/L3)
-- Strömgivare per fas (för fasskydd)
-- Max ström per fas (standard 20 A)
-- Nätspänning (standard 230 V)
-- Nätavgifter, energiskatt, moms, försäljningsersättning
-- Huslaststyrare – peka på Elm4 för direkt huslastmätning (rekommenderas)
-- Nätmätare enhet – välj `kW` om Elm1 rapporterar i kilowatt
-- EV-laddare effektenhet – välj `kW` om laddaren rapporterar i kilowatt
-- Gårdagens förbrukning – valfri sensor för `sensor.sem_yesterday_consumption`
+**Step 1 – Grid & Pricing**
+- Nord Pool sensor (required)
+- Grid meter per phase (L1/L2/L3)
+- Current sensors per phase (for phase protection)
+- Max current per phase (default 20 A)
+- Grid voltage (default 230 V)
+- Grid fees, energy tax, VAT, sales compensation
+- House load controller – point to Meter 4 for direct house load measurement (recommended)
+- Grid meter unit – select `kW` if Meter 1 reports in kilowatts
+- EV charger power unit – select `kW` if the charger reports in kilowatts
+- Yesterday's consumption – optional sensor for `sensor.sem_yesterday_consumption`
 
-**Steg 2 – Solceller**
-- Sol-inverter total och per fas
-- Solcast-prognoser idag/imorgon
+**Step 2 – Solar Panels**
+- Solar inverter total and per phase
+- Solcast forecasts today/tomorrow
 
-**Steg 3 – Batteri**
-- SOC-sensor, effektgivare, laddnings- och urladdningsentiteter
-- Kapacitet (kWh) och max effekt (kW)
-- Min/max SOC-gränser
+**Step 3 – Battery**
+- SOC sensor, power sensor, charging and discharging entities
+- Capacity (kWh) and max power (kW)
+- Min/max SOC limits
 
-**Steg 4 – Elpanna / Värmepump**
-- Effektgivare (Elm5) – kompressorns på/av-status avläses från effekten, ingen separat switch behövs
-- Switch för extra varmvatten (elpatron)
-- Kompressorns fas (1-fas, standard L3) – patronfaserna beräknas automatiskt
-- Elpatronens märkeffekt (kW)
-- **Ackumulatortank temperatursensor** (valfri)
-- **Max-temp för extra varmvatten** (standard 70°C)
-- **Min-temp för extra varmvatten** (standard 65°C)
-- **Minimitid extra varmvatten** (standard 5 min) – förhindrar flimmer på/av
+**Step 4 – Electric Boiler / Heat Pump**
+- Power sensor (Meter 5) – the compressor's on/off status is read from the power, no separate switch needed
+- Switch for extra hot water (heating element)
+- Compressor phase (1-phase, default L3) – element phases are calculated automatically
+- Heating element rated power (kW)
+- **Buffer tank temperature sensor** (optional)
+- **Max temp for extra hot water** (default 70°C)
+- **Min temp for extra hot water** (default 65°C)
+- **Minimum runtime for extra hot water** (default 5 min) – prevents on/off flicker
 
-**Steg 5 – Legionella-desinficering**
-- Aktivera/avaktivera funktionen
-- **Legionella-switch** (pannans digitala programswitch)
-- **Bekräftelsetemp** (standard 65°C – körningen godkänns när tanken nått denna temp)
-- Intervall i dagar (standard 7)
-- Önskat tidsfönster (standard 10–15)
-- Max elpris för körning på nätström (standard 1,50 SEK/kWh)
-- Körtid i minuter (referenstid)
+**Step 5 – Legionella Disinfection**
+- Enable/disable the feature
+- **Legionella switch** (the boiler's digital program switch)
+- **Confirmation temp** (default 65°C – the run is approved when the tank reaches this temp)
+- Interval in days (default 7)
+- Desired time window (default 10–15)
+- Max electricity price for running on grid power (default SEK 1.50/kWh)
+- Run time in minutes (reference time)
 
-**Steg 6 – EV-laddare**
-- Lägg till en eller flera laddare
-- Per laddare: namn, anslutningssensor, switch, strömsättningsentitet, laddarens fasantal (1-fas eller 3-fas hårdvara)
-- Per bil på laddaren: namn, SOC-sensor, SOC-mål, **bilens fasantal** (1/2/3-fas inbyggd laddare – styr fasbelastningen), fas (vid 1- och 2-fas bilar)
-- Repetera för varje laddare
+**Step 6 – EV Charger**
+- Add one or more chargers
+- Per charger: name, connection sensor, switch, current setpoint entity, charger phase count (1-phase or 3-phase hardware)
+- Per car on the charger: name, SOC sensor, SOC target, **the car's phase count** (1/2/3-phase built-in charger – governs phase load), phase (for 1- and 2-phase cars)
+- Repeat for each charger
 
-Alla inställningar kan redigeras i efterhand via **Inställningar → Integrationer → Smart Energy Manager → Konfigurera**.
+All settings can be edited afterwards via **Settings → Integrations → Smart Energy Manager → Configure**.
 
-### Enhetsanmärkning
+### Unit Notes
 
-| Sensor | Enhet i HA | Inställning |
+| Sensor | Unit in HA | Setting |
 |---|---|---|
-| Elm1 (nätmätare) | kW | Nätmätare enhet → **kW** |
-| Elm3 / SolInv_prod | W | (standard W) |
-| BatInv_in_out | W, pos=laddning, neg=urladdning | (standard W) |
-| Elm4 (huslast) | W | Huslaststyrare → Elm4 |
-| Elm5 (elpanna) | W | Elpanna effektgivare → Elm5 |
-| Bil_ladd (intern) | kW | EV-laddare effektenhet → **kW** |
+| Meter 1 (grid meter) | kW | Grid meter unit → **kW** |
+| Meter 3 / SolInv_prod | W | (default W) |
+| BatInv_in_out | W, pos=charging, neg=discharging | (default W) |
+| Meter 4 (house load) | W | House load controller → Meter 4 |
+| Meter 5 (boiler) | W | Boiler power sensor → Meter 5 |
+| Car_charging (internal) | kW | EV charger power unit → **kW** |
 
 ---
 
-## Loggning
+## Logging
 
 ```yaml
 logger:
@@ -351,7 +353,7 @@ logger:
 
 ---
 
-## Exempel: Automation för vinterläge
+## Example: Automation for Winter Mode
 
 ```yaml
 automation:
@@ -370,58 +372,58 @@ automation:
           option: winter
 ```
 
-## Exempel: Dashboard (Lovelace)
+## Example: Dashboard (Lovelace)
 
 ```yaml
 type: vertical-stack
 cards:
   - type: entity
     entity: select.sem_operating_mode
-    name: Driftläge
+    name: Operating mode
 
   - type: glance
     entities:
       - entity: sensor.sem_buy_price
-        name: Köp SEK/kWh
+        name: Buy SEK/kWh
       - entity: sensor.sem_sell_price
-        name: Sälj SEK/kWh
+        name: Sell SEK/kWh
       - entity: sensor.sem_solar_surplus
-        name: Solöverskott W
+        name: Solar surplus W
       - entity: sensor.sem_house_load
-        name: Huslast W
+        name: House load W
       - entity: sensor.sem_hot_water_temp
-        name: Varmvatten °C
+        name: Hot water °C
 
   - type: gauge
     entity: sensor.sem_battery_charge_power
-    name: Batteriladdning W
+    name: Battery charging W
     max: 5000
 
   - type: entities
-    title: Laddare A
+    title: Charger A
     entities:
       - entity: sensor.sem_charger_laddare_a_connected
-        name: Ansluten
+        name: Connected
       - entity: select.sem_charger_laddare_a_active_car
-        name: Vald bil
+        name: Selected car
       - entity: sensor.sem_charger_laddare_a_current
-        name: Laddström A
+        name: Charging current A
       - entity: sensor.sem_charger_laddare_a_enabled
-        name: Laddning aktiv
+        name: Charging active
 
   - type: entities
     title: Legionella
     entities:
       - entity: sensor.sem_legionella_active
-        name: Pågår
+        name: In progress
       - entity: sensor.sem_legionella_temp_confirmed
-        name: Temp bekräftad
+        name: Temp confirmed
       - entity: sensor.sem_legionella_days_since
-        name: Dagar sedan senaste
+        name: Days since last
       - entity: sensor.sem_legionella_next_due
-        name: Nästa körning
+        name: Next run
 
   - type: entity
     entity: sensor.sem_decision_reason
-    name: Senaste beslut
+    name: Latest decision
 ```
