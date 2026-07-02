@@ -58,6 +58,16 @@ async def async_setup_entry(
         SmartEnergyBestChargePriceSensor(coordinator, entry),
     ]
 
+    # Solprognos-sensorer (visas alltid, värde 0 om Solcast ej konfigurerat)
+    entities += [
+        SmartEnergySolarNext2hSensor(coordinator, entry),
+        SmartEnergySolarNext4hSensor(coordinator, entry),
+        SmartEnergySolarNext8hSensor(coordinator, entry),
+        SmartEnergyPeakSolarKwSensor(coordinator, entry),
+        SmartEnergyHoursToSolarPeakSensor(coordinator, entry),
+        SmartEnergyWaitForSolarSensor(coordinator, entry),
+    ]
+
     # Gårdagsförbrukning om konfigurerad
     from .const import CONF_YESTERDAY_CONSUMPTION_ENTITY
     if coordinator._config.get(CONF_YESTERDAY_CONSUMPTION_ENTITY):
@@ -503,3 +513,110 @@ class SmartEnergyYesterdayConsumptionSensor(_BaseEnergySensor):
         d = self.coordinator.data
         val = d.get("yesterday_consumption_kwh") if d else None
         return round(val, 2) if val is not None else None
+
+
+# ── Solprognos-sensorer ───────────────────────────────────────────────────────
+
+class SmartEnergySolarNext2hSensor(_BaseEnergySensor):
+    """Förväntad solenergi kommande 2 timmar (kWh, median)."""
+    _attr_unique_id = "sem_solar_next_2h_kwh"
+    _attr_name = "Solar Forecast Next 2h"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:weather-sunny"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return round(d.get("solar_next_2h_kwh", 0.0), 2) if d else 0.0
+
+
+class SmartEnergySolarNext4hSensor(_BaseEnergySensor):
+    """Förväntad solenergi kommande 4 timmar (kWh, median)."""
+    _attr_unique_id = "sem_solar_next_4h_kwh"
+    _attr_name = "Solar Forecast Next 4h"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:weather-sunny"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return round(d.get("solar_next_4h_kwh", 0.0), 2) if d else 0.0
+
+
+class SmartEnergySolarNext8hSensor(_BaseEnergySensor):
+    """Förväntad solenergi kommande 8 timmar (kWh, median)."""
+    _attr_unique_id = "sem_solar_next_8h_kwh"
+    _attr_name = "Solar Forecast Next 8h"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:weather-sunny-alert"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return round(d.get("solar_next_8h_kwh", 0.0), 2) if d else 0.0
+
+
+class SmartEnergyPeakSolarKwSensor(_BaseEnergySensor):
+    """Maxeffekt från sol kommande 8h (kW)."""
+    _attr_unique_id = "sem_peak_solar_kw_next_8h"
+    _attr_name = "Peak Solar Power Next 8h"
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:solar-power-variant"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return round(d.get("peak_solar_kw_next_8h", 0.0), 2) if d else 0.0
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data
+        ps = d.get("price_schedule") if d else None
+        if not ps or not ps.peak_solar_time:
+            return {}
+        return {"peak_solar_time": ps.peak_solar_time.isoformat()}
+
+
+class SmartEnergyHoursToSolarPeakSensor(_BaseEnergySensor):
+    """Timmar tills soltoppen kommande 8h."""
+    _attr_unique_id = "sem_hours_to_solar_peak"
+    _attr_name = "Hours to Solar Peak"
+    _attr_native_unit_of_measurement = "h"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:clock-time-eight-outline"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return round(d.get("hours_to_solar_peak", 0.0), 1) if d else 0.0
+
+
+class SmartEnergyWaitForSolarSensor(_BaseEnergySensor):
+    """Indikerar om det lönar sig att vänta på sol innan batteriladdning från nät."""
+    _attr_unique_id = "sem_wait_for_solar"
+    _attr_name = "Wait for Solar"
+    _attr_icon = "mdi:sun-clock"
+
+    @property
+    def native_value(self) -> str:
+        d = self.coordinator.data
+        return "on" if (d and d.get("should_wait_for_solar")) else "off"
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data
+        if not d:
+            return {}
+        return {
+            "solar_next_2h_kwh": round(d.get("solar_next_2h_kwh", 0.0), 2),
+            "hours_to_solar_peak": round(d.get("hours_to_solar_peak", 0.0), 1),
+            "peak_solar_kw": round(d.get("peak_solar_kw_next_8h", 0.0), 2),
+        }

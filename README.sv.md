@@ -1,8 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.4-blue)
+![Version](https://img.shields.io/badge/version-0.5.5-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.5
+
+- **Solcast 30-minutersprognos integrerad** – `detailedForecast`-attributet från Solcast-sensorerna matchas mot Nordpools prisslottar vilket ger prisschemat per-slot soldata. Nya beslut: hoppa över batteriladdning från elnät om stor sol väntas inom 2 timmar, och skapa extra headroom i batteriet inför soltopp. Sex nya sensorer exponeras (se [Entiteter](#entiteter)).
 
 ## Nyheter i 0.5.4
 
@@ -61,6 +65,14 @@ Baserat på Nordpools `raw_today`/`raw_tomorrow`-attribut beräknas varje cykel:
 - **Bästa laddnings-/urladdningstimme** kommande 12h – styr batteribeslut i både auto- och vinterläge
 - **Proaktiv absorption** – om ≥ 4 kvartstimmar med negativt säljpris väntar inom 2h, hålls batteriet inte fulladdat (headroom upp till 30%) och extra varmvatten/EV-laddning startas proaktivt för att skapa utrymme innan de negativa priserna inträffar
 - Resultatet exponeras via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price` och `sensor.sem_best_charge_price`
+
+### Solcast-prognos med 30-minutersupplösning
+Om Solcast-sensorer är konfigurerade läses `detailedForecast`-attributet (30-minuters `pv_estimate`-värden i kW) varje cykel och matchas mot Nordpools prisslottar:
+- **Sol per slot** – varje prissslott får ett förväntat soleffektvärde (kW) och energimängd (kWh)
+- **Vänta på sol** – om ≥ 2 kWh sol väntas inom 2 timmar *och* aktuellt köppris överstiger 0,50 SEK/kWh hoppas batteriladdning från nät över för att spara utrymme åt gratis solel
+- **Solaggregat** – rullande prognos för kommande 2 h, 4 h och 8 h exponeras som sensorer
+- **Soltopp** – förväntad toppeffekt (kW) inom 8 h och antal timmar tills den inträffar
+- `sensor.sem_wait_for_solar` slår på `on` när systemet håller tillbaka elnätsladdning i väntan på sol
 
 ### Vinterläge
 - Ladda batteri nattetid när priset underskrider konfigurerbar gräns
@@ -224,6 +236,12 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 | `sensor.sem_best_discharge_price` | Bästa (högsta) köppris för urladdning kommande 12h, med tidpunkt som attribut |
 | `sensor.sem_best_charge_price` | Lägsta köppris för laddning kommande 12h, med tidpunkt som attribut |
 | `sensor.sem_yesterday_consumption` | Gårdagens förbrukning exkl. EV-laddning (kWh) – kräver konfigurerad sensor |
+| `sensor.sem_solar_next_2h_kwh` | Förväntad solenergi kommande 2 h (kWh, Solcast median) |
+| `sensor.sem_solar_next_4h_kwh` | Förväntad solenergi kommande 4 h (kWh, Solcast median) |
+| `sensor.sem_solar_next_8h_kwh` | Förväntad solenergi kommande 8 h (kWh, Solcast median) |
+| `sensor.sem_peak_solar_kw_next_8h` | Förväntad toppeffekt från sol inom 8 h (kW) – attribut: `peak_solar_time` |
+| `sensor.sem_hours_to_solar_peak` | Timmar tills soltoppen inom 8 h |
+| `sensor.sem_wait_for_solar` | `on` när systemet håller tillbaka elnätsladdning i väntan på sol |
 
 **Per laddare** (ersätt `<laddare>` med laddarens namn i gemener):
 

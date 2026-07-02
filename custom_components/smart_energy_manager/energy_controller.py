@@ -420,12 +420,21 @@ class EnergyController:
                     remaining_surplus = max(0.0, remaining_surplus - consumed)
                     decision.reason += f" | {ch.config.name} {cur:.0f}A sol"
 
-        # Ladda batteri
+        # Ladda batteri från solöverskott
+        # Vänta om stor sol väntas inom 2h och priset är tillräckligt högt
+        # för att motivera att hålla utrymme i batteriet.
+        ps = state.price_schedule
+        wait_solar = ps is not None and ps.should_wait_for_solar
         if remaining_surplus > 100 and battery_soc < self.battery_max_soc:
-            charge_w = min(state.battery_max_power_kw * 1000, remaining_surplus)
-            decision.battery_charge_power_w = charge_w
-            remaining_surplus -= charge_w
-            decision.reason += f" | Batteri +{charge_w:.0f}W"
+            if wait_solar:
+                decision.reason += (
+                    f" | Väntar på sol ({ps.solar_next_2h_kwh:.1f} kWh inom 2h)"
+                )
+            else:
+                charge_w = min(state.battery_max_power_kw * 1000, remaining_surplus)
+                decision.battery_charge_power_w = charge_w
+                remaining_surplus -= charge_w
+                decision.reason += f" | Batteri +{charge_w:.0f}W"
 
         # Extra varmvatten
         if remaining_surplus > 500 and battery_soc >= self.battery_max_soc and self._can_start_extra_hot_water(state):
@@ -437,7 +446,6 @@ class EnergyController:
         if solar_w < house_load_w and battery_soc > self.battery_min_soc:
             deficit_w = house_load_w - solar_w
             discharge_w = min(state.battery_max_power_kw * 1000, deficit_w)
-            ps = state.price_schedule
             now = datetime.now().astimezone()
             # Ladda ur om: priset är tillräckligt högt ELLER detta är bästa timmen kommande 12h
             is_good_discharge = buy_price > self.auto_discharge_threshold

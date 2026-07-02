@@ -1,10 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.4-blue)
+![Version](https://img.shields.io/badge/version-0.5.5-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/README.sv.md)
+
+## What's New in 0.5.5
+
+- **Solcast 30-minute solar forecast integration** – the `detailedForecast` attribute from Solcast sensors is matched against Nord Pool price slots, giving the scheduler per-slot solar data. New decisions: skip grid battery charging when significant solar is expected within 2 h, and create extra battery headroom ahead of a large solar peak. Six new sensors exposed (see [Entities](#entities)).
 
 ## What's New in 0.5.4
 
@@ -63,6 +67,14 @@ Based on Nord Pool's `raw_today`/`raw_tomorrow` attributes, the following are ca
 - **Best charging/discharging hour** for the coming 12h – governs battery decisions in both auto and winter mode
 - **Proactive absorption** – if ≥ 4 quarter-hours with negative sell price are expected within 2h, the battery is not kept fully charged (headroom up to 30%) and extra hot water/EV charging is started proactively to create room before the negative prices occur
 - Results are exposed via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price`, and `sensor.sem_best_charge_price`
+
+### Solcast Solar Forecast (30-minute resolution)
+If Solcast sensors are configured, the `detailedForecast` attribute (30-minute `pv_estimate` values in kW) is read each cycle and matched against Nord Pool price slots:
+- **Per-slot solar data** – each price slot gets an expected solar power value (kW) and energy (kWh)
+- **Wait for solar** – if ≥ 2 kWh of solar is expected within 2 h *and* the current buy price is above SEK 0.50/kWh, battery charging from the grid is skipped to preserve headroom for free solar
+- **Solar aggregates** – rolling forecasts for the next 2 h, 4 h, and 8 h exposed as sensors
+- **Peak solar** – the expected peak power (kW) within 8 h and how many hours until it occurs
+- `sensor.sem_wait_for_solar` turns `on` when the system is holding back grid charging in anticipation of solar
 
 ### Winter Mode
 - Charge battery overnight when the price is below a configurable limit
@@ -226,6 +238,12 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 | `sensor.sem_best_discharge_price` | Best (highest) buy price for discharging in the coming 12h, with timestamp as attribute |
 | `sensor.sem_best_charge_price` | Lowest buy price for charging in the coming 12h, with timestamp as attribute |
 | `sensor.sem_yesterday_consumption` | Yesterday's consumption excl. EV charging (kWh) – requires a configured sensor |
+| `sensor.sem_solar_next_2h_kwh` | Expected solar energy next 2 h (kWh, Solcast median) |
+| `sensor.sem_solar_next_4h_kwh` | Expected solar energy next 4 h (kWh, Solcast median) |
+| `sensor.sem_solar_next_8h_kwh` | Expected solar energy next 8 h (kWh, Solcast median) |
+| `sensor.sem_peak_solar_kw_next_8h` | Expected peak solar power within 8 h (kW) – attribute: `peak_solar_time` |
+| `sensor.sem_hours_to_solar_peak` | Hours until solar peak within 8 h |
+| `sensor.sem_wait_for_solar` | `on` when the system is holding back grid charging in anticipation of solar |
 
 **Per charger** (replace `<charger>` with the charger's name in lowercase):
 

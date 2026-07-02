@@ -329,7 +329,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             )
             solar_surplus_w = max(0.0, solar_w - house_load_w)
 
-            # Prisschema från Nordpool-attributen
+            # Prisschema från Nordpool + Solcast-attributen
             now = datetime.now().astimezone()
             nordpool_entity = c.get(CONF_NORDPOOL_ENTITY)
             price_schedule = None
@@ -337,8 +337,23 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 nordpool_state = self.hass.states.get(nordpool_entity)
                 if nordpool_state and nordpool_state.attributes:
                     try:
+                        solcast_today_attrs = None
+                        solcast_tomorrow_attrs = None
+                        sc_today = c.get(CONF_SOLCAST_TODAY)
+                        sc_tomorrow = c.get(CONF_SOLCAST_TOMORROW)
+                        if sc_today:
+                            st = self.hass.states.get(sc_today)
+                            if st:
+                                solcast_today_attrs = dict(st.attributes)
+                        if sc_tomorrow:
+                            st = self.hass.states.get(sc_tomorrow)
+                            if st:
+                                solcast_tomorrow_attrs = dict(st.attributes)
+
                         price_schedule = self._price_scheduler.compute(
-                            nordpool_state.attributes, now
+                            nordpool_state.attributes, now,
+                            solcast_today_attrs=solcast_today_attrs,
+                            solcast_tomorrow_attrs=solcast_tomorrow_attrs,
                         )
                     except Exception as e:
                         _LOGGER.warning("Kunde inte beräkna prisschema: %s", e)
@@ -437,6 +452,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "negative_slots_ahead": price_schedule.negative_slots_ahead if price_schedule else 0,
                 "best_discharge_price": price_schedule.best_discharge_slot.buy_sek if price_schedule and price_schedule.best_discharge_slot else None,
                 "best_charge_price": price_schedule.best_charge_slot.buy_sek if price_schedule and price_schedule.best_charge_slot else None,
+                "solar_next_2h_kwh": price_schedule.solar_next_2h_kwh if price_schedule else 0.0,
+                "solar_next_4h_kwh": price_schedule.solar_next_4h_kwh if price_schedule else 0.0,
+                "solar_next_8h_kwh": price_schedule.solar_next_8h_kwh if price_schedule else 0.0,
+                "peak_solar_kw_next_8h": price_schedule.peak_solar_kw_next_8h if price_schedule else 0.0,
+                "hours_to_solar_peak": price_schedule.hours_to_solar_peak if price_schedule else 0.0,
+                "should_wait_for_solar": price_schedule.should_wait_for_solar if price_schedule else False,
             }
 
         except Exception as err:
