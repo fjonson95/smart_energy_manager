@@ -196,6 +196,10 @@ class EnergyState:
     # Gårdagens förbrukning exkl. EV-laddning (kWh)
     yesterday_consumption_kwh: Optional[float] = None
 
+    # Sol-tider (från HA sun-integration, används för dynamisk kvällsfylling)
+    sun_next_setting: Optional[datetime] = None
+    sun_next_rising: Optional[datetime] = None
+
     # Driftläge
     operating_mode: str = MODE_AUTO
     winter_mode: bool = False
@@ -257,6 +261,8 @@ class EnergyController:
         winter_min_soc: float = 20.0,
         winter_max_soc: float = 95.0,
         auto_discharge_threshold_sek: float = 0.20,
+        sell_solar_min_price_sek: float = 0.80,
+        evening_min_soc: float = 90.0,
     ):
         self.max_current = max_current_per_phase
         self.voltage = grid_voltage
@@ -269,6 +275,8 @@ class EnergyController:
         self.winter_min_soc = winter_min_soc
         self.winter_max_soc = winter_max_soc
         self.auto_discharge_threshold = auto_discharge_threshold_sek
+        self.sell_solar_min_price = sell_solar_min_price_sek
+        self.evening_min_soc = evening_min_soc
 
     # ── Publik ingångspunkt ───────────────────────────────────────────
 
@@ -420,21 +428,91 @@ class EnergyController:
                     remaining_surplus = max(0.0, remaining_surplus - consumed)
                     decision.reason += f" | {ch.config.name} {cur:.0f}A sol"
 
-        # Ladda batteri från solöverskott
-        # Vänta om stor sol väntas inom 2h och priset är tillräckligt högt
-        # för att motivera att hålla utrymme i batteriet.
+        # Batteriladdning från solöverskott – tre styrfaktorer:
+        #
+        # 1. Kvällsfylling: efter evening_fill_hour, fyll alltid batteriet
+        #    inför natten (solar_w > 0 = solen fortfarande uppe).
+        # 2. Säljpris: om säljpris är högt, exportera hellre än att lagra.
+        # 3. Vänta på sol: om solen knappt producerar men stor sol väntas,
+        #    håll plats i batteriet.
         ps = state.price_schedule
-        wait_solar = ps is not None and ps.should_wait_for_solar
+        now_aware = datetime.now().astimezone()
+
+        # Kvällsfylling: Solcast-prognosen för platsen avgör om solen räcker
+        # för att fylla batteriet innan solnedgång.
+        #
+        # Logik: summera förväntad solenergi (kWh) från Solcast-slots fram till
+        # solnedgång. Om den summan understiger vad batteriet behöver för att nå
+        # evening_min_soc → starta kvällsfylling nu, oavsett säljpris.
+        #
+        # Fungerar automatiskt för alla årstider eftersom Solcast känner till
+        # exakt panelvinkel och plats.
+        solar_until_sunset_kwh = 0.0
+        sun_set: Optional[datetime] = None
+        if state.sun_next_setting is not None:
+            sun_set = state.sun_next_setting
+            if sun_set.tzinfo is None:
+                sun_set = sun_set.astimezone()
+            if ps and ps.slots:
+                solar_until_sunset_kwh = sum(
+                    s.solar_kwh for s in ps.slots
+                    if s.end > now_aware and s.start < sun_set
+                )
+
+        battery_remaining_kwh = (
+            state.battery_capacity_kwh
+            * max(0.0, self.evening_min_soc - battery_soc)
+            / 100.0
+        )
+
+        evening_fill = (
+            sun_set is not None
+            and solar_w > 100                              # sol fortfarande igång
+            and battery_soc < self.evening_min_soc
+            and solar_until_sunset_kwh < battery_remaining_kwh  # prognosen räcker inte
+        )
+
+        _LOGGER.debug(
+            "Kvällsfylling: sol_kvar=%.1f kWh batteri_kvar=%.1f kWh → %s",
+            solar_until_sunset_kwh, battery_remaining_kwh, evening_fill,
+        )
+
+        # Föredrar export om säljpriset är högt – men aldrig under kvällsfylling.
+        prefer_sell = (
+            sell_price >= self.sell_solar_min_price
+            and not evening_fill
+        )
+
+        # Vänta på sol: solen inte igång än men stor sol väntas.
+        # Gäller inte under kvällsfylling.
+        wait_solar = (
+            ps is not None
+            and ps.should_wait_for_solar
+            and solar_w < 500
+            and not evening_fill
+        )
+
         if remaining_surplus > 100 and battery_soc < self.battery_max_soc:
             if wait_solar:
                 decision.reason += (
                     f" | Väntar på sol ({ps.solar_next_2h_kwh:.1f} kWh inom 2h)"
                 )
+            elif prefer_sell:
+                decision.reason += (
+                    f" | Exporterar sol (sälj {sell_price:.2f} kr/kWh)"
+                )
             else:
                 charge_w = min(state.battery_max_power_kw * 1000, remaining_surplus)
                 decision.battery_charge_power_w = charge_w
                 remaining_surplus -= charge_w
-                decision.reason += f" | Batteri +{charge_w:.0f}W"
+                if evening_fill:
+                    suffix = (
+                        f" (kvällsfylling: {solar_until_sunset_kwh:.1f} kWh "
+                        f"sol kvar < {battery_remaining_kwh:.1f} kWh behövs)"
+                    )
+                else:
+                    suffix = ""
+                decision.reason += f" | Batteri +{charge_w:.0f}W{suffix}"
 
         # Extra varmvatten
         if remaining_surplus > 500 and battery_soc >= self.battery_max_soc and self._can_start_extra_hot_water(state):

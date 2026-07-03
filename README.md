@@ -1,10 +1,17 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.5-blue)
+![Version](https://img.shields.io/badge/version-0.5.6-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/README.sv.md)
+
+## What's New in 0.5.6
+
+- **Sell-price-aware battery charging** – when the sell price is at or above a configurable threshold (default SEK 0.80/kWh), solar surplus is exported to the grid instead of stored in the battery.
+- **Solcast-based evening fill** – the system compares the remaining Solcast solar forecast until sunset against how much energy the battery still needs to reach the configured minimum SOC (`evening_min_soc`, default 90 %). If the forecast falls short, the battery is charged from solar (or grid) even when sell prices are high. Because the Solcast forecast is calibrated to the actual panel location and angle, this works correctly across all seasons without any fixed clock time.
+- **Fix: battery no longer waits for solar during active production** – previously the "wait for solar" flag blocked battery charging all day whenever significant solar was expected within 2 h. The guard now only activates when current solar output is below 500 W (sun not yet producing).
+- **Sun integration** – `sun_next_setting` and `sun_next_rising` are read from the `sun.sun` entity and added to `EnergyState` for use in the evening-fill calculation.
 
 ## What's New in 0.5.5
 

@@ -172,6 +172,24 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             return False
         return state.state.lower() in ("on", "true", "1", "home", "charging")
 
+    def _get_sun_datetime(self, attribute: str) -> Optional[datetime]:
+        """Läs sol-tidpunkt från sun.sun-entitetens attribut."""
+        sun_state = self.hass.states.get("sun.sun")
+        if sun_state is None:
+            return None
+        raw = sun_state.attributes.get(attribute)
+        if raw is None:
+            return None
+        try:
+            if isinstance(raw, datetime):
+                return raw
+            dt = datetime.fromisoformat(str(raw))
+            if dt.tzinfo is None:
+                dt = dt.astimezone()
+            return dt
+        except (ValueError, TypeError):
+            return None
+
     def _is_charger_connected(self, entity_id: Optional[str]) -> bool:
         """Kontrollera om laddarsensorn indikerar att en bil är ansluten."""
         if not entity_id:
@@ -416,6 +434,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 winter_mode=bool(c.get(CONF_WINTER_MODE_ENABLED, False)),
                 price_schedule=price_schedule,
                 yesterday_consumption_kwh=yesterday_kwh,
+                sun_next_setting=self._get_sun_datetime("next_setting"),
+                sun_next_rising=self._get_sun_datetime("next_rising"),
             )
             self._state = state
 

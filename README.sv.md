@@ -1,8 +1,15 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.5-blue)
+![Version](https://img.shields.io/badge/version-0.5.6-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.6
+
+- **Säljprismedveten batteriladdning** – när säljpriset är lika med eller överstiger en konfigurerbar gräns (standard 0,80 SEK/kWh) exporteras solöverskottet till elnätet istället för att lagras i batteriet.
+- **Solcast-baserad kvällsfylling** – systemet jämför återstående Solcast-prognos fram till solnedgång mot hur mycket energi batteriet fortfarande behöver för att nå konfigurerat lägsta SOC inför natten (`evening_min_soc`, standard 90 %). Om prognosen inte räcker laddas batteriet från sol (eller nät) även när säljpriserna är höga. Eftersom Solcast-prognosen är kalibrerad mot den faktiska panelplatsen och vinkeln fungerar detta korrekt under alla årstider utan någon fast klocktid.
+- **Fix: batteriet väntar inte längre på sol under aktiv produktion** – tidigare blockerade "vänta på sol"-flaggan batteriladdning hela dagen när stor sol väntades inom 2 timmar. Spärren aktiveras nu bara när aktuell solproduktion understiger 500 W (solen producerar ännu inte).
+- **Sol-integration** – `sun_next_setting` och `sun_next_rising` läses från `sun.sun`-entiteten och läggs till `EnergyState` för kvällsfyllningsberäkningen.
 
 ## Nyheter i 0.5.5
 
