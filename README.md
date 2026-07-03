@@ -4,7 +4,7 @@
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
-Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/README.sv.md)
+Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
 ## What's New in 0.5.6
 
