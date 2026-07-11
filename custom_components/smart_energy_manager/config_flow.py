@@ -45,6 +45,8 @@ from .const import (
     DEFAULT_WINTER_CHEAP_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD,
     DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
+    CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH,
     CONF_WINTER_CHEAP_HOUR_THRESHOLD, CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD,
     CONF_WINTER_MIN_SOC, CONF_WINTER_MAX_SOC,
 )
@@ -106,6 +108,10 @@ def _grid_schema(d: dict) -> vol.Schema:
             )
         ),
         vol.Optional(CONF_YESTERDAY_CONSUMPTION_ENTITY, default=_d(d, CONF_YESTERDAY_CONSUMPTION_ENTITY, "")): _opt_entity_selector(),
+        vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=_d(d, CONF_OUTDOOR_TEMP_ENTITY, "")): _opt_entity_selector(),
+        vol.Optional(CONF_DISINFECTING_EXTRA_KWH, default=_d(d, CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX)
+        ),
     })
 
 

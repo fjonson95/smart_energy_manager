@@ -1,10 +1,14 @@
 """Sensors for Smart Energy Manager."""
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import UnitOfPower, UnitOfElectricCurrent
 
@@ -58,6 +62,15 @@ async def async_setup_entry(
         SmartEnergyBestChargePriceSensor(coordinator, entry),
     ]
 
+    # Batterikostandssensorer:
+    #   nät→batteri * köppris, sol→batteri * säljpris, urladdning * snittpris
+    _bat_cost = BatteryAccumulatedCostSensor(coordinator, entry)
+    entities += [
+        _bat_cost,
+        BatteryAveragePriceSensor(coordinator, entry, _bat_cost),
+        BatteryEnergyKwhSensor(coordinator, entry),
+    ]
+
     # Solprognos-sensorer (visas alltid, värde 0 om Solcast ej konfigurerat)
     entities += [
         SmartEnergySolarNext2hSensor(coordinator, entry),
@@ -69,9 +82,13 @@ async def async_setup_entry(
     ]
 
     # Gårdagsförbrukning om konfigurerad
-    from .const import CONF_YESTERDAY_CONSUMPTION_ENTITY
+    from .const import CONF_YESTERDAY_CONSUMPTION_ENTITY, CONF_OUTDOOR_TEMP_ENTITY
     if coordinator._config.get(CONF_YESTERDAY_CONSUMPTION_ENTITY):
         entities.append(SmartEnergyYesterdayConsumptionSensor(coordinator, entry))
+
+    # Förbrukningsprognos om utomhustemperatur är konfigurerad
+    if coordinator._config.get(CONF_OUTDOOR_TEMP_ENTITY):
+        entities.append(PredictedHouseLoadSensor(coordinator, entry))
 
     async_add_entities(entities)
 
@@ -619,4 +636,223 @@ class SmartEnergyWaitForSolarSensor(_BaseEnergySensor):
             "solar_next_2h_kwh": round(d.get("solar_next_2h_kwh", 0.0), 2),
             "hours_to_solar_peak": round(d.get("hours_to_solar_peak", 0.0), 1),
             "peak_solar_kw": round(d.get("peak_solar_kw_next_8h", 0.0), 2),
+        }
+
+
+# ── Batterikostnadssensorer ───────────────────────────────────────────────────
+
+class BatteryAccumulatedCostSensor(_BaseEnergySensor, RestoreEntity):
+    """Ackumulerad kostnad för energin som finns i batteriet.
+
+    Modell:
+      - Nät → batteri:  grid_kwh  * köppris
+      - Sol → batteri:  solar_kwh * säljpris  (alternativkostnad – du offrar sälj-intäkten)
+      - Urladdning:     cost *= new_energy / old_energy  (= discharge_kwh * snittpris)
+
+    battery_power_w > 0 = laddar, < 0 = laddar ur.
+    """
+
+    _attr_unique_id  = "sem_battery_accumulated_cost"
+    _attr_name       = "Battery Accumulated Cost"
+    _attr_native_unit_of_measurement = "SEK"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon         = "mdi:battery-charging-medium"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._cost_sek: float = 0.0
+        self._last_update: datetime | None = None
+        self._last_soc: float | None = None
+        self._solar_kwh_total: float = 0.0
+        self._grid_kwh_total: float = 0.0
+        self._last_sell_price: float = 0.0
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state not in ("unknown", "unavailable", None):
+            try:
+                self._cost_sek        = float(last.attributes.get("accumulated_cost_sek", 0.0))
+                self._solar_kwh_total = float(last.attributes.get("solar_kwh_total", 0.0))
+                self._grid_kwh_total  = float(last.attributes.get("grid_kwh_total", 0.0))
+            except (ValueError, TypeError):
+                self._cost_sek = 0.0
+
+    def _handle_coordinator_update(self) -> None:
+        now = datetime.now()
+        state = self.coordinator.current_state
+
+        if state is not None and self._last_update is not None and self._last_soc is not None:
+            dt_h = (now - self._last_update).total_seconds() / 3600.0
+
+            battery_w  = state.battery_power_w
+            solar_w    = state.solar_power_w
+            house_w    = state.house_load_w
+            soc        = state.battery_soc_pct
+            capacity   = state.battery_capacity_kwh
+            buy_price  = max(0.0, state.buy_price_sek_kwh)
+            sell_price = state.sell_price_sek_kwh
+            self._last_sell_price = sell_price
+
+            if battery_w > 0:
+                surplus_w    = max(0.0, solar_w - house_w)
+                solar_to_bat = min(battery_w, surplus_w)
+                grid_to_bat  = max(0.0, battery_w - solar_to_bat)
+
+                grid_kwh  = grid_to_bat  / 1000.0 * dt_h
+                solar_kwh = solar_to_bat / 1000.0 * dt_h
+
+                self._grid_kwh_total  += grid_kwh
+                self._solar_kwh_total += solar_kwh
+                self._cost_sek += grid_kwh * buy_price + solar_kwh * sell_price
+
+            elif battery_w < 0:
+                old_energy = self._last_soc / 100.0 * capacity
+                new_energy = soc           / 100.0 * capacity
+                if old_energy > 0.01:
+                    self._cost_sek *= max(0.0, new_energy / old_energy)
+                self._cost_sek = max(0.0, self._cost_sek)
+
+        if state is not None:
+            self._last_soc = state.battery_soc_pct
+        self._last_update = now
+        super()._handle_coordinator_update()
+
+    def _energy_in_battery_kwh(self) -> float:
+        s = self.coordinator.current_state
+        if not s:
+            return 0.0
+        return s.battery_soc_pct / 100.0 * s.battery_capacity_kwh
+
+    @property
+    def native_value(self) -> float:
+        return round(self._cost_sek, 4)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        energy = self._energy_in_battery_kwh()
+        avg    = self._cost_sek / energy if energy > 0.01 else 0.0
+        return {
+            "accumulated_cost_sek":  round(self._cost_sek, 4),
+            "energy_in_battery_kwh": round(energy, 2),
+            "average_price_sek_kwh": round(avg, 4),
+            "solar_kwh_total":       round(self._solar_kwh_total, 4),
+            "grid_kwh_total":        round(self._grid_kwh_total, 4),
+            "last_sell_price":       round(self._last_sell_price, 4),
+        }
+
+
+class BatteryAveragePriceSensor(_BaseEnergySensor, RestoreEntity):
+    """Snittpris per kWh för energin som finns i batteriet.
+
+    Läser direkt från BatteryAccumulatedCostSensor för att alltid vara konsistent
+    med accumulated_cost / energy_in_battery. Ingen egen ackumulator.
+    """
+
+    _attr_unique_id  = "sem_battery_average_price"
+    _attr_name       = "Battery Average Price"
+    _attr_native_unit_of_measurement = "SEK/kWh"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon         = "mdi:battery-heart"
+
+    def __init__(self, coordinator, entry, cost_sensor: "BatteryAccumulatedCostSensor"):
+        super().__init__(coordinator, entry)
+        self._cost_sensor = cost_sensor
+
+    def _energy_in_battery_kwh(self) -> float:
+        s = self.coordinator.current_state
+        if not s:
+            return 0.0
+        return s.battery_soc_pct / 100.0 * s.battery_capacity_kwh
+
+    @property
+    def native_value(self) -> float:
+        energy = self._energy_in_battery_kwh()
+        cost   = self._cost_sensor._cost_sek
+        return round(cost / energy, 4) if energy > 0.01 else 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        energy = self._energy_in_battery_kwh()
+        cost   = self._cost_sensor._cost_sek
+        return {
+            "accumulated_cost_sek":  round(cost, 4),
+            "energy_in_battery_kwh": round(energy, 2),
+        }
+
+
+class PredictedHouseLoadSensor(_BaseEnergySensor):
+    """Beräknad daglig husförbrukning (kWh) baserat på utomhustemperatur.
+
+    Modell: base_dhw + k × max(0, T_balance − temp)
+    Kalibrerad mot IVT-historik nov 2025–jul 2026:
+      base_dhw = 1.33 kWh, k = 1.275 kWh/gradddag, T_balance = 14 °C
+    """
+
+    _attr_unique_id   = "sem_predicted_house_load"
+    _attr_name        = "Predicted House Load"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon         = "mdi:home-lightning-bolt"
+
+    @property
+    def native_value(self) -> float | None:
+        s = self.coordinator.current_state
+        if not s or s.predicted_daily_kwh == 0.0:
+            return None
+        return round(s.predicted_daily_kwh, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        s = self.coordinator.current_state
+        if not s:
+            return {}
+        from .const import DEFAULT_HEAT_BALANCE_TEMP, DEFAULT_BASE_DHW_KWH, DEFAULT_DISINFECTING_EXTRA_KWH
+        t_bal = float(self.coordinator._config.get("heat_balance_temp", DEFAULT_HEAT_BALANCE_TEMP))
+        base  = float(self.coordinator._config.get("base_dhw_kwh", DEFAULT_BASE_DHW_KWH))
+        extra = float(self.coordinator._config.get("disinfecting_extra_kwh", DEFAULT_DISINFECTING_EXTRA_KWH))
+        temp  = s.avg_temp_yesterday_c if s.avg_temp_yesterday_c is not None else s.outdoor_temp_c
+        hdd   = max(0.0, t_bal - temp) if temp is not None else None
+        return {
+            "temp_used_c":          round(temp, 1) if temp is not None else None,
+            "temp_source":          "yesterday_avg" if s.avg_temp_yesterday_c is not None else "current",
+            "outdoor_temp_c":       round(s.outdoor_temp_c, 1) if s.outdoor_temp_c is not None else None,
+            "avg_temp_yesterday_c": round(s.avg_temp_yesterday_c, 1) if s.avg_temp_yesterday_c is not None else None,
+            "heating_degree_day":   round(hdd, 1) if hdd is not None else None,
+            "dhw_base_kwh":         round(base, 2),
+            "heating_kwh":          round(max(0.0, s.predicted_daily_kwh - base - (extra if s.disinfecting_active else 0.0)), 2),
+            "disinfecting_active":  s.disinfecting_active,
+            "disinfecting_extra_kwh": round(extra, 2) if s.disinfecting_active else 0.0,
+        }
+
+
+class BatteryEnergyKwhSensor(_BaseEnergySensor):
+    """Faktisk energi lagrad i batteriet (kWh), beräknat från SOC × kapacitet."""
+
+    _attr_unique_id   = "sem_battery_energy_kwh"
+    _attr_name        = "Battery Energy"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon         = "mdi:battery-charging-medium"
+
+    @property
+    def native_value(self) -> float | None:
+        s = self.coordinator.current_state
+        if not s:
+            return None
+        return round(s.battery_soc_pct / 100.0 * s.battery_capacity_kwh, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        s = self.coordinator.current_state
+        if not s:
+            return {}
+        return {
+            "soc_pct":            round(s.battery_soc_pct, 1),
+            "capacity_kwh":       s.battery_capacity_kwh,
+            "remaining_capacity_kwh": round((1 - s.battery_soc_pct / 100.0) * s.battery_capacity_kwh, 2),
         }

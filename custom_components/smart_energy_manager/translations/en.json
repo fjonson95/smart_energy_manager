@@ -21,7 +21,9 @@
           "house_load_entity": "House load sensor (Elm4 – direct meter)",
           "grid_power_unit": "Grid power unit (W or kW)",
           "ev_power_unit": "EV charger power unit (W or kW)",
-          "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)"
+          "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)",
+          "outdoor_temp_entity": "Outdoor temperature (sensor, optional – enables consumption forecast)",
+          "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)"
         }
       },
       "solar": {
@@ -128,7 +130,9 @@
           "house_load_entity": "House load sensor (Elm4 – direct meter)",
           "grid_power_unit": "Grid power unit (W or kW)",
           "ev_power_unit": "EV charger power unit (W or kW)",
-          "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)"
+          "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)",
+          "outdoor_temp_entity": "Outdoor temperature (sensor, optional – enables consumption forecast)",
+          "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)"
         }
       },
       "solar_opts": {

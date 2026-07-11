@@ -1,10 +1,20 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.6-blue)
+![Version](https://img.shields.io/badge/version-0.5.7-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.7
+
+- **Battery cost accounting** – three new sensors track the accumulated cost of energy currently stored in the battery:
+  - `sensor.sem_battery_accumulated_cost` – total cost (SEK) of energy in the battery. Grid energy is priced at the current buy price; solar energy is priced at the current sell price (opportunity cost – you could have sold it instead). During discharge the cost is reduced proportionally.
+  - `sensor.sem_battery_average_price` – average cost per kWh currently in the battery (SEK/kWh). Always derived directly from the accumulated cost sensor to stay consistent.
+  - Diagnostic attributes on the cost sensor: `solar_kwh_total`, `grid_kwh_total`, `last_sell_price`.
+- **Proactive absorption revised** – when negative electricity prices are expected within 2 h, the system now only holds battery headroom (up to 30%). Extra hot water and EV pre-charging are **no longer started proactively** – they wait until the price is actually negative. After a negative price period has passed today, extra hot water is still offered when the boiler needs it.
+- **Solar-active battery charge cap** – when solar production exceeds 100 W the battery is never charged beyond the actual solar surplus; grid power is never drawn into the battery while the sun is producing.
+- **Discharge blocked when solar covers load** – if solar output already covers the full house load the system no longer forces battery discharge, even at high prices, since no grid power is being purchased anyway.
 
 ## What's New in 0.5.6
 
@@ -72,7 +82,7 @@ Grid (3-phase, max 20A/phase)
 ### Price Planning (quarter-hours ahead)
 Based on Nord Pool's `raw_today`/`raw_tomorrow` attributes, the following are calculated each cycle:
 - **Best charging/discharging hour** for the coming 12h – governs battery decisions in both auto and winter mode
-- **Proactive absorption** – if ≥ 4 quarter-hours with negative sell price are expected within 2h, the battery is not kept fully charged (headroom up to 30%) and extra hot water/EV charging is started proactively to create room before the negative prices occur
+- **Proactive absorption** – if ≥ 4 quarter-hours with negative sell price are expected within 2h, the battery holds headroom (up to 30%) to make room for solar. Extra hot water and EV charging are **not** started proactively; they wait until the price is actually negative
 - Results are exposed via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price`, and `sensor.sem_best_charge_price`
 
 ### Solcast Solar Forecast (30-minute resolution)
@@ -251,6 +261,8 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 | `sensor.sem_peak_solar_kw_next_8h` | Expected peak solar power within 8 h (kW) – attribute: `peak_solar_time` |
 | `sensor.sem_hours_to_solar_peak` | Hours until solar peak within 8 h |
 | `sensor.sem_wait_for_solar` | `on` when the system is holding back grid charging in anticipation of solar |
+| `sensor.sem_battery_accumulated_cost` | Accumulated cost (SEK) of energy currently in the battery – attributes: `solar_kwh_total`, `grid_kwh_total`, `average_price_sek_kwh`, `last_sell_price` |
+| `sensor.sem_battery_average_price` | Average cost per kWh of energy currently in the battery (SEK/kWh) |
 
 **Per charger** (replace `<charger>` with the charger's name in lowercase):
 

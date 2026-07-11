@@ -42,6 +42,11 @@ from .const import (
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     CHARGER_CONNECTED_STATES, NO_CAR_SELECTED,
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
+    CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_HEAT_BALANCE_TEMP, CONF_HEAT_FACTOR_KWH_DD, CONF_BASE_DHW_KWH,
+    CONF_DISINFECTING_EXTRA_KWH,
+    DEFAULT_HEAT_BALANCE_TEMP, DEFAULT_HEAT_FACTOR_KWH_DD, DEFAULT_BASE_DHW_KWH,
+    DEFAULT_DISINFECTING_EXTRA_KWH,
     MODE_AUTO,
 )
 from .price_scheduler import PriceScheduler
@@ -111,6 +116,16 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # Styrs av select-entiteten i select.py
         self._active_cars: dict[str, str] = {}
         self._init_active_cars()
+
+        # Vakthund: när laddning beordrades (bil vald) men ingen effekt syns ännu
+        # charger_name → tidpunkt då laddning startades utan ström
+        self._charge_command_times: dict[str, datetime] = {}
+
+        # Rullande temperaturmedelvärde för förbrukningsprognos
+        # Modellen är kalibrerad mot dygnsmedeltemperatur, inte ögonblicksvärde
+        self._temp_samples: list[float] = []
+        self._temp_sample_date: str = ""
+        self._yesterday_avg_temp: Optional[float] = None
 
         # Minimitid-spärr för extra varmvatten (förhindrar flimmer på/av)
         self._extra_hot_water_started_at: Optional[datetime] = None
@@ -229,7 +244,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         charger_cfgs = self._get_charger_configs()
         result: list[ChargerState] = []
 
-        for ch_data in charger_cfgs:
+        for i, ch_data in enumerate(charger_cfgs):
             cars = [
                 CarConfig(
                     name=car.get("name", "Bil"),
@@ -278,6 +293,31 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         break
 
             power_w = self._get_ev_power_w(cfg.charger_power) if cfg.charger_power else 0.0
+
+            # Vakthund: bil vald + laddning beordrad men ingen effekt inom 5 min → rensa bilval
+            if active_car_name != NO_CAR_SELECTED and connected:
+                prev_decision = self._last_decision
+                prev_charger_enabled = (
+                    prev_decision is not None
+                    and i < len(prev_decision.charger_decisions)
+                    and prev_decision.charger_decisions[i].enable
+                )
+                if prev_charger_enabled and power_w < 50.0:
+                    if cfg.name not in self._charge_command_times:
+                        self._charge_command_times[cfg.name] = datetime.now()
+                    elif (datetime.now() - self._charge_command_times[cfg.name]).total_seconds() >= 300:
+                        _LOGGER.warning(
+                            "Laddare '%s': laddning beordrad i >5 min utan ström (%.0f W) – återställer bilval",
+                            cfg.name, power_w,
+                        )
+                        self._active_cars[cfg.name] = NO_CAR_SELECTED
+                        active_car_name = NO_CAR_SELECTED
+                        soc_pct = None
+                        self._charge_command_times.pop(cfg.name, None)
+                else:
+                    self._charge_command_times.pop(cfg.name, None)
+            else:
+                self._charge_command_times.pop(cfg.name, None)
 
             result.append(ChargerState(
                 config=cfg,
@@ -382,6 +422,46 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             if yest_entity:
                 yesterday_kwh = self._get_state_float(yest_entity) or None
 
+            # Utomhustemperatur och förbrukningsprognos
+            outdoor_temp: Optional[float] = None
+            temp_entity = c.get(CONF_OUTDOOR_TEMP_ENTITY)
+            if temp_entity:
+                val = self._get_state_float(temp_entity)
+                if val != 0.0 or self.hass.states.get(temp_entity) is not None:
+                    outdoor_temp = val
+
+            # Bygg upp rullande dygnsmedeltemperatur.
+            # Modellen är kalibrerad mot dygnsmedeltemp, inte ögonblicksvärde.
+            if outdoor_temp is not None:
+                today_str = now.strftime("%Y-%m-%d")
+                if today_str != self._temp_sample_date:
+                    # Nytt dygn – lås in gårdagens medelvärde och nollställ
+                    if self._temp_samples:
+                        self._yesterday_avg_temp = sum(self._temp_samples) / len(self._temp_samples)
+                        _LOGGER.debug(
+                            "Temperaturmedel för %s: %.1f °C (%d mätningar)",
+                            self._temp_sample_date, self._yesterday_avg_temp, len(self._temp_samples),
+                        )
+                    self._temp_samples = []
+                    self._temp_sample_date = today_str
+                self._temp_samples.append(outdoor_temp)
+
+            # Välj temperaturindata: gårdagens medel om tillgängligt, annars aktuell
+            temp_for_model = self._yesterday_avg_temp if self._yesterday_avg_temp is not None else outdoor_temp
+
+            # Desinficering/legionella pågår? – återanvänd samma switch som legionella-fliken
+            disinfecting_active = self._get_state_bool(c.get(CONF_LEGIONELLA_SWITCH))
+
+            predicted_daily_kwh = 0.0
+            if temp_for_model is not None:
+                t_bal = float(c.get(CONF_HEAT_BALANCE_TEMP, DEFAULT_HEAT_BALANCE_TEMP))
+                k     = float(c.get(CONF_HEAT_FACTOR_KWH_DD, DEFAULT_HEAT_FACTOR_KWH_DD))
+                base  = float(c.get(CONF_BASE_DHW_KWH, DEFAULT_BASE_DHW_KWH))
+                predicted_daily_kwh = base + k * max(0.0, t_bal - temp_for_model)
+                if disinfecting_active:
+                    extra = float(c.get(CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH))
+                    predicted_daily_kwh += extra
+
             # Legionella – läs switch och temp
             legionella_switch_on = self._get_state_bool(c.get(CONF_LEGIONELLA_SWITCH))
             hot_water_temp = self._get_hot_water_temp()
@@ -434,6 +514,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 winter_mode=bool(c.get(CONF_WINTER_MODE_ENABLED, False)),
                 price_schedule=price_schedule,
                 yesterday_consumption_kwh=yesterday_kwh,
+                outdoor_temp_c=outdoor_temp,
+                avg_temp_yesterday_c=self._yesterday_avg_temp,
+                disinfecting_active=disinfecting_active,
+                predicted_daily_kwh=predicted_daily_kwh,
                 sun_next_setting=self._get_sun_datetime("next_setting"),
                 sun_next_rising=self._get_sun_datetime("next_rising"),
             )

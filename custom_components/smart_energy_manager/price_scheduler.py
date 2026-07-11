@@ -72,6 +72,9 @@ class PriceSchedule:
     # Antal kvartstimmar FRAMÅT (från nu) med negativt säljpris
     negative_slots_ahead: int = 0
 
+    # Antal kvartstimmar idag med negativt säljpris som redan passerat
+    negative_slots_passed_today: int = 0
+
     # Antal kvartstimmar FRAMÅT med säljpris under low_price_threshold
     low_price_slots_ahead: int = 0
 
@@ -380,6 +383,12 @@ class PriceScheduler:
 
         schedule.negative_slots_ahead = sum(
             1 for s in next_8h if s.sell_sek < self.negative_threshold
+        )
+        # Negativa slots som redan passerat idag (start < nu)
+        today_start = now_aware.replace(hour=0, minute=0, second=0, microsecond=0)
+        schedule.negative_slots_passed_today = sum(
+            1 for s in slots
+            if s.sell_sek < self.negative_threshold and today_start <= s.start < now_aware
         )
         schedule.low_price_slots_ahead = sum(
             1 for s in next_8h if s.buy_sek < self.low_price_threshold

@@ -21,7 +21,9 @@
           "house_load_entity": "Huslaststyrare (Elm4 – direkt mätare)",
           "grid_power_unit": "Nätmätare enhet (W eller kW)",
           "ev_power_unit": "EV-laddare effektenhet (W eller kW)",
-          "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)"
+          "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)",
+          "outdoor_temp_entity": "Utomhustemperatur (sensor, valfri – aktiverar förbrukningsprognos)",
+          "disinfecting_extra_kwh": "Extra kWh vid desinficering/legionella (standard 5.0)"
         }
       },
       "solar": {
@@ -128,7 +130,9 @@
           "house_load_entity": "Huslaststyrare (Elm4 – direkt mätare)",
           "grid_power_unit": "Nätmätare enhet (W eller kW)",
           "ev_power_unit": "EV-laddare effektenhet (W eller kW)",
-          "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)"
+          "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)",
+          "outdoor_temp_entity": "Utomhustemperatur (sensor, valfri – aktiverar förbrukningsprognos)",
+          "disinfecting_extra_kwh": "Extra kWh vid desinficering/legionella (standard 5.0)"
         }
       },
       "solar_opts": {

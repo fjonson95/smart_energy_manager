@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .price_scheduler import PriceSchedule
 from .const import (
@@ -196,6 +196,19 @@ class EnergyState:
     # Gårdagens förbrukning exkl. EV-laddning (kWh)
     yesterday_consumption_kwh: Optional[float] = None
 
+    # Utomhustemperatur (°C) – aktuell mätning
+    outdoor_temp_c: Optional[float] = None
+
+    # Gårdagens dygnsmedeltemperatur (°C) – mer stabil indata för prognosen
+    avg_temp_yesterday_c: Optional[float] = None
+
+    # Sant om desinficering/legionella pågår just nu
+    disinfecting_active: bool = False
+
+    # Beräknad daglig förbrukning (kWh) från temperaturmodell
+    # base_dhw + k * max(0, T_balance - avg_temp) [+ extra om disinfecting]
+    predicted_daily_kwh: float = 0.0
+
     # Sol-tider (från HA sun-integration, används för dynamisk kvällsfylling)
     sun_next_setting: Optional[datetime] = None
     sun_next_rising: Optional[datetime] = None
@@ -342,36 +355,16 @@ class EnergyController:
         )
 
         # ── Proaktiv absorption: negativa priser väntar inom 2h ─────
+        # Håller headroom i batteriet men startar INTE varmvatten eller EV
+        # i förväg — de väntar till priset faktiskt är negativt.
         ps = state.price_schedule
+        had_negative_today = ps is not None and ps.negative_slots_passed_today > 0
         if ps and ps.should_absorb_proactively and not negative_price:
-            decision.reason += f" | Proaktiv absorption ({ps.negative_slots_ahead} neg slots inom 8h)"
-            # Skapa utrymme: ladda INTE upp batteriet om det är nära fullt
-            # och vi vill ha headroom för kommande sol
+            decision.reason += f" | Headroom inför neg pris ({ps.negative_slots_ahead} slots inom 8h)"
             effective_max_soc = self.battery_max_soc - (ps.recommended_headroom * 100)
             if battery_soc > effective_max_soc:
                 decision.battery_charge_power_w = 0
                 decision.reason += f" | Håller {ps.recommended_headroom*100:.0f}% headroom"
-            # Aktivera extra varmvatten och EV-laddning proaktivt för att tömma utrymme
-            if self._can_start_extra_hot_water(state):
-                decision.extra_hot_water = True
-                decision.reason += " | Proaktiv varmvatten"
-            # EV: ladda med all tillgänglig sol nu, vi vill inte ha överskott sen
-            remaining_surplus = solar_surplus_w
-            for i, ch in enumerate(state.chargers):
-                if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
-                    continue
-                car = ch.active_car
-                if car and ch.soc_pct is not None and ch.soc_pct >= car.ev_soc_target:
-                    continue
-                min_surplus = MIN_SOLAR_FOR_EV_1PHASE if ch.car_phases == 1 else MIN_SOLAR_FOR_EV_3PHASE
-                if remaining_surplus >= min_surplus:
-                    cur = self._surplus_to_current(remaining_surplus, ch.car_phases)
-                    if cur >= MIN_EV_CURRENT:
-                        decision.charger_decisions[i] = ChargerDecision(
-                            enable=True, current_a=cur,
-                            reason=f"proaktiv sol-laddning inför neg pris",
-                        )
-                        remaining_surplus -= self._charger_power(cur, ch.car_phases)
             self._check_car_selection(state, decision)
             return self._apply_phase_limits(state, decision)
 
@@ -459,22 +452,58 @@ class EnergyController:
                     if s.end > now_aware and s.start < sun_set
                 )
 
+        # Dynamiskt kvällsmål: beräkna hur mycket energi som behövs för natten.
+        #
+        # Om predicted_daily_kwh finns (temperaturmodell): räkna ut timmar tills
+        # solen producerar tillräckligt för att täcka huslasten imorgon bitti.
+        # Annars: fall tillbaka på fast evening_min_soc.
+        evening_target_soc = self.evening_min_soc
+        evening_needed_kwh = 0.0
+
+        if state.predicted_daily_kwh > 0 and ps and ps.slots:
+            hourly_load_kw = state.predicted_daily_kwh / 24.0
+            # Hitta första slot imorgon där soleffekten täcker huslasten
+            solar_covers_at: Optional[datetime] = None
+            for slot in ps.slots:
+                if slot.start > now_aware and slot.solar_kw >= hourly_load_kw:
+                    solar_covers_at = slot.start
+                    break
+
+            if solar_covers_at is None and state.sun_next_rising:
+                # Solcast saknar data bortom idag – uppskatta 3h efter soluppgång
+                rising = state.sun_next_rising
+                if rising.tzinfo is None:
+                    rising = rising.astimezone()
+                solar_covers_at = rising + timedelta(hours=3)
+
+            if solar_covers_at is not None:
+                hours_dark = max(0.0, (solar_covers_at - now_aware).total_seconds() / 3600)
+                evening_needed_kwh = hourly_load_kw * hours_dark + 2.0  # +2 kWh laddmarginal
+                evening_target_soc = min(
+                    self.battery_max_soc,
+                    evening_needed_kwh / state.battery_capacity_kwh * 100.0,
+                )
+                _LOGGER.debug(
+                    "Kvällsfylling dynamisk: %.1f kWh behövs (%.1fh mörker) → mål %.0f%% SOC",
+                    evening_needed_kwh, hours_dark, evening_target_soc,
+                )
+
         battery_remaining_kwh = (
             state.battery_capacity_kwh
-            * max(0.0, self.evening_min_soc - battery_soc)
+            * max(0.0, evening_target_soc - battery_soc)
             / 100.0
         )
 
         evening_fill = (
             sun_set is not None
             and solar_w > 100                              # sol fortfarande igång
-            and battery_soc < self.evening_min_soc
+            and battery_soc < evening_target_soc
             and solar_until_sunset_kwh < battery_remaining_kwh  # prognosen räcker inte
         )
 
         _LOGGER.debug(
-            "Kvällsfylling: sol_kvar=%.1f kWh batteri_kvar=%.1f kWh → %s",
-            solar_until_sunset_kwh, battery_remaining_kwh, evening_fill,
+            "Kvällsfylling: sol_kvar=%.1f kWh batteri_kvar=%.1f kWh mål=%.0f%% → %s",
+            solar_until_sunset_kwh, battery_remaining_kwh, evening_target_soc, evening_fill,
         )
 
         # Föredrar export om säljpriset är högt – men aldrig under kvällsfylling.
@@ -514,11 +543,16 @@ class EnergyController:
                     suffix = ""
                 decision.reason += f" | Batteri +{charge_w:.0f}W{suffix}"
 
-        # Extra varmvatten
-        if remaining_surplus > 500 and battery_soc >= self.battery_max_soc and self._can_start_extra_hot_water(state):
+        # Extra varmvatten – batteri fullt och solöverskott, eller vi har passerat negativt pris idag
+        varmvatten_ok = (
+            (remaining_surplus > 500 and battery_soc >= self.battery_max_soc)
+            or had_negative_today
+        )
+        if varmvatten_ok and self._can_start_extra_hot_water(state):
             decision.extra_hot_water = True
             temp_str = f" (tank {state.hot_water_temp_c:.0f}°C)" if state.hot_water_temp_c is not None else ""
-            decision.reason += f" | Extra varmvatten (batteri fullt{temp_str})"
+            trigger = "passerat neg pris" if had_negative_today and not (remaining_surplus > 500 and battery_soc >= self.battery_max_soc) else "batteri fullt"
+            decision.reason += f" | Extra varmvatten ({trigger}{temp_str})"
 
         # Ladda ur batteri
         if solar_w < house_load_w and battery_soc > self.battery_min_soc:
