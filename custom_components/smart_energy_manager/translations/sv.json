@@ -83,26 +83,42 @@
           "legionella_target_temp": "Bekräftelsetemp för legionella (°C)"
         }
       },
-      "ev_menu": {
-        "title": "Elbilar ({count} tillagda)",
-        "description": "Lägg till en elbil eller gå vidare",
+      "charger_menu": {
+        "title": "Laddare ({count} tillagda)",
+        "description": "Lägg till en laddare eller gå vidare",
         "data": {
-          "add_car": "Lägg till elbil"
+          "add_charger": "Lägg till laddare"
         }
       },
-      "ev_car": {
-        "title": "Elbil {title}",
-        "description": "Konfigurera laddare och fas för denna bil",
+      "charger": {
+        "title": "Laddare {title}",
+        "description": "Konfigurera laddarhårdvara och fas",
         "data": {
-          "car_name": "Namn på bilen",
+          "charger_name": "Laddarens namn",
+          "connected_sensor": "Anslutningssensor (ev-status)",
           "charger_switch": "Laddare strömbrytare",
           "charger_current": "Laddström setpunkt",
           "charger_power": "Laddeffekt sensor (valfritt)",
+          "phases": "Antal faser (hårdvara)",
+          "phase": "Startfas (L1/L2/L3)"
+        }
+      },
+      "car_menu": {
+        "title": "Bilar för {charger} ({count} tillagda)",
+        "description": "Lägg till en bil till denna laddare eller gå vidare",
+        "data": {
+          "add_car": "Lägg till bil"
+        }
+      },
+      "car": {
+        "title": "Bil {title}",
+        "description": "Konfigurera bilens inbyggda laddare och fas",
+        "data": {
+          "car_name": "Namn på bilen",
           "ev_soc": "Bilens batteri SOC (valfritt)",
           "ev_soc_target": "Mål-SOC (%)",
-          "phases": "Antal faser",
-          "phase": "Startfas (L1/L2/L3)",
-          "car_phases": "Bilens laddare (antal faser)"
+          "car_phases": "Bilens inbyggda laddare (antal faser)",
+          "phase": "Startfas (L1/L2/L3)"
         }
       }
     },
@@ -195,26 +211,42 @@
           "legionella_target_temp": "Bekräftelsetemp för legionella (°C)"
         }
       },
-      "ev_menu_opts": {
-        "title": "Elbilar ({count} konfigurerade)",
-        "description": "Redigera, ta bort eller lägg till elbilar",
+      "charger_menu_opts": {
+        "title": "Laddare ({count} konfigurerade)",
+        "description": "Redigera, ta bort eller lägg till laddare",
         "data": {
           "action": "Välj åtgärd"
         }
       },
-      "ev_car_opts": {
-        "title": "Elbil – {title}",
-        "description": "Konfigurera laddare och fas för denna bil",
+      "charger_opts": {
+        "title": "Laddare – {title}",
+        "description": "Konfigurera laddarhårdvara och fas",
         "data": {
-          "car_name": "Namn på bilen",
+          "charger_name": "Laddarens namn",
+          "connected_sensor": "Anslutningssensor (ev-status)",
           "charger_switch": "Laddare strömbrytare",
           "charger_current": "Laddström setpunkt",
           "charger_power": "Laddeffekt sensor (valfritt)",
+          "phases": "Antal faser (hårdvara)",
+          "phase": "Startfas (L1/L2/L3)"
+        }
+      },
+      "car_menu_opts": {
+        "title": "Bilar för {charger} ({count} konfigurerade)",
+        "description": "Redigera, ta bort eller lägg till bilar för denna laddare",
+        "data": {
+          "action": "Välj åtgärd"
+        }
+      },
+      "car_opts": {
+        "title": "Bil – {title}",
+        "description": "Konfigurera bilens inbyggda laddare och fas",
+        "data": {
+          "car_name": "Namn på bilen",
           "ev_soc": "Bilens batteri SOC (valfritt)",
           "ev_soc_target": "Mål-SOC (%)",
-          "phases": "Antal faser",
-          "phase": "Startfas (L1/L2/L3)",
-          "car_phases": "Bilens laddare (antal faser)"
+          "car_phases": "Bilens inbyggda laddare (antal faser)",
+          "phase": "Startfas (L1/L2/L3)"
         }
       }
     },

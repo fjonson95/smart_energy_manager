@@ -1,10 +1,15 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.7-blue)
+![Version](https://img.shields.io/badge/version-0.5.8-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.8
+
+- **Fix: config/options UI labels** – all config flow steps now have correct labels in both English and Swedish. The charger and car setup steps (`charger_menu`, `charger`, `car_menu`, `car` and their options counterparts) previously used wrong step IDs (`ev_menu`/`ev_car`) that did not match the actual flow, causing fields to show raw key names instead of readable labels. All fields — charger name, connection sensor, charge current setpoint, car onboard charger phases, etc. — now display correctly.
+- **Backtest framework** – added `testdata/backtest.py` for replaying historical sensor data through the energy controller. Reads timdata/realtidsdata CSVs, reconstructs `EnergyState` at each timestamp, runs `EnergyController.compute()`, and outputs a semicolon-separated CSV with comma as decimal separator (Excel-compatible). Supports date filtering and parameter overrides (`--min-soc`, `--percentile`).
 
 ## What's New in 0.5.7
 

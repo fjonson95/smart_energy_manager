@@ -57,7 +57,7 @@
       },
       "heat_pump": {
         "title": "Heat pump / boiler",
-        "description": "Compressor: 1-phase. Heating element: 2-phase (auto-calculated as the remaining two phases).",
+        "description": "Compressor: 1-phase for house heating. Heating element: 2-phase for extra hot water (auto-configured as the two remaining phases).",
         "data": {
           "heat_pump_power_entity": "Heat pump power sensor",
           "heat_pump_extra_hot_water_entity": "Extra hot water (heating element)",
@@ -83,26 +83,42 @@
           "legionella_target_temp": "Legionella confirmation temperature (°C)"
         }
       },
-      "ev_menu": {
-        "title": "Electric vehicles ({count} added)",
-        "description": "Add an EV or continue",
+      "charger_menu": {
+        "title": "Chargers ({count} added)",
+        "description": "Add a charger or continue",
         "data": {
-          "add_car": "Add EV"
+          "add_charger": "Add charger"
         }
       },
-      "ev_car": {
-        "title": "EV – {title}",
-        "description": "Configure charger and phase for this car",
+      "charger": {
+        "title": "Charger {title}",
+        "description": "Configure charger hardware and phase",
         "data": {
-          "car_name": "Car name",
+          "charger_name": "Charger name",
+          "connected_sensor": "Connection sensor (EV status)",
           "charger_switch": "Charger switch",
           "charger_current": "Charge current setpoint",
           "charger_power": "Charge power sensor (optional)",
+          "phases": "Number of phases (hardware)",
+          "phase": "Start phase (L1/L2/L3)"
+        }
+      },
+      "car_menu": {
+        "title": "Cars for {charger} ({count} added)",
+        "description": "Add a car to this charger or continue",
+        "data": {
+          "add_car": "Add car"
+        }
+      },
+      "car": {
+        "title": "Car {title}",
+        "description": "Configure the car's onboard charger and phase",
+        "data": {
+          "car_name": "Car name",
           "ev_soc": "Car battery SOC (optional)",
           "ev_soc_target": "Target SOC (%)",
-          "phases": "Number of phases",
-          "phase": "Start phase (L1/L2/L3)",
-          "car_phases": "Car onboard charger (number of phases)"
+          "car_phases": "Car onboard charger (number of phases)",
+          "phase": "Start phase (L1/L2/L3)"
         }
       }
     },
@@ -195,26 +211,42 @@
           "legionella_target_temp": "Legionella confirmation temperature (°C)"
         }
       },
-      "ev_menu_opts": {
-        "title": "Electric vehicles ({count} configured)",
-        "description": "Edit, remove or add electric vehicles",
+      "charger_menu_opts": {
+        "title": "Chargers ({count} configured)",
+        "description": "Edit, remove or add chargers",
         "data": {
           "action": "Choose action"
         }
       },
-      "ev_car_opts": {
-        "title": "EV – {title}",
-        "description": "Configure charger and phase for this car",
+      "charger_opts": {
+        "title": "Charger – {title}",
+        "description": "Configure charger hardware and phase",
         "data": {
-          "car_name": "Car name",
+          "charger_name": "Charger name",
+          "connected_sensor": "Connection sensor (EV status)",
           "charger_switch": "Charger switch",
           "charger_current": "Charge current setpoint",
           "charger_power": "Charge power sensor (optional)",
+          "phases": "Number of phases (hardware)",
+          "phase": "Start phase (L1/L2/L3)"
+        }
+      },
+      "car_menu_opts": {
+        "title": "Cars for {charger} ({count} configured)",
+        "description": "Edit, remove or add cars for this charger",
+        "data": {
+          "action": "Choose action"
+        }
+      },
+      "car_opts": {
+        "title": "Car – {title}",
+        "description": "Configure the car's onboard charger and phase",
+        "data": {
+          "car_name": "Car name",
           "ev_soc": "Car battery SOC (optional)",
           "ev_soc_target": "Target SOC (%)",
-          "phases": "Number of phases",
-          "phase": "Start phase (L1/L2/L3)",
-          "car_phases": "Car onboard charger (number of phases)"
+          "car_phases": "Car onboard charger (number of phases)",
+          "phase": "Start phase (L1/L2/L3)"
         }
       }
     },
