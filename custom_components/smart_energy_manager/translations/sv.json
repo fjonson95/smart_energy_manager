@@ -49,7 +49,10 @@
           "battery_capacity_kwh": "Batterikapacitet (kWh)",
           "battery_max_power_kw": "Max effekt (kW)",
           "battery_min_soc": "Min SOC (%)",
-          "battery_max_soc": "Max SOC (%)"
+          "battery_max_soc": "Max SOC (%)",
+          "export_sell_percentile": "Proaktiv export: prispercentil (0.75 = topp 25%)",
+          "export_min_solar_tomorrow_kwh": "Proaktiv export: min Solcast imorgon (kWh)",
+          "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
         }
       },
       "heat_pump": {
@@ -158,7 +161,10 @@
           "battery_capacity_kwh": "Batterikapacitet (kWh)",
           "battery_max_power_kw": "Max effekt (kW)",
           "battery_min_soc": "Min SOC (%)",
-          "battery_max_soc": "Max SOC (%)"
+          "battery_max_soc": "Max SOC (%)",
+          "export_sell_percentile": "Proaktiv export: prispercentil (0.75 = topp 25%)",
+          "export_min_solar_tomorrow_kwh": "Proaktiv export: min Solcast imorgon (kWh)",
+          "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
         }
       },
       "heat_pump_opts": {

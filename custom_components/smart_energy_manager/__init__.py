@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import SmartEnergyCoordinator
@@ -24,6 +24,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    async def _handle_reset_battery_cost(call: ServiceCall) -> None:
+        for coord in hass.data.get(DOMAIN, {}).values():
+            if hasattr(coord, "reset_battery_cost"):
+                coord.reset_battery_cost()
+                _LOGGER.info("Batterikostnad återställd till 0")
+
+    hass.services.async_register(DOMAIN, "reset_battery_cost", _handle_reset_battery_cost)
 
     return True
 

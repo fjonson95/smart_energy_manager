@@ -49,6 +49,9 @@ from .const import (
     CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH,
     CONF_WINTER_CHEAP_HOUR_THRESHOLD, CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD,
     CONF_WINTER_MIN_SOC, CONF_WINTER_MAX_SOC,
+    CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH,
+    DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
+    CONF_BATTERY_POWER_INVERTED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -136,6 +139,13 @@ def _battery_schema(d: dict) -> vol.Schema:
         vol.Optional(CONF_BATTERY_MAX_POWER_KW, default=_d(d, CONF_BATTERY_MAX_POWER_KW, 5.0)): vol.Coerce(float),
         vol.Optional(CONF_BATTERY_MIN_SOC, default=_d(d, CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)): vol.Coerce(float),
         vol.Optional(CONF_BATTERY_MAX_SOC, default=_d(d, CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)): vol.Coerce(float),
+        vol.Optional(CONF_EXPORT_SELL_PERCENTILE, default=_d(d, CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.05, mode=selector.NumberSelectorMode.BOX)
+        ),
+        vol.Optional(CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, default=_d(d, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=50.0, step=1.0, mode=selector.NumberSelectorMode.BOX)
+        ),
+        vol.Optional(CONF_BATTERY_POWER_INVERTED, default=_d(d, CONF_BATTERY_POWER_INVERTED, False)): selector.BooleanSelector(),
     })
 
 

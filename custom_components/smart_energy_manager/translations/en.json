@@ -49,7 +49,10 @@
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "battery_max_power_kw": "Max power (kW)",
           "battery_min_soc": "Min SOC (%)",
-          "battery_max_soc": "Max SOC (%)"
+          "battery_max_soc": "Max SOC (%)",
+          "export_sell_percentile": "Proactive export: price percentile (0.75 = top 25%)",
+          "export_min_solar_tomorrow_kwh": "Proactive export: min Solcast tomorrow (kWh)",
+          "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
         }
       },
       "heat_pump": {
@@ -158,7 +161,10 @@
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "battery_max_power_kw": "Max power (kW)",
           "battery_min_soc": "Min SOC (%)",
-          "battery_max_soc": "Max SOC (%)"
+          "battery_max_soc": "Max SOC (%)",
+          "export_sell_percentile": "Proactive export: price percentile (0.75 = top 25%)",
+          "export_min_solar_tomorrow_kwh": "Proactive export: min Solcast tomorrow (kWh)",
+          "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
         }
       },
       "heat_pump_opts": {

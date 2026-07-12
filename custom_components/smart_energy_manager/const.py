@@ -186,9 +186,14 @@ DEFAULT_BASE_DHW_KWH         = 1.33   # kWh/dag – fast varmvattenbas
 DEFAULT_DISINFECTING_EXTRA_KWH = 5.0  # kWh extra vid desinficering/legionella
 CONF_NEGATIVE_PRICE_THRESHOLD = "negative_price_threshold_sek"
 CONF_PROACTIVE_ABSORPTION_SLOTS = "proactive_absorption_slots"
+CONF_EXPORT_SELL_PERCENTILE = "export_sell_percentile"
+CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH = "export_min_solar_tomorrow_kwh"
+CONF_BATTERY_POWER_INVERTED = "battery_power_inverted"
 
 DEFAULT_NEGATIVE_PRICE_THRESHOLD = 0.0   # SEK/kWh
 DEFAULT_PROACTIVE_ABSORPTION_SLOTS = 4   # Antal negativa kvartstimmar inom 2h för att reagera
+DEFAULT_EXPORT_SELL_PERCENTILE = 0.75    # Urladda/exportera när säljpris ≥ 75:e percentilen av dagens priser
+DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH = 5.0  # Minsta Solcast-prognos imorgon för att tillåta export-urladdning
 
 # ── Minimitid för extra varmvatten ──────────────────────────────────────────────
 CONF_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES = "extra_hot_water_min_runtime_minutes"

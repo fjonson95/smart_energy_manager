@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from .price_scheduler import PriceSchedule
 from .const import (
@@ -17,6 +17,7 @@ from .const import (
     MODE_FORCE_CHARGE_BATTERY, MODE_MANUAL,
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES,
     DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
+    DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -213,6 +214,9 @@ class EnergyState:
     sun_next_setting: Optional[datetime] = None
     sun_next_rising: Optional[datetime] = None
 
+    # Tidpunkt då sol förväntas täcka huslasten (beräknat från Solcast imorgon)
+    solar_takeover_dt: Optional[datetime] = None
+
     # Driftläge
     operating_mode: str = MODE_AUTO
     winter_mode: bool = False
@@ -276,6 +280,8 @@ class EnergyController:
         auto_discharge_threshold_sek: float = 0.20,
         sell_solar_min_price_sek: float = 0.80,
         evening_min_soc: float = 90.0,
+        export_sell_percentile: float = DEFAULT_EXPORT_SELL_PERCENTILE,
+        export_min_solar_tomorrow_kwh: float = DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     ):
         self.max_current = max_current_per_phase
         self.voltage = grid_voltage
@@ -290,6 +296,8 @@ class EnergyController:
         self.auto_discharge_threshold = auto_discharge_threshold_sek
         self.sell_solar_min_price = sell_solar_min_price_sek
         self.evening_min_soc = evening_min_soc
+        self.export_sell_percentile = export_sell_percentile
+        self.export_min_solar_tomorrow_kwh = export_min_solar_tomorrow_kwh
 
     # ── Publik ingångspunkt ───────────────────────────────────────────
 
@@ -554,8 +562,72 @@ class EnergyController:
             trigger = "passerat neg pris" if had_negative_today and not (remaining_surplus > 500 and battery_soc >= self.battery_max_soc) else "batteri fullt"
             decision.reason += f" | Extra varmvatten ({trigger}{temp_str})"
 
-        # Ladda ur batteri
-        if solar_w < house_load_w and battery_soc > self.battery_min_soc:
+        # ── Proaktiv export: sälj dyrt, fyll på med sol imorgon ─────────
+        # Villkor:
+        #   1. Aktuellt säljpris ≥ export_sell_percentile av dagens alla priser
+        #   2. Solcast imorgon ≥ export_min_solar_tomorrow_kwh (vi kan ladda igen)
+        #   3. Batteri > nattens energibehov + 2 kWh marginal (täcker huset tills sol tar över)
+        #   4. Batteri > battery_min_soc (absolut golv oavsett)
+        _now_utc = datetime.now(timezone.utc)
+        _ref_dt = state.solar_takeover_dt or state.sun_next_rising
+        if _ref_dt and _ref_dt > _now_utc:
+            _hours_dark = (_ref_dt - _now_utc).total_seconds() / 3600.0
+        else:
+            _hours_dark = 0.0
+        _export_floor_kwh = _hours_dark * (house_load_w / 1000.0) + 2.0
+        _battery_energy_kwh = battery_soc / 100.0 * state.battery_capacity_kwh
+
+        export_active = False
+        if (
+            ps and ps.slots
+            and battery_soc > self.battery_min_soc
+            and _battery_energy_kwh > _export_floor_kwh
+            and state.solar_forecast_tomorrow_kwh >= self.export_min_solar_tomorrow_kwh
+        ):
+            today_sell_prices = sorted(s.sell_sek for s in ps.slots)
+            if today_sell_prices:
+                idx = int(self.export_sell_percentile * len(today_sell_prices))
+                idx = min(idx, len(today_sell_prices) - 1)
+                price_threshold = today_sell_prices[idx]
+                if sell_price >= price_threshold:
+                    export_active = True
+
+                    # Modulera effekten: dela exporterbar energi jämnt över
+                    # återstående höga prisslotar (sell_sek >= tröskeln).
+                    _now_local = datetime.now().astimezone()
+                    _high_slots = [
+                        s for s in ps.slots
+                        if s.sell_sek >= price_threshold and s.end > _now_local
+                    ]
+                    _high_hours = sum(
+                        (s.end - max(s.start, _now_local)).total_seconds() / 3600.0
+                        for s in _high_slots
+                    )
+                    _exportable_kwh = _battery_energy_kwh - _export_floor_kwh
+                    if _high_hours > 0.25:
+                        _target_w = (_exportable_kwh / _high_hours) * 1000.0
+                    else:
+                        _target_w = state.battery_max_power_kw * 1000.0
+                    discharge_w = max(500.0, min(_target_w, state.battery_max_power_kw * 1000.0))
+
+                    decision.battery_discharge_power_w = discharge_w
+                    decision.reason += (
+                        f" | Proaktiv export {sell_price:.2f} kr/kWh"
+                        f" (≥{self.export_sell_percentile*100:.0f}:e percentil {price_threshold:.2f})"
+                        f" sol imorgon {state.solar_forecast_tomorrow_kwh:.1f} kWh"
+                        f" golv {_export_floor_kwh:.1f} kWh ({_hours_dark:.1f}h mörker)"
+                        f" {discharge_w:.0f}W/{_high_hours:.1f}h"
+                    )
+                    _LOGGER.info(
+                        "Proaktiv export: %.0f W (%.1f kWh / %.1fh) säljpris %.3f ≥ %.3f kr/kWh"
+                        " | batteri %.1f kWh > golv %.1f kWh",
+                        discharge_w, _exportable_kwh, _high_hours,
+                        sell_price, price_threshold,
+                        _battery_energy_kwh, _export_floor_kwh,
+                    )
+
+        # Ladda ur batteri för att täcka huslast (om inte proaktiv export redan satt urladdningen)
+        if not export_active and solar_w < house_load_w and battery_soc > self.battery_min_soc:
             deficit_w = house_load_w - solar_w
             discharge_w = min(state.battery_max_power_kw * 1000, deficit_w)
             now = datetime.now().astimezone()

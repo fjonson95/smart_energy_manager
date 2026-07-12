@@ -47,6 +47,8 @@ from .const import (
     CONF_DISINFECTING_EXTRA_KWH,
     DEFAULT_HEAT_BALANCE_TEMP, DEFAULT_HEAT_FACTOR_KWH_DD, DEFAULT_BASE_DHW_KWH,
     DEFAULT_DISINFECTING_EXTRA_KWH,
+    CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, CONF_BATTERY_POWER_INVERTED,
+    DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     MODE_AUTO,
 )
 from .price_scheduler import PriceScheduler
@@ -131,6 +133,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._extra_hot_water_started_at: Optional[datetime] = None
         self._extra_hot_water_actual_state: bool = False
 
+        # Registreras av BatteryAccumulatedCostSensor för att möjliggöra reset via service
+        self._battery_cost_reset_cb = None
+
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
         chargers = self._get_charger_configs()
@@ -164,6 +169,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             winter_expensive_threshold=float(c.get(CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD)),
             winter_min_soc=float(c.get(CONF_WINTER_MIN_SOC, DEFAULT_WINTER_MIN_SOC)),
             winter_max_soc=float(c.get(CONF_WINTER_MAX_SOC, DEFAULT_WINTER_MAX_SOC)),
+            export_sell_percentile=float(c.get(CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE)),
+            export_min_solar_tomorrow_kwh=float(c.get(CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH)),
         )
 
     # ── Avläsningshjälpare ────────────────────────────────────────────
@@ -343,6 +350,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
     # ── Bilval ────────────────────────────────────────────────────────
 
+    def reset_battery_cost(self) -> None:
+        """Nollställ batterikostnadsackumulatorn via service-anrop."""
+        if self._battery_cost_reset_cb:
+            self._battery_cost_reset_cb()
+
     def set_active_car(self, charger_name: str, car_name: str) -> None:
         """Anropas av select-entiteten när användaren väljer bil."""
         self._active_cars[charger_name] = car_name
@@ -378,7 +390,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             grid_l3 = self._get_grid_power_w(c.get(CONF_GRID_POWER_L3))
 
             solar_w       = self._get_state_float(c.get(CONF_SOLAR_INVERTER_TOTAL))
-            battery_pwr_w = self._get_state_float(c.get(CONF_BATTERY_INVERTER_POWER))
+            _bat_raw      = self._get_state_float(c.get(CONF_BATTERY_INVERTER_POWER))
+            battery_pwr_w = -_bat_raw if c.get(CONF_BATTERY_POWER_INVERTED, False) else _bat_raw
             chargers      = self._build_charger_states()
 
             ev_total_w = sum(ch.power_w for ch in chargers)
@@ -415,6 +428,21 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         )
                     except Exception as e:
                         _LOGGER.warning("Kunde inte beräkna prisschema: %s", e)
+
+            # Tidpunkt då sol förväntas täcka huslasten (från Solcast imorgon)
+            solar_takeover_dt = None
+            sc_tomorrow = c.get(CONF_SOLCAST_TOMORROW)
+            if sc_tomorrow:
+                st = self.hass.states.get(sc_tomorrow)
+                if st:
+                    for slot in st.attributes.get("detailedForecast", []):
+                        try:
+                            slot_kw = slot.get("pv_estimate", 0.0)
+                            if slot_kw * 1000.0 >= house_load_w:
+                                solar_takeover_dt = datetime.fromisoformat(slot["period_start"])
+                                break
+                        except Exception:
+                            pass
 
             # Gårdagens förbrukning (valfri sensor)
             yesterday_kwh: Optional[float] = None
@@ -520,6 +548,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 predicted_daily_kwh=predicted_daily_kwh,
                 sun_next_setting=self._get_sun_datetime("next_setting"),
                 sun_next_rising=self._get_sun_datetime("next_rising"),
+                solar_takeover_dt=solar_takeover_dt,
             )
             self._state = state
 

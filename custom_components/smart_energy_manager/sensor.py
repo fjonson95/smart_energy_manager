@@ -668,8 +668,17 @@ class BatteryAccumulatedCostSensor(_BaseEnergySensor, RestoreEntity):
         self._grid_kwh_total: float = 0.0
         self._last_sell_price: float = 0.0
 
+    def reset_cost(self) -> None:
+        self._cost_sek = 0.0
+        self._solar_kwh_total = 0.0
+        self._grid_kwh_total = 0.0
+        self._last_soc = None
+        self._last_update = None
+        self.async_write_ha_state()
+
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self.coordinator._battery_cost_reset_cb = self.reset_cost
         last = await self.async_get_last_state()
         if last and last.state not in ("unknown", "unavailable", None):
             try:
