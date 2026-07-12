@@ -217,6 +217,9 @@ class EnergyState:
     # Tidpunkt då sol förväntas täcka huslasten (beräknat från Solcast imorgon)
     solar_takeover_dt: Optional[datetime] = None
 
+    # Snittpris för energin i batteriet (SEK/kWh) – från BatteryAccumulatedCostSensor
+    battery_avg_cost_sek_kwh: float = 0.0
+
     # Driftläge
     operating_mode: str = MODE_AUTO
     winter_mode: bool = False
@@ -577,12 +580,15 @@ class EnergyController:
         _export_floor_kwh = _hours_dark * (house_load_w / 1000.0) + 2.0
         _battery_energy_kwh = battery_soc / 100.0 * state.battery_capacity_kwh
 
+        _avg_cost = state.battery_avg_cost_sek_kwh
+
         export_active = False
         if (
             ps and ps.slots
             and battery_soc > self.battery_min_soc
             and _battery_energy_kwh > _export_floor_kwh
             and state.solar_forecast_tomorrow_kwh >= self.export_min_solar_tomorrow_kwh
+            and (_avg_cost <= 0.0 or sell_price > _avg_cost)
         ):
             today_sell_prices = sorted(s.sell_sek for s in ps.slots)
             if today_sell_prices:
@@ -620,10 +626,10 @@ class EnergyController:
                     )
                     _LOGGER.info(
                         "Proaktiv export: %.0f W (%.1f kWh / %.1fh) säljpris %.3f ≥ %.3f kr/kWh"
-                        " | batteri %.1f kWh > golv %.1f kWh",
+                        " | batteri %.1f kWh > golv %.1f kWh | snittpris %.3f kr/kWh",
                         discharge_w, _exportable_kwh, _high_hours,
                         sell_price, price_threshold,
-                        _battery_energy_kwh, _export_floor_kwh,
+                        _battery_energy_kwh, _export_floor_kwh, _avg_cost,
                     )
 
         # Ladda ur batteri för att täcka huslast (om inte proaktiv export redan satt urladdningen)

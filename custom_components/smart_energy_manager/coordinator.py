@@ -135,6 +135,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
         # Registreras av BatteryAccumulatedCostSensor för att möjliggöra reset via service
         self._battery_cost_reset_cb = None
+        self._battery_avg_cost_sek_kwh: float = 0.0
 
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
@@ -549,6 +550,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 sun_next_setting=self._get_sun_datetime("next_setting"),
                 sun_next_rising=self._get_sun_datetime("next_rising"),
                 solar_takeover_dt=solar_takeover_dt,
+                battery_avg_cost_sek_kwh=self._battery_avg_cost_sek_kwh,
             )
             self._state = state
 

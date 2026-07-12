@@ -726,6 +726,11 @@ class BatteryAccumulatedCostSensor(_BaseEnergySensor, RestoreEntity):
         if state is not None:
             self._last_soc = state.battery_soc_pct
         self._last_update = now
+
+        energy = self._energy_in_battery_kwh()
+        avg = self._cost_sek / energy if energy > 0.01 else 0.0
+        self.coordinator._battery_avg_cost_sek_kwh = avg
+
         super()._handle_coordinator_update()
 
     def _energy_in_battery_kwh(self) -> float:
