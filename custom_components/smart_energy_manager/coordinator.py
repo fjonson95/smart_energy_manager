@@ -48,6 +48,7 @@ from .const import (
     DEFAULT_HEAT_BALANCE_TEMP, DEFAULT_HEAT_FACTOR_KWH_DD, DEFAULT_BASE_DHW_KWH,
     DEFAULT_DISINFECTING_EXTRA_KWH,
     CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, CONF_BATTERY_POWER_INVERTED,
+    CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH,
     DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     MODE_AUTO,
 )
@@ -172,6 +173,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             winter_max_soc=float(c.get(CONF_WINTER_MAX_SOC, DEFAULT_WINTER_MAX_SOC)),
             export_sell_percentile=float(c.get(CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE)),
             export_min_solar_tomorrow_kwh=float(c.get(CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH)),
+            export_min_sell_price_sek_kwh=float(c.get(CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH)),
         )
 
     # ── Avläsningshjälpare ────────────────────────────────────────────

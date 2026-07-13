@@ -285,6 +285,7 @@ class EnergyController:
         evening_min_soc: float = 90.0,
         export_sell_percentile: float = DEFAULT_EXPORT_SELL_PERCENTILE,
         export_min_solar_tomorrow_kwh: float = DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
+        export_min_sell_price_sek_kwh: float = 0.0,
     ):
         self.max_current = max_current_per_phase
         self.voltage = grid_voltage
@@ -301,6 +302,7 @@ class EnergyController:
         self.evening_min_soc = evening_min_soc
         self.export_sell_percentile = export_sell_percentile
         self.export_min_solar_tomorrow_kwh = export_min_solar_tomorrow_kwh
+        self.export_min_sell_price_sek_kwh = export_min_sell_price_sek_kwh
 
     # ── Publik ingångspunkt ───────────────────────────────────────────
 
@@ -590,20 +592,34 @@ class EnergyController:
             and state.solar_forecast_tomorrow_kwh >= self.export_min_solar_tomorrow_kwh
             and (_avg_cost <= 0.0 or sell_price > _avg_cost)
         ):
-            today_sell_prices = sorted(s.sell_sek for s in ps.slots)
+            # Använd bara dagens slots för percentilberäkningen så att imorgons
+            # priser inte höjer tröskeln när priserna är generellt höga.
+            _today_date = datetime.now().astimezone().date()
+            _today_slots = [s for s in ps.slots if s.start.astimezone().date() == _today_date]
+            today_sell_prices = sorted(s.sell_sek for s in (_today_slots or ps.slots))
             if today_sell_prices:
                 idx = int(self.export_sell_percentile * len(today_sell_prices))
                 idx = min(idx, len(today_sell_prices) - 1)
                 price_threshold = today_sell_prices[idx]
-                if sell_price >= price_threshold:
+                _abs_triggered = (
+                    self.export_min_sell_price_sek_kwh > 0
+                    and sell_price >= self.export_min_sell_price_sek_kwh
+                )
+                if sell_price >= price_threshold or _abs_triggered:
                     export_active = True
+                    _trigger_label = (
+                        f"≥absolut {self.export_min_sell_price_sek_kwh:.2f}"
+                        if _abs_triggered and sell_price < price_threshold
+                        else f"≥{self.export_sell_percentile*100:.0f}:e percentil {price_threshold:.2f}"
+                    )
 
                     # Modulera effekten: dela exporterbar energi jämnt över
-                    # återstående höga prisslotar (sell_sek >= tröskeln).
+                    # återstående lönsamma prisslotar.
                     _now_local = datetime.now().astimezone()
+                    _effective_threshold = min(price_threshold, self.export_min_sell_price_sek_kwh) if _abs_triggered else price_threshold
                     _high_slots = [
                         s for s in ps.slots
-                        if s.sell_sek >= price_threshold and s.end > _now_local
+                        if s.sell_sek >= _effective_threshold and s.end > _now_local
                     ]
                     _high_hours = sum(
                         (s.end - max(s.start, _now_local)).total_seconds() / 3600.0
@@ -619,16 +635,16 @@ class EnergyController:
                     decision.battery_discharge_power_w = discharge_w
                     decision.reason += (
                         f" | Proaktiv export {sell_price:.2f} kr/kWh"
-                        f" (≥{self.export_sell_percentile*100:.0f}:e percentil {price_threshold:.2f})"
+                        f" ({_trigger_label})"
                         f" sol imorgon {state.solar_forecast_tomorrow_kwh:.1f} kWh"
                         f" golv {_export_floor_kwh:.1f} kWh ({_hours_dark:.1f}h mörker)"
                         f" {discharge_w:.0f}W/{_high_hours:.1f}h"
                     )
                     _LOGGER.info(
-                        "Proaktiv export: %.0f W (%.1f kWh / %.1fh) säljpris %.3f ≥ %.3f kr/kWh"
+                        "Proaktiv export: %.0f W (%.1f kWh / %.1fh) säljpris %.3f kr/kWh (%s)"
                         " | batteri %.1f kWh > golv %.1f kWh | snittpris %.3f kr/kWh",
                         discharge_w, _exportable_kwh, _high_hours,
-                        sell_price, price_threshold,
+                        sell_price, _trigger_label,
                         _battery_energy_kwh, _export_floor_kwh, _avg_cost,
                     )
 

@@ -52,6 +52,7 @@
           "battery_max_soc": "Max SOC (%)",
           "export_sell_percentile": "Proactive export: price percentile (0.75 = top 25%)",
           "export_min_solar_tomorrow_kwh": "Proactive export: min Solcast tomorrow (kWh)",
+          "export_min_sell_price_sek_kwh": "Proactive export: absolute minimum sell price (SEK/kWh, 0 = disabled)",
           "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
         }
       },
@@ -180,6 +181,7 @@
           "battery_max_soc": "Max SOC (%)",
           "export_sell_percentile": "Proactive export: price percentile (0.75 = top 25%)",
           "export_min_solar_tomorrow_kwh": "Proactive export: min Solcast tomorrow (kWh)",
+          "export_min_sell_price_sek_kwh": "Proactive export: absolute minimum sell price (SEK/kWh, 0 = disabled)",
           "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
         }
       },

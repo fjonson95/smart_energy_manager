@@ -4,6 +4,11 @@
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
+## Nyheter i 0.5.9
+
+- **Proaktiv export: absolut minimipris** – nytt batteriinställning `export_min_sell_price_sek_kwh` (standard 0,70 SEK/kWh). När säljpriset når eller överstiger detta värde laddar batteriet ur och exporterar till nätet oavsett relativ percentilposition. Löser problemet där alla timmar på dygnet har enhetligt höga priser, vilket gör att percentiltröskeln aldrig uppnås trots lönsamma säljpriser. Sätt till 0 för att inaktivera.
+- **Proaktiv export: percentil beräknas bara på dagens priser** – prispercentilen som avgör om export ska ske beräknas nu enbart från dagens prisslottar (tidigare inkluderades morgondagens priser, vilket kunde höja tröskeln när båda dagarna hade höga priser).
+
 ## Nyheter i 0.5.8
 
 - **Fix: etiketter i konfigurations-UI** – alla steg i config flow har nu korrekta svenska och engelska etiketter. Laddare- och bilkonfigurationsstegen (`charger_menu`, `charger`, `car_menu`, `car` och deras options-motsvarigheter) använde tidigare fel steg-ID:n (`ev_menu`/`ev_car`) som inte matchade det faktiska flödet, vilket gjorde att fälten visade råa nyckelnamn istället för läsbara etiketter. Alla fält – laddarens namn, anslutningssensor, laddström-setpunkt, bilens antal inbyggda faser m.m. – visas nu korrekt.

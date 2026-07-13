@@ -52,6 +52,7 @@
           "battery_max_soc": "Max SOC (%)",
           "export_sell_percentile": "Proaktiv export: prispercentil (0.75 = topp 25%)",
           "export_min_solar_tomorrow_kwh": "Proaktiv export: min Solcast imorgon (kWh)",
+          "export_min_sell_price_sek_kwh": "Proaktiv export: absolut minimipris (kr/kWh, 0 = inaktivt)",
           "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
         }
       },
@@ -180,6 +181,7 @@
           "battery_max_soc": "Max SOC (%)",
           "export_sell_percentile": "Proaktiv export: prispercentil (0.75 = topp 25%)",
           "export_min_solar_tomorrow_kwh": "Proaktiv export: min Solcast imorgon (kWh)",
+          "export_min_sell_price_sek_kwh": "Proaktiv export: absolut minimipris (kr/kWh, 0 = inaktivt)",
           "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
         }
       },

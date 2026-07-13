@@ -6,6 +6,11 @@ A HACS integration for Home Assistant that optimizes self-consumption of solar e
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
+## What's New in 0.5.9
+
+- **Proactive export: absolute minimum sell price** – added a new Battery setting `export_min_sell_price_sek_kwh` (default 0.70 SEK/kWh). When the sell price meets or exceeds this threshold, the battery discharges and exports to the grid regardless of the relative percentile position. This fixes the case where all hours of the day have uniformly high prices, causing the percentile threshold to be too high to trigger even at genuinely profitable sell prices. Set to 0 to disable.
+- **Proactive export: today-only percentile** – the price percentile used to decide whether to export is now calculated from today's price slots only (previously it included tomorrow's prices, which could inflate the threshold when both days had high prices).
+
 ## What's New in 0.5.8
 
 - **Fix: config/options UI labels** – all config flow steps now have correct labels in both English and Swedish. The charger and car setup steps (`charger_menu`, `charger`, `car_menu`, `car` and their options counterparts) previously used wrong step IDs (`ev_menu`/`ev_car`) that did not match the actual flow, causing fields to show raw key names instead of readable labels. All fields — charger name, connection sensor, charge current setpoint, car onboard charger phases, etc. — now display correctly.
