@@ -554,7 +554,7 @@ class EnergyController:
                     )
                 else:
                     suffix = ""
-                decision.reason += f" | Batteri +{charge_w:.0f}W{suffix}"
+                decision.reason += f" | Batteri laddar{suffix}"
 
         # Extra varmvatten – batteri fullt och solöverskott, eller vi har passerat negativt pris idag
         varmvatten_ok = (
@@ -579,7 +579,8 @@ class EnergyController:
             _hours_dark = (_ref_dt - _now_utc).total_seconds() / 3600.0
         else:
             _hours_dark = 0.0
-        _export_floor_kwh = _hours_dark * (house_load_w / 1000.0) + 2.0
+        _ref_load_w = (state.yesterday_consumption_kwh / 24.0 * 1000.0) if state.yesterday_consumption_kwh else house_load_w
+        _export_floor_kwh = _hours_dark * (_ref_load_w / 1000.0) + 2.0
         _battery_energy_kwh = battery_soc / 100.0 * state.battery_capacity_kwh
 
         _avg_cost = state.battery_avg_cost_sek_kwh
@@ -591,6 +592,7 @@ class EnergyController:
             and _battery_energy_kwh > _export_floor_kwh
             and state.solar_forecast_tomorrow_kwh >= self.export_min_solar_tomorrow_kwh
             and (_avg_cost <= 0.0 or sell_price > _avg_cost)
+            and solar_w <= house_load_w + 200
         ):
             # Använd bara dagens slots för percentilberäkningen så att imorgons
             # priser inte höjer tröskeln när priserna är generellt höga.
@@ -662,7 +664,7 @@ class EnergyController:
                     decision.reason += " | Bästa urladdningstimmen"
             if is_good_discharge:
                 decision.battery_discharge_power_w = discharge_w
-                decision.reason += f" | Batteri -{discharge_w:.0f}W"
+                decision.reason += " | Batteri laddar ur"
 
         if battery_soc <= self.battery_min_soc:
             decision.battery_discharge_power_w = 0

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from homeassistant.config_entries import ConfigEntry
@@ -129,6 +129,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._temp_samples: list[float] = []
         self._temp_sample_date: str = ""
         self._yesterday_avg_temp: Optional[float] = None
+
+        # Sparad solar_takeover_dt: beräknas live men sparas undan så att
+        # inaktuell Solcast-data inte nollställer värdet mitt i natten.
+        # Nollställs när sol producerar igen (solar_w > 200 W).
+        self._saved_solar_takeover_dt: Optional[datetime] = None
 
         # Minimitid-spärr för extra varmvatten (förhindrar flimmer på/av)
         self._extra_hot_water_started_at: Optional[datetime] = None
@@ -432,26 +437,55 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     except Exception as e:
                         _LOGGER.warning("Kunde inte beräkna prisschema: %s", e)
 
-            # Tidpunkt då sol förväntas täcka huslasten (från Solcast imorgon)
-            solar_takeover_dt = None
-            sc_tomorrow = c.get(CONF_SOLCAST_TOMORROW)
-            if sc_tomorrow:
-                st = self.hass.states.get(sc_tomorrow)
-                if st:
-                    for slot in st.attributes.get("detailedForecast", []):
-                        try:
-                            slot_kw = slot.get("pv_estimate", 0.0)
-                            if slot_kw * 1000.0 >= house_load_w:
-                                solar_takeover_dt = datetime.fromisoformat(slot["period_start"])
-                                break
-                        except Exception:
-                            pass
-
-            # Gårdagens förbrukning (valfri sensor)
+            # Gårdagens förbrukning via last_period-attributet (= hela gårdagen i kWh)
             yesterday_kwh: Optional[float] = None
             yest_entity = c.get(CONF_YESTERDAY_CONSUMPTION_ENTITY)
             if yest_entity:
-                yesterday_kwh = self._get_state_float(yest_entity) or None
+                _yest_st = self.hass.states.get(yest_entity)
+                if _yest_st:
+                    _lp = _yest_st.attributes.get("last_period")
+                    yesterday_kwh = float(_lp) if _lp is not None else None
+
+            # Tidpunkt då sol förväntas täcka huslasten.
+            # Referenslast = gårdagens snitt (stabil, immun mot nattliga spikar).
+            # Sök först i dagens prognos (framtida slots), sedan imorgons.
+            # Sparar undan det senaste giltiga värdet så att inaktuell Solcast-data
+            # inte nollställer takeover-tid mitt i natten.
+            _ref_load_w = (yesterday_kwh / 24.0 * 1000.0) if yesterday_kwh else house_load_w
+            solar_takeover_dt = None
+            _now_for_takeover = datetime.now(timezone.utc)
+            for _sc_key in (CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW):
+                _sc_entity = c.get(_sc_key)
+                if not _sc_entity:
+                    continue
+                _sc_st = self.hass.states.get(_sc_entity)
+                if not _sc_st:
+                    continue
+                for slot in _sc_st.attributes.get("detailedForecast", []):
+                    try:
+                        slot_start = datetime.fromisoformat(slot["period_start"])
+                        if slot_start.tzinfo is None:
+                            slot_start = slot_start.replace(tzinfo=timezone.utc)
+                        if slot_start <= _now_for_takeover:
+                            continue
+                        if slot.get("pv_estimate", 0.0) * 1000.0 >= _ref_load_w:
+                            solar_takeover_dt = slot_start
+                            break
+                    except Exception:
+                        pass
+                if solar_takeover_dt is not None:
+                    break
+
+            # Nollställ sparat värde när sol producerar (nytt dygn börjar)
+            if solar_w > 200:
+                self._saved_solar_takeover_dt = None
+
+            if solar_takeover_dt is not None:
+                self._saved_solar_takeover_dt = solar_takeover_dt
+            elif self._saved_solar_takeover_dt is not None:
+                # Solcast inaktuell – återanvänd senast kända takeover-tid
+                solar_takeover_dt = self._saved_solar_takeover_dt
+                _LOGGER.debug("solar_takeover_dt: Solcast inaktuell, återanvänder sparat värde %s", solar_takeover_dt)
 
             # Utomhustemperatur och förbrukningsprognos
             outdoor_temp: Optional[float] = None

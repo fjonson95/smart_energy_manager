@@ -461,7 +461,7 @@ class SmartEnergyBestDischargePriceSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_best_discharge_price"
     _attr_name = "Best Discharge Price Next 12h"
     _attr_native_unit_of_measurement = "SEK/kWh"
-    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:battery-arrow-down"
 
     @property
@@ -491,7 +491,7 @@ class SmartEnergyBestChargePriceSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_best_charge_price"
     _attr_name = "Best Charge Price Next 12h"
     _attr_native_unit_of_measurement = "SEK/kWh"
-    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:battery-arrow-up"
 
     @property
@@ -540,7 +540,7 @@ class SmartEnergySolarNext2hSensor(_BaseEnergySensor):
     _attr_name = "Solar Forecast Next 2h"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_icon = "mdi:weather-sunny"
 
     @property
@@ -555,7 +555,7 @@ class SmartEnergySolarNext4hSensor(_BaseEnergySensor):
     _attr_name = "Solar Forecast Next 4h"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_icon = "mdi:weather-sunny"
 
     @property
@@ -570,7 +570,7 @@ class SmartEnergySolarNext8hSensor(_BaseEnergySensor):
     _attr_name = "Solar Forecast Next 8h"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_icon = "mdi:weather-sunny-alert"
 
     @property
@@ -656,7 +656,7 @@ class BatteryAccumulatedCostSensor(_BaseEnergySensor, RestoreEntity):
     _attr_name       = "Battery Accumulated Cost"
     _attr_native_unit_of_measurement = "SEK"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_state_class  = SensorStateClass.TOTAL
     _attr_icon         = "mdi:battery-charging-medium"
 
     def __init__(self, coordinator, entry):
@@ -767,7 +767,6 @@ class BatteryAveragePriceSensor(_BaseEnergySensor, RestoreEntity):
     _attr_unique_id  = "sem_battery_average_price"
     _attr_name       = "Battery Average Price"
     _attr_native_unit_of_measurement = "SEK/kWh"
-    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_icon         = "mdi:battery-heart"
 
@@ -809,7 +808,7 @@ class PredictedHouseLoadSensor(_BaseEnergySensor):
     _attr_name        = "Predicted House Load"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_state_class  = None
     _attr_icon         = "mdi:home-lightning-bolt"
 
     @property
@@ -850,7 +849,7 @@ class BatteryEnergyKwhSensor(_BaseEnergySensor):
     _attr_name        = "Battery Energy"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_state_class  = None
     _attr_icon         = "mdi:battery-charging-medium"
 
     @property
