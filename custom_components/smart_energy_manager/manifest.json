@@ -6,7 +6,6 @@
   ],
   "config_flow": true,
   "documentation": "https://github.com/fjonson95/smart_energy_manager",
-  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/fjonson95/smart_energy_manager/issues",
   "requirements": [],
   "version": "0.5.11"
