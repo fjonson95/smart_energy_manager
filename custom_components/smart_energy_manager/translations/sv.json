@@ -256,5 +256,144 @@
       "required": "Detta fält är obligatoriskt",
       "required_fields": "Namn, strömbrytare och strömsetpunkt krävs"
     }
+  },
+  "entity": {
+    "sensor": {
+      "buy_price": {
+        "name": "Köppris"
+      },
+      "sell_price": {
+        "name": "Säljpris"
+      },
+      "spot_price": {
+        "name": "Spotpris"
+      },
+      "battery_charge_power": {
+        "name": "Laddningssetpunkt batteri"
+      },
+      "battery_discharge_power": {
+        "name": "Urladdningssetpunkt batteri"
+      },
+      "phase_l1_load": {
+        "name": "Fasbelastning L1"
+      },
+      "phase_l2_load": {
+        "name": "Fasbelastning L2"
+      },
+      "phase_l3_load": {
+        "name": "Fasbelastning L3"
+      },
+      "decision_reason": {
+        "name": "Senaste beslut"
+      },
+      "operating_mode_sensor": {
+        "name": "Driftläge (sensor)"
+      },
+      "legionella_active": {
+        "name": "Legionella aktiv"
+      },
+      "legionella_days_since": {
+        "name": "Dagar sedan legionella"
+      },
+      "legionella_next_due": {
+        "name": "Nästa legionella"
+      },
+      "house_load": {
+        "name": "Husförbrukning"
+      },
+      "solar_surplus": {
+        "name": "Solöverskott"
+      },
+      "hot_water_temp": {
+        "name": "Varmvattentemperatur"
+      },
+      "legionella_temp_confirmed": {
+        "name": "Legionella temp bekräftad"
+      },
+      "negative_slots_ahead": {
+        "name": "Negativprisslots framåt"
+      },
+      "best_discharge_price": {
+        "name": "Bästa urladdningspris (12h)"
+      },
+      "best_charge_price": {
+        "name": "Bästa laddningspris (12h)"
+      },
+      "yesterday_consumption": {
+        "name": "Gårdagens förbrukning (exkl. EV)"
+      },
+      "solar_next_2h": {
+        "name": "Solprognos 2h"
+      },
+      "solar_next_4h": {
+        "name": "Solprognos 4h"
+      },
+      "solar_next_8h": {
+        "name": "Solprognos 8h"
+      },
+      "peak_solar_power": {
+        "name": "Max soleffekt (8h)"
+      },
+      "hours_to_solar_peak": {
+        "name": "Timmar till soltoppet"
+      },
+      "wait_for_solar": {
+        "name": "Vänta på sol"
+      },
+      "battery_accumulated_cost": {
+        "name": "Batterikostnad ackumulerad"
+      },
+      "battery_average_price": {
+        "name": "Batterisnittpris"
+      },
+      "predicted_house_load": {
+        "name": "Prognos husförbrukning"
+      },
+      "battery_energy": {
+        "name": "Batterienergi"
+      }
+    },
+    "switch": {
+      "force_ev_charge": {
+        "name": "Tvångsladdning bil"
+      },
+      "winter_mode": {
+        "name": "Vinterläge"
+      },
+      "force_charge_battery": {
+        "name": "Tvångsladdning batteri"
+      },
+      "opportunistic_charge": {
+        "name": "Opportunistisk nätladdning"
+      }
+    },
+    "number": {
+      "battery_min_soc": {
+        "name": "Batteri min SOC"
+      },
+      "battery_max_soc": {
+        "name": "Batteri max SOC"
+      },
+      "ev_soc_target": {
+        "name": "EV SOC-mål"
+      },
+      "winter_cheap_threshold": {
+        "name": "Vinter billig priströskel"
+      },
+      "winter_expensive_threshold": {
+        "name": "Vinter dyr priströskel"
+      },
+      "winter_min_soc": {
+        "name": "Vinter min SOC"
+      },
+      "winter_max_soc": {
+        "name": "Vinter max SOC"
+      }
+    },
+    "select": {
+      "operating_mode": {
+        "name": "Driftläge"
+      }
+    }
   }
 }

@@ -45,7 +45,7 @@ class _BaseSEMSwitch(CoordinatorEntity, SwitchEntity):
 class ForceEVChargeSwitch(_BaseSEMSwitch):
     """Force EV charging from grid regardless of solar."""
     _attr_unique_id = "sem_force_ev_charge"
-    _attr_name = "Force EV Charge from Grid"
+    _attr_translation_key = "force_ev_charge"
     _attr_icon = "mdi:car-electric"
 
     @property
@@ -66,7 +66,7 @@ class ForceEVChargeSwitch(_BaseSEMSwitch):
 class WinterModeSwitch(_BaseSEMSwitch):
     """Enable winter mode (charge cheap / discharge expensive)."""
     _attr_unique_id = "sem_winter_mode"
-    _attr_name = "Winter Mode"
+    _attr_translation_key = "winter_mode"
     _attr_icon = "mdi:snowflake"
 
     @property
@@ -87,7 +87,7 @@ class WinterModeSwitch(_BaseSEMSwitch):
 class ForceChargeBatterySwitch(_BaseSEMSwitch):
     """Force charge battery from grid."""
     _attr_unique_id = "sem_force_battery_charge"
-    _attr_name = "Force Charge Battery from Grid"
+    _attr_translation_key = "force_charge_battery"
     _attr_icon = "mdi:battery-charging"
 
     @property
@@ -108,7 +108,7 @@ class ForceChargeBatterySwitch(_BaseSEMSwitch):
 class OpportunisticChargeSwitch(_BaseSEMSwitch):
     """Aktivera/inaktivera opportunistisk nätladdning vid lågt pris."""
     _attr_unique_id = "sem_opportunistic_charge"
-    _attr_name = "Opportunistic Grid Charge"
+    _attr_translation_key = "opportunistic_charge"
     _attr_icon = "mdi:battery-charging-low"
 
     @property

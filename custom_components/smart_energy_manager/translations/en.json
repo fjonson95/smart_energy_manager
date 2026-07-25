@@ -256,5 +256,144 @@
       "required": "This field is required",
       "required_fields": "Name, switch, and current setpoint are required"
     }
+  },
+  "entity": {
+    "sensor": {
+      "buy_price": {
+        "name": "Buy Price"
+      },
+      "sell_price": {
+        "name": "Sell Price"
+      },
+      "spot_price": {
+        "name": "Spot Price"
+      },
+      "battery_charge_power": {
+        "name": "Battery Charge Power Setpoint"
+      },
+      "battery_discharge_power": {
+        "name": "Battery Discharge Power Setpoint"
+      },
+      "phase_l1_load": {
+        "name": "Phase L1 Estimated Load"
+      },
+      "phase_l2_load": {
+        "name": "Phase L2 Estimated Load"
+      },
+      "phase_l3_load": {
+        "name": "Phase L3 Estimated Load"
+      },
+      "decision_reason": {
+        "name": "Last Decision Reason"
+      },
+      "operating_mode_sensor": {
+        "name": "Operating Mode (sensor)"
+      },
+      "legionella_active": {
+        "name": "Legionella Disinfection Active"
+      },
+      "legionella_days_since": {
+        "name": "Legionella Days Since Last Run"
+      },
+      "legionella_next_due": {
+        "name": "Legionella Next Due"
+      },
+      "house_load": {
+        "name": "House Load"
+      },
+      "solar_surplus": {
+        "name": "Solar Surplus"
+      },
+      "hot_water_temp": {
+        "name": "Hot Water Temperature"
+      },
+      "legionella_temp_confirmed": {
+        "name": "Legionella Temperature Confirmed"
+      },
+      "negative_slots_ahead": {
+        "name": "Negative Price Slots Ahead"
+      },
+      "best_discharge_price": {
+        "name": "Best Discharge Price Next 12h"
+      },
+      "best_charge_price": {
+        "name": "Best Charge Price Next 12h"
+      },
+      "yesterday_consumption": {
+        "name": "Yesterday Consumption (excl. EV)"
+      },
+      "solar_next_2h": {
+        "name": "Solar Forecast Next 2h"
+      },
+      "solar_next_4h": {
+        "name": "Solar Forecast Next 4h"
+      },
+      "solar_next_8h": {
+        "name": "Solar Forecast Next 8h"
+      },
+      "peak_solar_power": {
+        "name": "Peak Solar Power Next 8h"
+      },
+      "hours_to_solar_peak": {
+        "name": "Hours to Solar Peak"
+      },
+      "wait_for_solar": {
+        "name": "Wait for Solar"
+      },
+      "battery_accumulated_cost": {
+        "name": "Battery Accumulated Cost"
+      },
+      "battery_average_price": {
+        "name": "Battery Average Price"
+      },
+      "predicted_house_load": {
+        "name": "Predicted House Load"
+      },
+      "battery_energy": {
+        "name": "Battery Energy"
+      }
+    },
+    "switch": {
+      "force_ev_charge": {
+        "name": "Force EV Charge from Grid"
+      },
+      "winter_mode": {
+        "name": "Winter Mode"
+      },
+      "force_charge_battery": {
+        "name": "Force Charge Battery from Grid"
+      },
+      "opportunistic_charge": {
+        "name": "Opportunistic Grid Charge"
+      }
+    },
+    "number": {
+      "battery_min_soc": {
+        "name": "Battery Min SOC"
+      },
+      "battery_max_soc": {
+        "name": "Battery Max SOC"
+      },
+      "ev_soc_target": {
+        "name": "EV SOC Target"
+      },
+      "winter_cheap_threshold": {
+        "name": "Winter Cheap Price Threshold"
+      },
+      "winter_expensive_threshold": {
+        "name": "Winter Expensive Price Threshold"
+      },
+      "winter_min_soc": {
+        "name": "Winter Min SOC"
+      },
+      "winter_max_soc": {
+        "name": "Winter Max SOC"
+      }
+    },
+    "select": {
+      "operating_mode": {
+        "name": "Operating Mode"
+      }
+    }
   }
 }

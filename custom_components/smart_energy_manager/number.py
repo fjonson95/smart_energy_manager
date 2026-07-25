@@ -70,7 +70,7 @@ class _BaseSEMNumber(CoordinatorEntity, NumberEntity):
 
 class BatteryMinSocNumber(_BaseSEMNumber):
     _attr_unique_id = "sem_battery_min_soc"
-    _attr_name = "Battery Min SOC"
+    _attr_translation_key = "battery_min_soc"
     _attr_native_unit_of_measurement = "%"
     _attr_native_min_value = 5.0
     _attr_native_max_value = 50.0
@@ -87,7 +87,7 @@ class BatteryMinSocNumber(_BaseSEMNumber):
 
 class BatteryMaxSocNumber(_BaseSEMNumber):
     _attr_unique_id = "sem_battery_max_soc"
-    _attr_name = "Battery Max SOC"
+    _attr_translation_key = "battery_max_soc"
     _attr_native_unit_of_measurement = "%"
     _attr_native_min_value = 50.0
     _attr_native_max_value = 100.0
@@ -104,7 +104,7 @@ class BatteryMaxSocNumber(_BaseSEMNumber):
 
 class EvSocTargetNumber(_BaseSEMNumber):
     _attr_unique_id = "sem_ev_soc_target"
-    _attr_name = "EV SOC Target"
+    _attr_translation_key = "ev_soc_target"
     _attr_native_unit_of_measurement = "%"
     _attr_native_min_value = 20.0
     _attr_native_max_value = 100.0
@@ -121,7 +121,7 @@ class EvSocTargetNumber(_BaseSEMNumber):
 
 class WinterCheapThresholdNumber(_BaseSEMNumber):
     _attr_unique_id = "sem_winter_cheap_threshold"
-    _attr_name = "Winter Cheap Price Threshold"
+    _attr_translation_key = "winter_cheap_threshold"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_native_min_value = 0.0
     _attr_native_max_value = 3.0
@@ -138,7 +138,7 @@ class WinterCheapThresholdNumber(_BaseSEMNumber):
 
 class WinterExpensiveThresholdNumber(_BaseSEMNumber):
     _attr_unique_id = "sem_winter_expensive_threshold"
-    _attr_name = "Winter Expensive Price Threshold"
+    _attr_translation_key = "winter_expensive_threshold"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_native_min_value = 0.5
     _attr_native_max_value = 5.0
@@ -155,7 +155,7 @@ class WinterExpensiveThresholdNumber(_BaseSEMNumber):
 
 class WinterMinSocNumber(_BaseSEMNumber):
     _attr_unique_id = "sem_winter_min_soc"
-    _attr_name = "Winter Min SOC"
+    _attr_translation_key = "winter_min_soc"
     _attr_native_unit_of_measurement = "%"
     _attr_native_min_value = 10.0
     _attr_native_max_value = 80.0
@@ -172,7 +172,7 @@ class WinterMinSocNumber(_BaseSEMNumber):
 
 class WinterMaxSocNumber(_BaseSEMNumber):
     _attr_unique_id = "sem_winter_max_soc"
-    _attr_name = "Winter Max SOC"
+    _attr_translation_key = "winter_max_soc"
     _attr_native_unit_of_measurement = "%"
     _attr_native_min_value = 50.0
     _attr_native_max_value = 100.0

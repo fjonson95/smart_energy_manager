@@ -48,7 +48,7 @@ class _BaseSEMSelect(CoordinatorEntity, SelectEntity):
 class OperatingModeSelect(_BaseSEMSelect):
     """Välj driftläge."""
     _attr_unique_id = "sem_operating_mode_select"
-    _attr_name = "Operating Mode"
+    _attr_translation_key = "operating_mode"
     _attr_icon = "mdi:tune"
     _attr_options = OPERATING_MODES
 

@@ -112,7 +112,7 @@ class _BaseEnergySensor(CoordinatorEntity, SensorEntity):
 
 class SmartEnergyBuyPriceSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_buy_price"
-    _attr_name = "Buy Price"
+    _attr_translation_key = "buy_price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:currency-usd"
@@ -124,7 +124,7 @@ class SmartEnergyBuyPriceSensor(_BaseEnergySensor):
 
 class SmartEnergySellPriceSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_sell_price"
-    _attr_name = "Sell Price"
+    _attr_translation_key = "sell_price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:currency-usd"
@@ -136,7 +136,7 @@ class SmartEnergySellPriceSensor(_BaseEnergySensor):
 
 class SmartEnergySpotPriceSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_spot_price"
-    _attr_name = "Spot Price"
+    _attr_translation_key = "spot_price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:flash"
@@ -148,7 +148,7 @@ class SmartEnergySpotPriceSensor(_BaseEnergySensor):
 
 class SmartEnergyBatteryChargePowerSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_battery_charge_power"
-    _attr_name = "Battery Charge Power Setpoint"
+    _attr_translation_key = "battery_charge_power"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -162,7 +162,7 @@ class SmartEnergyBatteryChargePowerSensor(_BaseEnergySensor):
 
 class SmartEnergyBatteryDischargePowerSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_battery_discharge_power"
-    _attr_name = "Battery Discharge Power Setpoint"
+    _attr_translation_key = "battery_discharge_power"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -272,7 +272,7 @@ class ChargerConnectedSensor(_BaseChargerSensor):
 
 class SmartEnergyPhaseL1Sensor(_BaseEnergySensor):
     _attr_unique_id = "sem_phase_l1_load"
-    _attr_name = "Phase L1 Estimated Load"
+    _attr_translation_key = "phase_l1_load"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -285,7 +285,7 @@ class SmartEnergyPhaseL1Sensor(_BaseEnergySensor):
 
 class SmartEnergyPhaseL2Sensor(_BaseEnergySensor):
     _attr_unique_id = "sem_phase_l2_load"
-    _attr_name = "Phase L2 Estimated Load"
+    _attr_translation_key = "phase_l2_load"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -298,7 +298,7 @@ class SmartEnergyPhaseL2Sensor(_BaseEnergySensor):
 
 class SmartEnergyPhaseL3Sensor(_BaseEnergySensor):
     _attr_unique_id = "sem_phase_l3_load"
-    _attr_name = "Phase L3 Estimated Load"
+    _attr_translation_key = "phase_l3_load"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -311,7 +311,7 @@ class SmartEnergyPhaseL3Sensor(_BaseEnergySensor):
 
 class SmartEnergyDecisionReasonSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_decision_reason"
-    _attr_name = "Last Decision Reason"
+    _attr_translation_key = "decision_reason"
     _attr_icon = "mdi:information"
 
     @property
@@ -322,7 +322,7 @@ class SmartEnergyDecisionReasonSensor(_BaseEnergySensor):
 
 class SmartEnergyOperatingModeSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_operating_mode"
-    _attr_name = "Operating Mode"
+    _attr_translation_key = "operating_mode_sensor"
     _attr_icon = "mdi:cog"
 
     @property
@@ -332,7 +332,7 @@ class SmartEnergyOperatingModeSensor(_BaseEnergySensor):
 
 class SmartEnergyLegionellaActiveSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_legionella_active"
-    _attr_name = "Legionella Disinfection Active"
+    _attr_translation_key = "legionella_active"
     _attr_icon = "mdi:bacteria"
 
     @property
@@ -343,7 +343,7 @@ class SmartEnergyLegionellaActiveSensor(_BaseEnergySensor):
 
 class SmartEnergyLegionellaDaysSinceSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_legionella_days_since"
-    _attr_name = "Legionella Days Since Last Run"
+    _attr_translation_key = "legionella_days_since"
     _attr_native_unit_of_measurement = "d"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:calendar-clock"
@@ -359,7 +359,7 @@ class SmartEnergyLegionellaDaysSinceSensor(_BaseEnergySensor):
 
 class SmartEnergyLegionellaNextDueSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_legionella_next_due"
-    _attr_name = "Legionella Next Due"
+    _attr_translation_key = "legionella_next_due"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:calendar-alert"
 
@@ -371,7 +371,7 @@ class SmartEnergyLegionellaNextDueSensor(_BaseEnergySensor):
 
 class SmartEnergyHouseLoadSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_house_load"
-    _attr_name = "House Load"
+    _attr_translation_key = "house_load"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -385,7 +385,7 @@ class SmartEnergyHouseLoadSensor(_BaseEnergySensor):
 
 class SmartEnergySolarSurplusSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_solar_surplus"
-    _attr_name = "Solar Surplus"
+    _attr_translation_key = "solar_surplus"
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -400,7 +400,7 @@ class SmartEnergySolarSurplusSensor(_BaseEnergySensor):
 class SmartEnergyHotWaterTempSensor(_BaseEnergySensor):
     """Ackumulatortankens temperatur."""
     _attr_unique_id = "sem_hot_water_temp"
-    _attr_name = "Hot Water Temperature"
+    _attr_translation_key = "hot_water_temp"
     _attr_native_unit_of_measurement = "°C"
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -417,7 +417,7 @@ class SmartEnergyHotWaterTempSensor(_BaseEnergySensor):
 class SmartEnergyLegionellaTempConfirmedSensor(_BaseEnergySensor):
     """Visar om legionella-körningen bekräftats via temperatur."""
     _attr_unique_id = "sem_legionella_temp_confirmed"
-    _attr_name = "Legionella Temperature Confirmed"
+    _attr_translation_key = "legionella_temp_confirmed"
     _attr_icon = "mdi:thermometer-check"
 
     @property
@@ -430,7 +430,7 @@ class SmartEnergyLegionellaTempConfirmedSensor(_BaseEnergySensor):
 class SmartEnergyNegativeSlotsAheadSensor(_BaseEnergySensor):
     """Antal kvartstimmar med negativt säljpris kommande 8h."""
     _attr_unique_id = "sem_negative_slots_ahead"
-    _attr_name = "Negative Price Slots Ahead"
+    _attr_translation_key = "negative_slots_ahead"
     _attr_native_unit_of_measurement = "slots"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:clock-alert"
@@ -459,7 +459,7 @@ class SmartEnergyNegativeSlotsAheadSensor(_BaseEnergySensor):
 class SmartEnergyBestDischargePriceSensor(_BaseEnergySensor):
     """Bästa köppris för batteridischarge kommande 12h."""
     _attr_unique_id = "sem_best_discharge_price"
-    _attr_name = "Best Discharge Price Next 12h"
+    _attr_translation_key = "best_discharge_price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:battery-arrow-down"
@@ -489,7 +489,7 @@ class SmartEnergyBestDischargePriceSensor(_BaseEnergySensor):
 class SmartEnergyBestChargePriceSensor(_BaseEnergySensor):
     """Lägsta köppris för batteriladdning kommande 12h."""
     _attr_unique_id = "sem_best_charge_price"
-    _attr_name = "Best Charge Price Next 12h"
+    _attr_translation_key = "best_charge_price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:battery-arrow-up"
@@ -519,7 +519,7 @@ class SmartEnergyBestChargePriceSensor(_BaseEnergySensor):
 class SmartEnergyYesterdayConsumptionSensor(_BaseEnergySensor):
     """Gårdagens förbrukning exkl. EV-laddning."""
     _attr_unique_id = "sem_yesterday_consumption"
-    _attr_name = "Yesterday Consumption (excl. EV)"
+    _attr_translation_key = "yesterday_consumption"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -537,7 +537,7 @@ class SmartEnergyYesterdayConsumptionSensor(_BaseEnergySensor):
 class SmartEnergySolarNext2hSensor(_BaseEnergySensor):
     """Förväntad solenergi kommande 2 timmar (kWh, median)."""
     _attr_unique_id = "sem_solar_next_2h_kwh"
-    _attr_name = "Solar Forecast Next 2h"
+    _attr_translation_key = "solar_next_2h"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = None
@@ -552,7 +552,7 @@ class SmartEnergySolarNext2hSensor(_BaseEnergySensor):
 class SmartEnergySolarNext4hSensor(_BaseEnergySensor):
     """Förväntad solenergi kommande 4 timmar (kWh, median)."""
     _attr_unique_id = "sem_solar_next_4h_kwh"
-    _attr_name = "Solar Forecast Next 4h"
+    _attr_translation_key = "solar_next_4h"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = None
@@ -567,7 +567,7 @@ class SmartEnergySolarNext4hSensor(_BaseEnergySensor):
 class SmartEnergySolarNext8hSensor(_BaseEnergySensor):
     """Förväntad solenergi kommande 8 timmar (kWh, median)."""
     _attr_unique_id = "sem_solar_next_8h_kwh"
-    _attr_name = "Solar Forecast Next 8h"
+    _attr_translation_key = "solar_next_8h"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = None
@@ -582,7 +582,7 @@ class SmartEnergySolarNext8hSensor(_BaseEnergySensor):
 class SmartEnergyPeakSolarKwSensor(_BaseEnergySensor):
     """Maxeffekt från sol kommande 8h (kW)."""
     _attr_unique_id = "sem_peak_solar_kw_next_8h"
-    _attr_name = "Peak Solar Power Next 8h"
+    _attr_translation_key = "peak_solar_power"
     _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -605,7 +605,7 @@ class SmartEnergyPeakSolarKwSensor(_BaseEnergySensor):
 class SmartEnergyHoursToSolarPeakSensor(_BaseEnergySensor):
     """Timmar tills soltoppen kommande 8h."""
     _attr_unique_id = "sem_hours_to_solar_peak"
-    _attr_name = "Hours to Solar Peak"
+    _attr_translation_key = "hours_to_solar_peak"
     _attr_native_unit_of_measurement = "h"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:clock-time-eight-outline"
@@ -619,7 +619,7 @@ class SmartEnergyHoursToSolarPeakSensor(_BaseEnergySensor):
 class SmartEnergyWaitForSolarSensor(_BaseEnergySensor):
     """Indikerar om det lönar sig att vänta på sol innan batteriladdning från nät."""
     _attr_unique_id = "sem_wait_for_solar"
-    _attr_name = "Wait for Solar"
+    _attr_translation_key = "wait_for_solar"
     _attr_icon = "mdi:sun-clock"
 
     @property
@@ -653,7 +653,7 @@ class BatteryAccumulatedCostSensor(_BaseEnergySensor, RestoreEntity):
     """
 
     _attr_unique_id  = "sem_battery_accumulated_cost"
-    _attr_name       = "Battery Accumulated Cost"
+    _attr_translation_key = "battery_accumulated_cost"
     _attr_native_unit_of_measurement = "SEK"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class  = SensorStateClass.TOTAL
@@ -765,7 +765,7 @@ class BatteryAveragePriceSensor(_BaseEnergySensor, RestoreEntity):
     """
 
     _attr_unique_id  = "sem_battery_average_price"
-    _attr_name       = "Battery Average Price"
+    _attr_translation_key = "battery_average_price"
     _attr_native_unit_of_measurement = "SEK/kWh"
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_icon         = "mdi:battery-heart"
@@ -805,7 +805,7 @@ class PredictedHouseLoadSensor(_BaseEnergySensor):
     """
 
     _attr_unique_id   = "sem_predicted_house_load"
-    _attr_name        = "Predicted House Load"
+    _attr_translation_key = "predicted_house_load"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class  = None
@@ -846,7 +846,7 @@ class BatteryEnergyKwhSensor(_BaseEnergySensor):
     """Faktisk energi lagrad i batteriet (kWh), beräknat från SOC × kapacitet."""
 
     _attr_unique_id   = "sem_battery_energy_kwh"
-    _attr_name        = "Battery Energy"
+    _attr_translation_key = "battery_energy"
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class  = None
