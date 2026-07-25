@@ -1,0 +1,4 @@
+reset_battery_cost:
+  name: Reset Battery Cost
+  description: Resets the accumulated battery cost and average price to zero.
+  fields: {}
