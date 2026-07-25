@@ -1,10 +1,21 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.8-blue)
+![Version](https://img.shields.io/badge/version-0.5.11-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.11
+
+- **Fix: stabilt export-golv baserat på gårdagens förbrukning** – exportgolvets timberäkning (`hours_dark × huslast + 2 kWh`) använde tidigare den momentana huslasten, vilket innebar att ett värmepumpsstart kl 04:00 kunde mångdubbla golvet och blockera export. Huslasten i beräkningen ersätts nu med gårdagens dygnsmedelförbrukning (`last_period`-attributet från `yesterday_consumption_entity` delat på 24 h). Golvet varierar nu bara när Solcast-prognosen förändras, inte vid momentana toppar.
+- **Fix: solar_takeover_dt sparas undan mot inaktuell Solcast-data** – om Solcast-sensorn serverade gammal data (alla slots i det förflutna) föll koden tillbaka på nästa soluppgång (~22 h), vilket gav ett felaktigt golv på 15–20 kWh. Koordinatorn sparar nu senaste giltiga `solar_takeover_dt` och återanvänder det om Solcast tillfälligt inte kan beräkna ett nytt värde. Värdet nollställs när solen producerar igen. Om Solcast uppdateras och ger ett *tidigare* takeover-datum (bättre prognos) uppdateras det sparade värdet.
+
+## What's New in 0.5.10
+
+- **Fix: solar_takeover söker dagens prognos först** – exportgolvet (energireserven som skyddar batteriurladdning) beräknades mot imorgons Solcast-prognos även när solen redan producerade idag. Resultatet blev ett felaktigt "mörker" på 20+ timmar som blockerade export i onödan. Koden söker nu i dagens detailedForecast-slots (framtida slots) innan den faller tillbaka på imorgons prognos.
+- **Fix: proaktiv export blockeras vid solöverskott** – batteriet laddade ur för export samtidigt som det laddades från solöverskott. Proaktiv batteriexport aktiveras nu bara när solproduktionen inte överstiger huslasten med mer än 200 W. Vid solöverskott exporteras solenergin naturligt utan batteriinblandning.
+- **Fix: state_class för monetary- och energy-sensorer** – ett antal sensorer använde `state_class = MEASUREMENT` i kombination med `device_class = MONETARY` eller `ENERGY`, vilket HA varnar för. `BatteryAccumulatedCostSensor` använder nu `TOTAL`; övriga (prognos- och beräkningssensorer) använder `None`.
 
 ## What's New in 0.5.9
 

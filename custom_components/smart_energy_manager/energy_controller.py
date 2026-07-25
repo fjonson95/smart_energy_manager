@@ -18,6 +18,7 @@ from .const import (
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES,
     DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
+    DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH, DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -219,6 +220,9 @@ class EnergyState:
 
     # Snittpris för energin i batteriet (SEK/kWh) – från BatteryAccumulatedCostSensor
     battery_avg_cost_sek_kwh: float = 0.0
+
+    # Opportunistisk nätladdning aktiverad
+    opportunistic_charge_enabled: bool = True
 
     # Driftläge
     operating_mode: str = MODE_AUTO
@@ -628,10 +632,8 @@ class EnergyController:
                         for s in _high_slots
                     )
                     _exportable_kwh = _battery_energy_kwh - _export_floor_kwh
-                    if _high_hours > 0.25:
-                        _target_w = (_exportable_kwh / _high_hours) * 1000.0
-                    else:
-                        _target_w = state.battery_max_power_kw * 1000.0
+                    _safe_hours = max(1.0, _high_hours)
+                    _target_w = (_exportable_kwh / _safe_hours) * 1000.0
                     discharge_w = max(500.0, min(_target_w, state.battery_max_power_kw * 1000.0))
 
                     decision.battery_discharge_power_w = discharge_w
@@ -649,6 +651,66 @@ class EnergyController:
                         sell_price, _trigger_label,
                         _battery_energy_kwh, _export_floor_kwh, _avg_cost,
                     )
+
+        # Morgonexport: sälj så länge säljpris > batterisnittpris och sol räcker för återladdning idag
+        if not export_active and (
+            battery_soc > self.battery_min_soc
+            and state.solar_forecast_today_kwh >= self.export_min_solar_tomorrow_kwh
+            and _avg_cost > 0
+            and sell_price > _avg_cost
+            and solar_w <= house_load_w + 200
+        ):
+            export_active = True
+            _solar_surplus_w = max(0.0, solar_w - house_load_w)
+            discharge_w = max(500.0, state.battery_max_power_kw * 1000.0 - _solar_surplus_w)
+            decision.battery_discharge_power_w = discharge_w
+            decision.reason += (
+                f" | Morgonexport {sell_price:.2f} > snitt {_avg_cost:.2f} kr/kWh"
+                f" sol idag {state.solar_forecast_today_kwh:.1f} kWh"
+            )
+
+        # Opportunistisk nätladdning: ladda billigt när sol imorgon är låg
+        if (
+            state.opportunistic_charge_enabled
+            and not export_active
+            and decision.battery_charge_power_w == 0.0
+            and ps and ps.slots
+            and battery_soc < self.battery_max_soc
+        ):
+            _ref_daily_kwh = state.yesterday_consumption_kwh or 25.0
+            _charge_target_kwh = _export_floor_kwh
+            if state.solar_forecast_tomorrow_kwh < DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH:
+                _tomorrow_deficit = max(0.0, _ref_daily_kwh - state.solar_forecast_tomorrow_kwh)
+                _charge_target_kwh = min(
+                    state.battery_capacity_kwh * self.battery_max_soc / 100.0,
+                    _export_floor_kwh + _tomorrow_deficit,
+                )
+            _charge_deficit_kwh = _charge_target_kwh - _battery_energy_kwh
+            if _charge_deficit_kwh > 0.5:
+                _now_loc = datetime.now().astimezone()
+                _future_slots = [s for s in ps.slots if s.end > _now_loc]
+                if _future_slots:
+                    _sorted_prices = sorted(s.buy_sek for s in _future_slots)
+                    _threshold_idx = max(0, int(len(_sorted_prices) * DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE) - 1)
+                    _price_threshold = _sorted_prices[_threshold_idx]
+                    _cur_slot = next((s for s in _future_slots if s.start <= _now_loc), None)
+                    if _cur_slot and buy_price <= _price_threshold:
+                        _cheap_slots = [s for s in _future_slots if s.buy_sek <= _price_threshold]
+                        _remaining_cheap_h = sum(
+                            (s.end - max(s.start, _now_loc)).total_seconds() / 3600.0
+                            for s in _cheap_slots
+                        )
+                        _safe_h = max(1.0, _remaining_cheap_h)
+                        charge_w = min(
+                            state.battery_max_power_kw * 1000.0,
+                            (_charge_deficit_kwh / _safe_h) * 1000.0,
+                        )
+                        decision.battery_charge_power_w = charge_w
+                        decision.reason += (
+                            f" | Opp. laddning {buy_price:.2f} kr/kWh"
+                            f" (≤{_price_threshold:.2f}) mål {_charge_target_kwh:.1f} kWh"
+                            f" sol imorgon {state.solar_forecast_tomorrow_kwh:.1f} kWh"
+                        )
 
         # Ladda ur batteri för att täcka huslast (om inte proaktiv export redan satt urladdningen)
         if not export_active and solar_w < house_load_w and battery_soc > self.battery_min_soc:

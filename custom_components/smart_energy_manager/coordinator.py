@@ -134,6 +134,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # inaktuell Solcast-data inte nollställer värdet mitt i natten.
         # Nollställs när sol producerar igen (solar_w > 200 W).
         self._saved_solar_takeover_dt: Optional[datetime] = None
+        self.opportunistic_charge_enabled: bool = True
 
         # Minimitid-spärr för extra varmvatten (förhindrar flimmer på/av)
         self._extra_hot_water_started_at: Optional[datetime] = None
@@ -468,7 +469,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             slot_start = slot_start.replace(tzinfo=timezone.utc)
                         if slot_start <= _now_for_takeover:
                             continue
-                        if slot.get("pv_estimate", 0.0) * 1000.0 >= _ref_load_w:
+                        if slot.get("pv_estimate10", 0.0) * 1000.0 >= _ref_load_w:
                             solar_takeover_dt = slot_start
                             break
                     except Exception:
@@ -587,6 +588,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 sun_next_rising=self._get_sun_datetime("next_rising"),
                 solar_takeover_dt=solar_takeover_dt,
                 battery_avg_cost_sek_kwh=self._battery_avg_cost_sek_kwh,
+                opportunistic_charge_enabled=self.opportunistic_charge_enabled,
             )
             self._state = state
 

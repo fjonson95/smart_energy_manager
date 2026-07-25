@@ -197,6 +197,9 @@ DEFAULT_EXPORT_SELL_PERCENTILE = 0.75    # Urladda/exportera när säljpris ≥ 
 DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH = 5.0  # Minsta Solcast-prognos imorgon för att tillåta export-urladdning
 DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH = 0.70  # Absolut minimipris – exporterar alltid om ≥ detta (oavsett percentil)
 
+DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH = 10.0   # Opportunistisk laddning tillåts om sol imorgon < detta (kWh)
+DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE = 0.30  # Ladda under billigaste 30% av kommande prisslots
+
 # ── Minimitid för extra varmvatten ──────────────────────────────────────────────
 CONF_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES = "extra_hot_water_min_runtime_minutes"
 DEFAULT_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES = 5

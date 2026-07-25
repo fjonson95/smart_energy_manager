@@ -21,6 +21,7 @@ async def async_setup_entry(
         ForceEVChargeSwitch(coordinator, entry),
         WinterModeSwitch(coordinator, entry),
         ForceChargeBatterySwitch(coordinator, entry),
+        OpportunisticChargeSwitch(coordinator, entry),
     ])
 
 
@@ -100,5 +101,26 @@ class ForceChargeBatterySwitch(_BaseSEMSwitch):
 
     async def async_turn_off(self, **kwargs) -> None:
         self.coordinator.operating_mode = MODE_AUTO
+        await self.coordinator.async_request_refresh()
+        self.async_write_ha_state()
+
+
+class OpportunisticChargeSwitch(_BaseSEMSwitch):
+    """Aktivera/inaktivera opportunistisk nätladdning vid lågt pris."""
+    _attr_unique_id = "sem_opportunistic_charge"
+    _attr_name = "Opportunistic Grid Charge"
+    _attr_icon = "mdi:battery-charging-low"
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.opportunistic_charge_enabled
+
+    async def async_turn_on(self, **kwargs) -> None:
+        self.coordinator.opportunistic_charge_enabled = True
+        await self.coordinator.async_request_refresh()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        self.coordinator.opportunistic_charge_enabled = False
         await self.coordinator.async_request_refresh()
         self.async_write_ha_state()
