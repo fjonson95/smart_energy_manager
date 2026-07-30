@@ -247,15 +247,25 @@ class PriceScheduler:
                 ps.solar_kw = total_kw / count
                 ps.solar_kwh = ps.solar_kw * 0.5
 
-    def parse_nordpool_attributes(self, attributes: dict, now: datetime) -> list[PriceSlot]:
+    def parse_nordpool_attributes(
+        self,
+        attributes: dict,
+        now: datetime,
+        price_in_cents: Optional[bool] = None,
+    ) -> list[PriceSlot]:
         """
         Parsa raw_today och raw_tomorrow från Nordpool-attributen.
         Returnerar sorterad lista av PriceSlot framåt i tid.
+
+        price_in_cents: None = auto-detect från attribut (bakåtkompatibel),
+                        True  = HACS (öre/kWh → ÷100),
+                        False = officiell integration (kr/kWh, ingen skalning).
         """
         slots: list[PriceSlot] = []
         now_aware = now if now.tzinfo else now.astimezone()
 
-        price_in_cents = attributes.get("price_in_cents", True)
+        if price_in_cents is None:
+            price_in_cents = bool(attributes.get("price_in_cents", True))
         scale = OERE_TO_SEK if price_in_cents else 1.0
 
         parsed_count = 0
@@ -325,6 +335,7 @@ class PriceScheduler:
         now: datetime,
         solcast_today_attrs: Optional[dict] = None,
         solcast_tomorrow_attrs: Optional[dict] = None,
+        price_in_cents: Optional[bool] = None,
     ) -> PriceSchedule:
         """
         Beräkna komplett prisschema och rekommendationer.
@@ -332,7 +343,7 @@ class PriceScheduler:
         Anropas av koordinatorn varje cykel.
         """
         schedule = PriceSchedule()
-        slots = self.parse_nordpool_attributes(nordpool_attributes, now)
+        slots = self.parse_nordpool_attributes(nordpool_attributes, now, price_in_cents=price_in_cents)
         schedule.slots = slots
 
         if not slots:

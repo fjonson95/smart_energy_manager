@@ -23,7 +23,9 @@
           "ev_power_unit": "EV-laddare effektenhet (W eller kW)",
           "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)",
           "outdoor_temp_entity": "Utomhustemperatur (sensor, valfri – aktiverar förbrukningsprognos)",
-          "disinfecting_extra_kwh": "Extra kWh vid desinficering/legionella (standard 5.0)"
+          "disinfecting_extra_kwh": "Extra kWh vid desinficering/legionella (standard 5.0)",
+          "nordpool_type": "Nordpool-integrationstyp",
+          "nordpool_area": "Nordpool prisområde (t.ex. SE3) – endast för officiell integration"
         }
       },
       "solar": {
@@ -152,7 +154,9 @@
           "ev_power_unit": "EV-laddare effektenhet (W eller kW)",
           "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)",
           "outdoor_temp_entity": "Utomhustemperatur (sensor, valfri – aktiverar förbrukningsprognos)",
-          "disinfecting_extra_kwh": "Extra kWh vid desinficering/legionella (standard 5.0)"
+          "disinfecting_extra_kwh": "Extra kWh vid desinficering/legionella (standard 5.0)",
+          "nordpool_type": "Nordpool-integrationstyp",
+          "nordpool_area": "Nordpool prisområde (t.ex. SE3) – endast för officiell integration"
         }
       },
       "solar_opts": {
@@ -393,6 +397,14 @@
     "select": {
       "operating_mode": {
         "name": "Driftläge"
+      }
+    }
+  },
+  "selector": {
+    "nordpool_type": {
+      "options": {
+        "hacs": "HACS (custom_components/nordpool)",
+        "official": "Officiell HA-integration"
       }
     }
   }

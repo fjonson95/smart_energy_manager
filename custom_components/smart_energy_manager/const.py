@@ -5,6 +5,11 @@ PLATFORMS = ["sensor", "switch", "number", "select"]
 
 # ── Nätmätare & prissättning ──────────────────────────────────────────────────
 CONF_NORDPOOL_ENTITY = "nordpool_entity"
+CONF_NORDPOOL_TYPE = "nordpool_type"
+NORDPOOL_TYPE_HACS = "hacs"
+NORDPOOL_TYPE_OFFICIAL = "official"
+CONF_NORDPOOL_AREA = "nordpool_area"
+DEFAULT_NORDPOOL_AREA = "SE3"
 CONF_SOLCAST_TODAY = "solcast_today_entity"
 CONF_SOLCAST_TOMORROW = "solcast_tomorrow_entity"
 

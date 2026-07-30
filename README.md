@@ -1,10 +1,17 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.11-blue)
+![Version](https://img.shields.io/badge/version-0.5.12-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## Recently Added
+
+- **Official Nord Pool integration support** – in addition to the HACS variant (`custom_components/nordpool`), the official HA Nord Pool integration is now supported. Select integration type and price area (e.g. `SE3`) under Grid & Pricing. Prices are fetched via the `nordpool.get_prices_for_date` service, converted from SEK/MWh to SEK/kWh and cached per day. All scheduler logic (proactive export, opportunistic charging, morning export) works identically regardless of source.
+- **Morning export – needs-based logic** – battery export in the morning to make room for incoming solar is now triggered based on actual need rather than a fixed time gate. The logic checks: (1) expected solar surplus > available battery headroom, (2) current sell price > production-weighted solar average, (3) battery is not empty. Prevents incorrect export in the afternoon and export at low prices.
+- **Fix: `negative_slots_ahead` used sell price** – the price comparison for negative slots ahead used `sell_sek` instead of `spot_sek`, meaning slots with a slightly negative spot price but positive sell price were not counted. Fixed to use `spot_sek` throughout.
+- **Fix: battery charged and discharged simultaneously** – solar surplus charging started even when a discharge decision was already made (e.g. proactive export). Guard added: battery only charges from solar surplus when no discharge is commanded in the same cycle.
 
 ## What's New in 0.5.11
 
@@ -340,16 +347,21 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 ## Configuration
 
 ### Dependencies
-These HACS integrations must be installed and configured:
-- **nordpool** – electricity price sensor
-- **solcast_solar** – solar forecast (optional but recommended)
+One of these Nord Pool integrations must be installed:
+- **nordpool (HACS)** – `custom_components/nordpool`, provides `raw_today`/`raw_tomorrow` with 15-minute prices
+- **Nord Pool (official)** – built-in HA integration (HA 2024.x+), requires `nordpool_type = official` and `nordpool_area` (e.g. `SE3`) in configuration
+
+Optional but recommended:
+- **solcast_solar** – solar forecast
 
 ### Configuration Flow
 
 Configuration takes place in six steps:
 
 **Step 1 – Grid & Pricing**
-- Nord Pool sensor (required)
+- Nord Pool sensor (required) – spot price sensor from the chosen integration
+- Nord Pool integration type – `hacs` (default) or `official`
+- Nord Pool price area – e.g. `SE3` (only used with `official`)
 - Grid meter per phase (L1/L2/L3)
 - Current sensors per phase (for phase protection)
 - Max current per phase (default 20 A)

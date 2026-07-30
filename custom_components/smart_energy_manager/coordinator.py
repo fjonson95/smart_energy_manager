@@ -25,7 +25,9 @@ from .const import (
     CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
     CONF_GRID_POWER_L1, CONF_GRID_POWER_L2, CONF_GRID_POWER_L3,
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
-    CONF_NORDPOOL_ENTITY, CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW,
+    CONF_NORDPOOL_ENTITY, CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS, NORDPOOL_TYPE_OFFICIAL,
+    CONF_NORDPOOL_AREA, DEFAULT_NORDPOOL_AREA,
+    CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW,
     CONF_GRID_FEES, CONF_ENERGY_TAX, CONF_VAT_RATE, CONF_SELL_EXTRA_REVENUE,
     CONF_MAX_CURRENT_PER_PHASE, CONF_GRID_VOLTAGE,
     CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC,
@@ -144,6 +146,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._battery_cost_reset_cb = None
         self._battery_avg_cost_sek_kwh: float = 0.0
 
+        # Cache för officiell Nordpool-integration (uppdateras max en gång per dag)
+        self._official_nordpool_cache: dict = {}
+
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
         chargers = self._get_charger_configs()
@@ -236,12 +241,16 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     def _get_ev_power_w(self, entity_id: Optional[str]) -> float:
         return self._get_state_float(entity_id) * self._ev_scale
 
-    def _get_nordpool_price(self) -> float:
-        """Läs Nordpool spotpris och returnera i SEK/kWh.
+    def _nordpool_price_in_cents(self, state_attributes: dict) -> bool:
+        """Returnera True om Nordpool-sensorn rapporterar i öre (HACS) istället för kr (officiell)."""
+        nordpool_type = self._config.get(CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS)
+        if nordpool_type == NORDPOOL_TYPE_OFFICIAL:
+            return False
+        # HACS: läs price_in_cents från attribut, fallback True
+        return bool(state_attributes.get("price_in_cents", True))
 
-        Nordpool HACS-integrationen rapporterar state i öre/kWh när
-        attributet price_in_cents=True (standard). Vi konverterar till SEK/kWh.
-        """
+    def _get_nordpool_price(self) -> float:
+        """Läs Nordpool spotpris och returnera i SEK/kWh."""
         entity_id = self._config.get(CONF_NORDPOOL_ENTITY)
         if not entity_id:
             return 0.0
@@ -250,9 +259,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             return 0.0
         try:
             raw = float(state.state)
-            # Konvertera öre → SEK om sensorn rapporterar i öre (price_in_cents=True)
-            price_in_cents = state.attributes.get("price_in_cents", True)
-            return raw / 100.0 if price_in_cents else raw
+            return raw / 100.0 if self._nordpool_price_in_cents(state.attributes) else raw
         except (ValueError, TypeError):
             return 0.0
 
@@ -380,6 +387,72 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 return [NO_CAR_SELECTED] + names
         return [NO_CAR_SELECTED]
 
+    # ── Officiell Nordpool-integration ───────────────────────────────
+
+    async def _fetch_official_nordpool_slots(self) -> dict | None:
+        """Hämta prisslots från officiella Nordpool-integrationen via service-anrop.
+
+        Returnerar dict med today/tomorrow-listor i same format som HACS raw_today/raw_tomorrow
+        (fältet heter "value" i SEK/kWh). Cachar resultatet per dag.
+        """
+        entries = self.hass.config_entries.async_entries("nordpool")
+        if not entries:
+            _LOGGER.warning("Officiell Nordpool-integration ej hittad i HA")
+            return None
+
+        entry_id = entries[0].entry_id
+        area = self._config.get(CONF_NORDPOOL_AREA, DEFAULT_NORDPOOL_AREA)
+        today = datetime.now().date()
+        today_str = today.isoformat()
+        tomorrow_str = (today + timedelta(days=1)).isoformat()
+
+        def _convert(slots: list) -> list:
+            return [
+                {"start": s["start"], "end": s["end"], "value": s["price"] / 1000}
+                for s in slots
+            ]
+
+        cached = self._official_nordpool_cache
+        if cached.get("date") == today_str and cached.get("today"):
+            if not cached.get("tomorrow"):
+                try:
+                    resp = await self.hass.services.async_call(
+                        "nordpool", "get_prices_for_date",
+                        {"config_entry": entry_id, "date": tomorrow_str, "area": area, "currency": "SEK"},
+                        blocking=True, return_response=True,
+                    )
+                    slots = (resp or {}).get(area, [])
+                    if slots:
+                        cached["tomorrow"] = _convert(slots)
+                except Exception as exc:
+                    _LOGGER.debug("Imorgondagens officiella Nordpool-priser ej tillgängliga: %s", exc)
+            return cached
+
+        try:
+            resp_today = await self.hass.services.async_call(
+                "nordpool", "get_prices_for_date",
+                {"config_entry": entry_id, "date": today_str, "area": area, "currency": "SEK"},
+                blocking=True, return_response=True,
+            )
+            today_slots = (resp_today or {}).get(area, [])
+
+            resp_tomorrow = await self.hass.services.async_call(
+                "nordpool", "get_prices_for_date",
+                {"config_entry": entry_id, "date": tomorrow_str, "area": area, "currency": "SEK"},
+                blocking=True, return_response=True,
+            )
+            tomorrow_slots = (resp_tomorrow or {}).get(area, [])
+
+            self._official_nordpool_cache = {
+                "date": today_str,
+                "today": _convert(today_slots),
+                "tomorrow": _convert(tomorrow_slots),
+            }
+            return self._official_nordpool_cache
+        except Exception as exc:
+            _LOGGER.warning("Fel vid hämtning av officiella Nordpool-priser: %s", exc)
+            return None
+
     # ── Huvuduppdatering ──────────────────────────────────────────────
 
     async def _async_update_data(self) -> dict:
@@ -412,31 +485,47 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             # Prisschema från Nordpool + Solcast-attributen
             now = datetime.now().astimezone()
             nordpool_entity = c.get(CONF_NORDPOOL_ENTITY)
+            nordpool_type = c.get(CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS)
             price_schedule = None
             if nordpool_entity:
-                nordpool_state = self.hass.states.get(nordpool_entity)
-                if nordpool_state and nordpool_state.attributes:
-                    try:
-                        solcast_today_attrs = None
-                        solcast_tomorrow_attrs = None
-                        sc_today = c.get(CONF_SOLCAST_TODAY)
-                        sc_tomorrow = c.get(CONF_SOLCAST_TOMORROW)
-                        if sc_today:
-                            st = self.hass.states.get(sc_today)
-                            if st:
-                                solcast_today_attrs = dict(st.attributes)
-                        if sc_tomorrow:
-                            st = self.hass.states.get(sc_tomorrow)
-                            if st:
-                                solcast_tomorrow_attrs = dict(st.attributes)
+                try:
+                    solcast_today_attrs = None
+                    solcast_tomorrow_attrs = None
+                    sc_today = c.get(CONF_SOLCAST_TODAY)
+                    sc_tomorrow = c.get(CONF_SOLCAST_TOMORROW)
+                    if sc_today:
+                        st = self.hass.states.get(sc_today)
+                        if st:
+                            solcast_today_attrs = dict(st.attributes)
+                    if sc_tomorrow:
+                        st = self.hass.states.get(sc_tomorrow)
+                        if st:
+                            solcast_tomorrow_attrs = dict(st.attributes)
 
-                        price_schedule = self._price_scheduler.compute(
-                            nordpool_state.attributes, now,
-                            solcast_today_attrs=solcast_today_attrs,
-                            solcast_tomorrow_attrs=solcast_tomorrow_attrs,
-                        )
-                    except Exception as e:
-                        _LOGGER.warning("Kunde inte beräkna prisschema: %s", e)
+                    if nordpool_type == NORDPOOL_TYPE_OFFICIAL:
+                        official_data = await self._fetch_official_nordpool_slots()
+                        if official_data and official_data.get("today"):
+                            synthetic_attrs = {
+                                "raw_today": official_data["today"],
+                                "raw_tomorrow": official_data.get("tomorrow", []),
+                            }
+                            price_schedule = self._price_scheduler.compute(
+                                synthetic_attrs, now,
+                                solcast_today_attrs=solcast_today_attrs,
+                                solcast_tomorrow_attrs=solcast_tomorrow_attrs,
+                                price_in_cents=False,
+                            )
+                    else:
+                        nordpool_state = self.hass.states.get(nordpool_entity)
+                        if nordpool_state and nordpool_state.attributes:
+                            price_schedule = self._price_scheduler.compute(
+                                nordpool_state.attributes, now,
+                                solcast_today_attrs=solcast_today_attrs,
+                                solcast_tomorrow_attrs=solcast_tomorrow_attrs,
+                                price_in_cents=self._nordpool_price_in_cents(nordpool_state.attributes),
+                            )
+                except Exception as e:
+                    _LOGGER.warning("Kunde inte beräkna prisschema: %s", e)
 
             # Gårdagens förbrukning via last_period-attributet (= hela gårdagen i kWh)
             yesterday_kwh: Optional[float] = None

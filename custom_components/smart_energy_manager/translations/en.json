@@ -23,7 +23,9 @@
           "ev_power_unit": "EV charger power unit (W or kW)",
           "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)",
           "outdoor_temp_entity": "Outdoor temperature (sensor, optional – enables consumption forecast)",
-          "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)"
+          "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)",
+          "nordpool_type": "Nordpool integration type",
+          "nordpool_area": "Nordpool price area (e.g. SE3) – only for official integration"
         }
       },
       "solar": {
@@ -152,7 +154,9 @@
           "ev_power_unit": "EV charger power unit (W or kW)",
           "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)",
           "outdoor_temp_entity": "Outdoor temperature (sensor, optional – enables consumption forecast)",
-          "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)"
+          "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)",
+          "nordpool_type": "Nordpool integration type",
+          "nordpool_area": "Nordpool price area (e.g. SE3) – only for official integration"
         }
       },
       "solar_opts": {
@@ -393,6 +397,14 @@
     "select": {
       "operating_mode": {
         "name": "Operating Mode"
+      }
+    }
+  },
+  "selector": {
+    "nordpool_type": {
+      "options": {
+        "hacs": "HACS (custom_components/nordpool)",
+        "official": "Official HA integration"
       }
     }
   }

@@ -21,7 +21,9 @@ from .const import (
     CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
     CONF_GRID_POWER_L1, CONF_GRID_POWER_L2, CONF_GRID_POWER_L3,
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
-    CONF_NORDPOOL_ENTITY, CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW,
+    CONF_NORDPOOL_ENTITY, CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS, NORDPOOL_TYPE_OFFICIAL,
+    CONF_NORDPOOL_AREA, DEFAULT_NORDPOOL_AREA,
+    CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW,
     CONF_GRID_FEES, CONF_ENERGY_TAX, CONF_VAT_RATE, CONF_SELL_EXTRA_REVENUE,
     CONF_MAX_CURRENT_PER_PHASE, CONF_GRID_VOLTAGE,
     CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC,
@@ -87,6 +89,12 @@ def _normalise(data: dict) -> dict:
 def _grid_schema(d: dict) -> vol.Schema:
     return vol.Schema({
         vol.Required(CONF_NORDPOOL_ENTITY, default=_d(d, CONF_NORDPOOL_ENTITY, "")): _entity_selector("sensor"),
+        vol.Required(CONF_NORDPOOL_TYPE, default=_d(d, CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS)): selector.SelectSelector(
+            selector.SelectSelectorConfig(options=[NORDPOOL_TYPE_HACS, NORDPOOL_TYPE_OFFICIAL], translation_key="nordpool_type")
+        ),
+        vol.Optional(CONF_NORDPOOL_AREA, default=_d(d, CONF_NORDPOOL_AREA, DEFAULT_NORDPOOL_AREA)): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+        ),
         vol.Optional(CONF_GRID_POWER_L1, default=_d(d, CONF_GRID_POWER_L1, "")): _opt_entity_selector(),
         vol.Optional(CONF_GRID_POWER_L2, default=_d(d, CONF_GRID_POWER_L2, "")): _opt_entity_selector(),
         vol.Optional(CONF_GRID_POWER_L3, default=_d(d, CONF_GRID_POWER_L3, "")): _opt_entity_selector(),

@@ -1,8 +1,15 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.11-blue)
+![Version](https://img.shields.io/badge/version-0.5.12-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyligen
+
+- **Stöd för officiell Nordpool-integration** – utöver HACS-varianten (`custom_components/nordpool`) kan nu den officiella HA Nordpool-integrationen användas. Välj integrationstyp och prisområde (t.ex. `SE3`) under Nät & Prissättning. Priser hämtas via `nordpool.get_prices_for_date`-servicen, konverteras från SEK/MWh till SEK/kWh och cachar per dag. All schemaläggarlogik (proaktiv export, opportunistisk laddning, morgonexport) fungerar identiskt oavsett källan.
+- **Morgonexport – behovsbaserad logik** – export ur batteriet på morgonen för att ge plats åt inkommande sol utlöses nu baserat på faktiskt behov i stället för fast tidsgräns. Logiken kontrollerar: (1) förväntat solöverskott > tillgängligt batteriutrymme, (2) aktuellt säljpris > produktionsviktat solsnitt, (3) batteriet är inte tomt. Förhindrar felaktig export på eftermiddagen och export vid låga priser.
+- **Fix: `negative_slots_ahead` använde säljpris** – prisjämförelsen för negativa slots framåt använde `sell_sek` i stället för `spot_sek`, vilket innebar att slots med svagt negativt spotpris men positivt säljpris inte räknades. Fixat till att använda `spot_sek` genomgående.
+- **Fix: batteri laddade och urladdade simultant** – solöverskottsladdning startade även när urladdning redan var beslutad (t.ex. proaktiv export). Guard tillagd: batteriet laddas från solöverskott bara om ingen urladdning är kommenderad samma cykel.
 
 ## Nyheter i 0.5.11
 
@@ -338,16 +345,21 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 ## Konfiguration
 
 ### Beroenden
-Dessa HACS-integrationer måste vara installerade och konfigurerade:
-- **nordpool** – elprissensor
-- **solcast_solar** – solprognos (valfritt men rekommenderat)
+En av dessa Nordpool-integrationer måste vara installerad:
+- **nordpool (HACS)** – `custom_components/nordpool`, ger `raw_today`/`raw_tomorrow` med 15-minutspriser
+- **Nord Pool (officiell)** – inbyggd HA-integration (HA 2024.x+), kräver att `nordpool_type = official` och `nordpool_area` (t.ex. `SE3`) anges i konfigurationen
+
+Valfritt men rekommenderat:
+- **solcast_solar** – solprognos
 
 ### Konfigurationsflöde
 
 Konfigurationen sker i sex steg:
 
 **Steg 1 – Nät & Prissättning**
-- Nordpool-sensor (obligatorisk)
+- Nordpool-sensor (obligatorisk) – spotprissensor från vald integration
+- Nordpool-integrationstyp – `hacs` (standard) eller `official`
+- Nordpool prisområde – t.ex. `SE3` (används bara vid `official`)
 - Nätmätare per fas (L1/L2/L3)
 - Strömgivare per fas (för fasskydd)
 - Max ström per fas (standard 20 A)
