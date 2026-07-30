@@ -1,7 +1,7 @@
 """Sensors for Smart Energy Manager."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
@@ -898,31 +898,35 @@ class NordpoolPriceScheduleSensor(_BaseEnergySensor):
         d = self.coordinator.data
         ps = d.get("price_schedule") if d else None
         if not ps or not ps.slots:
-            return {"prices_today": [], "prices_tomorrow": [], "slot_count_today": 0, "slot_count_tomorrow": 0}
+            return {
+                "prices_today": [], "prices_tomorrow": [],
+                "slot_count_today": 0, "slot_count_tomorrow": 0,
+                "total_slot_count": 0,
+            }
 
         now = datetime.now().astimezone()
-        today = now.date()
-        tomorrow = (now + __import__("datetime").timedelta(days=1)).date()
+        midnight_tomorrow = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
 
         prices_today = []
         prices_tomorrow = []
         for slot in ps.slots:
-            slot_date = slot.start.astimezone().date()
+            start_local = slot.start.astimezone()
             entry = {
-                "start": slot.start.astimezone().isoformat(),
+                "start": start_local.isoformat(),
                 "end":   slot.end.astimezone().isoformat(),
                 "spot":  round(slot.spot_sek, 4),
                 "buy":   round(slot.buy_sek, 4),
                 "sell":  round(slot.sell_sek, 4),
             }
-            if slot_date == today:
+            if start_local < midnight_tomorrow:
                 prices_today.append(entry)
-            elif slot_date == tomorrow:
+            else:
                 prices_tomorrow.append(entry)
 
         return {
-            "prices_today":      prices_today,
-            "prices_tomorrow":   prices_tomorrow,
-            "slot_count_today":  len(prices_today),
+            "prices_today":        prices_today,
+            "prices_tomorrow":     prices_tomorrow,
+            "slot_count_today":    len(prices_today),
             "slot_count_tomorrow": len(prices_tomorrow),
+            "total_slot_count":    len(ps.slots),
         }
