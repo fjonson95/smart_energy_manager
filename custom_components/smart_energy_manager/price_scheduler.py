@@ -382,19 +382,19 @@ class PriceScheduler:
         next_2h = [s for s in slots if (s.start - now_aware).total_seconds() <= 2 * 3600]
 
         schedule.negative_slots_ahead = sum(
-            1 for s in next_8h if s.sell_sek < self.negative_threshold
+            1 for s in next_8h if s.spot_sek < self.negative_threshold
         )
         # Negativa slots som redan passerat idag (start < nu)
         today_start = now_aware.replace(hour=0, minute=0, second=0, microsecond=0)
         schedule.negative_slots_passed_today = sum(
             1 for s in slots
-            if s.sell_sek < self.negative_threshold and today_start <= s.start < now_aware
+            if s.spot_sek < self.negative_threshold and today_start <= s.start < now_aware
         )
         schedule.low_price_slots_ahead = sum(
             1 for s in next_8h if s.buy_sek < self.low_price_threshold
         )
 
-        negative_within_2h = sum(1 for s in next_2h if s.sell_sek < self.negative_threshold)
+        negative_within_2h = sum(1 for s in next_2h if s.spot_sek < self.negative_threshold)
         schedule.should_absorb_proactively = (
             negative_within_2h >= self.proactive_absorption_slots
         )

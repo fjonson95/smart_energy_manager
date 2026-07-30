@@ -538,7 +538,7 @@ class EnergyController:
             and not evening_fill
         )
 
-        if remaining_surplus > 100 and battery_soc < self.battery_max_soc:
+        if remaining_surplus > 100 and battery_soc < self.battery_max_soc and decision.battery_discharge_power_w == 0.0:
             if wait_solar:
                 decision.reason += (
                     f" | Väntar på sol ({ps.solar_next_2h_kwh:.1f} kWh inom 2h)"
@@ -652,10 +652,42 @@ class EnergyController:
                         _battery_energy_kwh, _export_floor_kwh, _avg_cost,
                     )
 
-        # Morgonexport: sälj så länge säljpris > batterisnittpris och sol räcker för återladdning idag
-        if not export_active and (
-            battery_soc > self.battery_min_soc
-            and state.solar_forecast_today_kwh >= self.export_min_solar_tomorrow_kwh
+        # Morgonexport: sälj för att ge plats åt kommande solöverskott.
+        # Triggar när:
+        #   1. Förväntat solöverskott > kvarvarande batterikapacitet (verkligt behov av plats)
+        #   2. Nuvarande säljpris > snitt säljpris under kvarvarande solperiod (lönar sig att sälja nu)
+        #   3. Batteri > golv (finns energi att sälja utan att riskera nattens behov)
+        _now_loc = datetime.now().astimezone()
+        _ref_daily_kwh = state.yesterday_consumption_kwh or 25.0
+        _battery_remaining_kwh = (
+            state.battery_capacity_kwh * self.battery_max_soc / 100.0 - _battery_energy_kwh
+        )
+        _expected_solar_surplus = (state.solar_forecast_today_kwh or 0.0) - _ref_daily_kwh
+        _need_room = _expected_solar_surplus > _battery_remaining_kwh
+
+        _sun_set = state.sun_next_setting
+        _solar_window_slots = (
+            [s for s in ps.slots if _now_loc < s.end and (
+                _sun_set is None or s.start < _sun_set.astimezone()
+            )]
+            if ps and ps.slots else []
+        )
+        # Produktionsviktat snitt: timmar med hög solproduktion väger tyngre än
+        # låglastiga morgon/kväll-timmar som drar ner snittet mot dagstimmarnas låga pris.
+        _solar_production_total = sum(s.solar_kwh for s in _solar_window_slots)
+        if _solar_production_total > 0.0:
+            _solar_avg_sell = (
+                sum(s.sell_sek * s.solar_kwh for s in _solar_window_slots)
+                / _solar_production_total
+            )
+        elif _solar_window_slots:
+            _solar_avg_sell = sum(s.sell_sek for s in _solar_window_slots) / len(_solar_window_slots)
+        else:
+            _solar_avg_sell = sell_price
+        _price_diff_ok = sell_price > _solar_avg_sell
+
+        if not export_active and _need_room and _price_diff_ok and (
+            _battery_energy_kwh > _export_floor_kwh
             and _avg_cost > 0
             and sell_price > _avg_cost
             and solar_w <= house_load_w + 200
@@ -666,7 +698,7 @@ class EnergyController:
             decision.battery_discharge_power_w = discharge_w
             decision.reason += (
                 f" | Morgonexport {sell_price:.2f} > snitt {_avg_cost:.2f} kr/kWh"
-                f" sol idag {state.solar_forecast_today_kwh:.1f} kWh"
+                f" (solsnitt {_solar_avg_sell:.2f}) overskott {_expected_solar_surplus:.0f} kWh"
             )
 
         # Opportunistisk nätladdning: ladda billigt när sol imorgon är låg
@@ -713,7 +745,7 @@ class EnergyController:
                         )
 
         # Ladda ur batteri för att täcka huslast (om inte proaktiv export redan satt urladdningen)
-        if not export_active and solar_w < house_load_w and battery_soc > self.battery_min_soc:
+        if not export_active and decision.battery_charge_power_w == 0.0 and solar_w < house_load_w and battery_soc > self.battery_min_soc:
             deficit_w = house_load_w - solar_w
             discharge_w = min(state.battery_max_power_kw * 1000, deficit_w)
             now = datetime.now().astimezone()
