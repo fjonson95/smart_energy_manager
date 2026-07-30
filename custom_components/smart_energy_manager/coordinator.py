@@ -418,10 +418,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 try:
                     resp = await self.hass.services.async_call(
                         "nordpool", "get_prices_for_date",
-                        {"config_entry": entry_id, "date": tomorrow_str, "area": area, "currency": "SEK"},
+                        {"config_entry": entry_id, "date": tomorrow_str},
                         blocking=True, return_response=True,
                     )
-                    slots = (resp or {}).get(area, [])
+                    slots = next(iter((resp or {}).values()), [])
                     if slots:
                         cached["tomorrow"] = _convert(slots)
                 except Exception as exc:
@@ -431,17 +431,17 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         try:
             resp_today = await self.hass.services.async_call(
                 "nordpool", "get_prices_for_date",
-                {"config_entry": entry_id, "date": today_str, "area": area, "currency": "SEK"},
+                {"config_entry": entry_id, "date": today_str},
                 blocking=True, return_response=True,
             )
-            today_slots = (resp_today or {}).get(area, [])
+            today_slots = next(iter((resp_today or {}).values()), [])
 
             resp_tomorrow = await self.hass.services.async_call(
                 "nordpool", "get_prices_for_date",
-                {"config_entry": entry_id, "date": tomorrow_str, "area": area, "currency": "SEK"},
+                {"config_entry": entry_id, "date": tomorrow_str},
                 blocking=True, return_response=True,
             )
-            tomorrow_slots = (resp_tomorrow or {}).get(area, [])
+            tomorrow_slots = next(iter((resp_tomorrow or {}).values()), [])
 
             self._official_nordpool_cache = {
                 "date": today_str,
