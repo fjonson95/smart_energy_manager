@@ -60,6 +60,7 @@ async def async_setup_entry(
         SmartEnergyNegativeSlotsAheadSensor(coordinator, entry),
         SmartEnergyBestDischargePriceSensor(coordinator, entry),
         SmartEnergyBestChargePriceSensor(coordinator, entry),
+        NordpoolPriceScheduleSensor(coordinator, entry),
     ]
 
     # Batterikostandssensorer:
@@ -868,4 +869,60 @@ class BatteryEnergyKwhSensor(_BaseEnergySensor):
             "soc_pct":            round(s.battery_soc_pct, 1),
             "capacity_kwh":       s.battery_capacity_kwh,
             "remaining_capacity_kwh": round((1 - s.battery_soc_pct / 100.0) * s.battery_capacity_kwh, 2),
+        }
+
+
+class NordpoolPriceScheduleSensor(_BaseEnergySensor):
+    """Prisschema från Nordpool – alla dagens (och morgondagens) slots som attribut.
+
+    Lämplig för visualisering med ApexCharts eller liknande Lovelace-kort.
+    State = aktuellt spotpris (SEK/kWh).
+    """
+
+    _attr_unique_id = "sem_nordpool_price_schedule"
+    _attr_translation_key = "nordpool_price_schedule"
+    _attr_native_unit_of_measurement = "SEK/kWh"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = None
+    _attr_icon = "mdi:chart-line"
+
+    @property
+    def native_value(self) -> float | None:
+        s = self.coordinator.current_state
+        if not s:
+            return None
+        return round(s.spot_price_sek_kwh, 4)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        d = self.coordinator.data
+        ps = d.get("price_schedule") if d else None
+        if not ps or not ps.slots:
+            return {"prices_today": [], "prices_tomorrow": [], "slot_count_today": 0, "slot_count_tomorrow": 0}
+
+        now = datetime.now().astimezone()
+        today = now.date()
+        tomorrow = (now + __import__("datetime").timedelta(days=1)).date()
+
+        prices_today = []
+        prices_tomorrow = []
+        for slot in ps.slots:
+            slot_date = slot.start.astimezone().date()
+            entry = {
+                "start": slot.start.astimezone().isoformat(),
+                "end":   slot.end.astimezone().isoformat(),
+                "spot":  round(slot.spot_sek, 4),
+                "buy":   round(slot.buy_sek, 4),
+                "sell":  round(slot.sell_sek, 4),
+            }
+            if slot_date == today:
+                prices_today.append(entry)
+            elif slot_date == tomorrow:
+                prices_tomorrow.append(entry)
+
+        return {
+            "prices_today":      prices_today,
+            "prices_tomorrow":   prices_tomorrow,
+            "slot_count_today":  len(prices_today),
+            "slot_count_tomorrow": len(prices_tomorrow),
         }

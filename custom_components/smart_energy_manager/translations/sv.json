@@ -323,6 +323,9 @@
       "best_charge_price": {
         "name": "Bästa laddningspris (12h)"
       },
+      "nordpool_price_schedule": {
+        "name": "Nordpool prisschema"
+      },
       "yesterday_consumption": {
         "name": "Gårdagens förbrukning (exkl. EV)"
       },

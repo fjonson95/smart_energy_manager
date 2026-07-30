@@ -323,6 +323,9 @@
       "best_charge_price": {
         "name": "Best Charge Price Next 12h"
       },
+      "nordpool_price_schedule": {
+        "name": "Nord Pool Price Schedule"
+      },
       "yesterday_consumption": {
         "name": "Yesterday Consumption (excl. EV)"
       },
