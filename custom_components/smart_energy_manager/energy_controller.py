@@ -620,12 +620,18 @@ class EnergyController:
                     )
 
                     # Modulera effekten: dela exporterbar energi jämnt över
-                    # återstående lönsamma prisslotar.
+                    # återstående lönsamma prisslotar DENNA natt (fram till solar_takeover_dt
+                    # eller sun_next_rising). Morgondagens export är ett separat problem –
+                    # solar laddar batteriet igen innan dess.
                     _now_local = datetime.now().astimezone()
                     _effective_threshold = min(price_threshold, self.export_min_sell_price_sek_kwh) if _abs_triggered else price_threshold
+                    _solar_resume = state.solar_takeover_dt or state.sun_next_rising
+                    _solar_resume_local = _solar_resume.astimezone() if _solar_resume else None
                     _high_slots = [
                         s for s in ps.slots
-                        if s.sell_sek >= _effective_threshold and s.end > _now_local
+                        if s.sell_sek >= _effective_threshold
+                        and s.end > _now_local
+                        and (_solar_resume_local is None or s.start < _solar_resume_local)
                     ]
                     _high_hours = sum(
                         (s.end - max(s.start, _now_local)).total_seconds() / 3600.0
@@ -710,7 +716,8 @@ class EnergyController:
             and battery_soc < self.battery_max_soc
         ):
             _ref_daily_kwh = state.yesterday_consumption_kwh or 25.0
-            _charge_target_kwh = _export_floor_kwh
+            _max_storable_kwh = state.battery_capacity_kwh * self.battery_max_soc / 100.0
+            _charge_target_kwh = min(_export_floor_kwh, _max_storable_kwh)
             if state.solar_forecast_tomorrow_kwh < DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH:
                 _tomorrow_deficit = max(0.0, _ref_daily_kwh - state.solar_forecast_tomorrow_kwh)
                 _charge_target_kwh = min(
