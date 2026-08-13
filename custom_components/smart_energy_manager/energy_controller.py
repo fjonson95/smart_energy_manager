@@ -875,46 +875,59 @@ class EnergyController:
     # ── Fasbegränsning ────────────────────────────────────────────────
 
     def _apply_phase_limits(self, state: EnergyState, decision: ControlDecision) -> ControlDecision:
-        solar_per_phase = state.solar_power_w / 3.0
-        batt_discharge_per_phase = decision.battery_discharge_power_w / 3.0
-        batt_charge_per_phase = decision.battery_charge_power_w / 3.0
-
+        # Elmätarens avläsningar innehåller redan alla nuvarande laster:
+        # sol, batteri, EV, värmepump, elpatron.
+        # Vi applicerar bara delta för det som beslutet ändrar.
         loads: dict[str, float] = {
             "L1": state.grid_power_l1,
             "L2": state.grid_power_l2,
             "L3": state.grid_power_l3,
         }
 
+        # Batteri: ta bort nuvarande effekt, lägg till beslutets effekt (per fas)
+        current_batt_per_phase = state.battery_power_w / 3.0  # positiv=laddning, negativ=urladdning
+        new_batt_per_phase = (
+            decision.battery_charge_power_w - decision.battery_discharge_power_w
+        ) / 3.0
         for ph in PHASES:
-            loads[ph] += -solar_per_phase + batt_charge_per_phase - batt_discharge_per_phase
+            loads[ph] += new_batt_per_phase - current_batt_per_phase
 
-        # EV-lasterna per laddare
+        # EV: ta bort nuvarande laddning (ingår i elmätarvärdet), lägg till beslutets laddning.
         # Fasbelastningen bestäms av BILENS inbyggda laddare (car_phases),
         # inte laddarhårdvarans fasantal.
         ev_phase_loads: list[dict[str, float]] = []
         for i, (ch, dec) in enumerate(zip(state.chargers, decision.charger_decisions)):
-            ph_load: dict[str, float] = {p: 0.0 for p in PHASES}
+            ph_load_new: dict[str, float] = {p: 0.0 for p in PHASES}
             if dec.enable and dec.current_a > 0:
                 active_phases = ch.effective_phases  # [L1], [L1,L2] eller [L1,L2,L3]
                 per_phase_w = dec.current_a * self.voltage
                 for ph in active_phases:
-                    ph_load[ph] = per_phase_w
-            ev_phase_loads.append(ph_load)
+                    ph_load_new[ph] = per_phase_w
+
+            # Dra bort nuvarande EV-effekt (ingår redan i elmätarvärdet)
+            if ch.power_w > 0:
+                active_phases = ch.effective_phases
+                current_ev_per_phase = ch.power_w / len(active_phases)
+                for ph in active_phases:
+                    loads[ph] -= current_ev_per_phase
+
+            # Lägg till beslutets EV-effekt
             for ph in PHASES:
-                loads[ph] += ph_load[ph]
+                loads[ph] += ph_load_new[ph]
 
-        # Värmepump kompressor
-        if state.heat_pump_power_w:
-            hp_ph = state.heat_pump_phase
-            loads[hp_ph] = loads.get(hp_ph, 0.0) + state.heat_pump_power_w
+            ev_phase_loads.append(ph_load_new)
 
-        # Elpatron
-        if decision.extra_hot_water:
-            patron_phases = state.heat_pump_patron_phases or DEFAULT_HEAT_PUMP_PATRON_PHASES
-            patron_total_w = state.heat_pump_patron_power_kw * 1000
-            patron_per_phase_w = patron_total_w / len(patron_phases)
+        # Elpatron: applicera delta om beslutet ändrar tillståndet.
+        # Värmepumps-kompressorn ingår redan i elmätarvärdet och styrs inte av SEM.
+        patron_phases = state.heat_pump_patron_phases or DEFAULT_HEAT_PUMP_PATRON_PHASES
+        patron_total_w = state.heat_pump_patron_power_kw * 1000
+        patron_per_phase_w = patron_total_w / len(patron_phases)
+        if decision.extra_hot_water and not state.extra_hot_water_on:
             for ph in patron_phases:
-                loads[ph] = loads.get(ph, 0.0) + patron_per_phase_w
+                loads[ph] += patron_per_phase_w
+        elif not decision.extra_hot_water and state.extra_hot_water_on:
+            for ph in patron_phases:
+                loads[ph] -= patron_per_phase_w
 
         # Reduktionspass (max 4)
         for iteration in range(4):
@@ -972,13 +985,11 @@ class EnergyController:
                         loads[p] -= reduce_w_total / 3.0
                     over_w = max(0, (loads[ph] / self.voltage - self.max_current) * self.voltage)
 
-                # Prio 3: elpatron
+                # Prio 3: elpatron (om den är på – oavsett om den slogs på nu eller var på redan)
                 if over_w > 0 and decision.extra_hot_water:
-                    patron_phases = state.heat_pump_patron_phases or DEFAULT_HEAT_PUMP_PATRON_PHASES
                     if ph in patron_phases:
-                        patron_per_phase = state.heat_pump_patron_power_kw * 1000 / len(patron_phases)
                         for pp in patron_phases:
-                            loads[pp] -= patron_per_phase
+                            loads[pp] -= patron_per_phase_w
                         decision.extra_hot_water = False
                         _LOGGER.warning("Stänger av elpatron pga fasgräns på %s", ph)
 
