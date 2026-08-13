@@ -7,6 +7,7 @@ from typing import Optional
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -149,6 +150,13 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # Cache för officiell Nordpool-integration (uppdateras max en gång per dag)
         self._official_nordpool_cache: dict = {}
 
+        # Observerad solar-takeover: när solöverskottet hållit sig > 0 i ≥15 min
+        # Sparas i HA Store så att värdet överlever omstarter.
+        self._takeover_store = Store(hass, 1, f"{DOMAIN}_solar_takeover")
+        self._observed_takeover_minutes: list[float] = []   # senaste 14 obs (min fr midnatt)
+        self._surplus_positive_since: Optional[datetime] = None
+        self._takeover_observed_today: bool = False
+
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
         chargers = self._get_charger_configs()
@@ -169,7 +177,57 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
     async def async_config_entry_first_refresh(self):
         await self._legionella.async_load()
+        await self._load_takeover_store()
         await super().async_config_entry_first_refresh()
+
+    async def _load_takeover_store(self) -> None:
+        data = await self._takeover_store.async_load()
+        if isinstance(data, list):
+            self._observed_takeover_minutes = [float(v) for v in data if isinstance(v, (int, float))]
+
+    async def _save_takeover_store(self) -> None:
+        await self._takeover_store.async_save(self._observed_takeover_minutes)
+
+    def _weighted_observed_minutes(self) -> Optional[float]:
+        obs = self._observed_takeover_minutes
+        if not obs:
+            return None
+        weights = list(range(1, len(obs) + 1))
+        return sum(w * m for w, m in zip(weights, obs)) / sum(weights)
+
+    def _blend_takeover_dt(
+        self,
+        solcast_dt: Optional[datetime],
+        now_utc: datetime,
+    ) -> Optional[datetime]:
+        """Viktad blend 60% Solcast + 40% historisk observation (minuter fr midnatt)."""
+        obs_min = self._weighted_observed_minutes()
+
+        if solcast_dt is None and obs_min is None:
+            return None
+
+        # Konvertera Solcast till minuter från midnatt lokal tid
+        if solcast_dt is not None:
+            local = solcast_dt.astimezone()
+            midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+            solcast_min = (local - midnight).total_seconds() / 60.0
+        else:
+            solcast_min = None
+
+        if solcast_min is not None and obs_min is not None:
+            blended_min = 0.6 * solcast_min + 0.4 * obs_min
+        elif solcast_min is not None:
+            blended_min = solcast_min
+        else:
+            blended_min = obs_min
+
+        # Bygg datetime för imorgon (om blended_min är i det förflutna idag) eller idag
+        local_now = datetime.now().astimezone()
+        midnight_today = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        candidate = midnight_today + timedelta(minutes=blended_min)
+        if candidate <= local_now:
+            candidate += timedelta(days=1)
+        return candidate
 
     def _build_controller(self) -> EnergyController:
         c = self._config
@@ -576,6 +634,44 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 # Solcast inaktuell – återanvänd senast kända takeover-tid
                 solar_takeover_dt = self._saved_solar_takeover_dt
                 _LOGGER.debug("solar_takeover_dt: Solcast inaktuell, återanvänder sparat värde %s", solar_takeover_dt)
+
+            # Observera när solöverskott > 0 i ≥15 min – bygger historisk takeover-tid.
+            # Nollställ vid midnatt (nytt dygn).
+            _local_now = datetime.now().astimezone()
+            _today_str = _local_now.strftime("%Y-%m-%d")
+            if not hasattr(self, "_takeover_obs_date"):
+                self._takeover_obs_date = _today_str
+            if _today_str != self._takeover_obs_date:
+                self._surplus_positive_since = None
+                self._takeover_observed_today = False
+                self._takeover_obs_date = _today_str
+
+            if not self._takeover_observed_today:
+                net_surplus = solar_w - house_load_w
+                if net_surplus > 0:
+                    if self._surplus_positive_since is None:
+                        self._surplus_positive_since = _local_now
+                    elif (_local_now - self._surplus_positive_since).total_seconds() >= 900:
+                        # 15 min sammanhängande surplus – spara starttiden
+                        midnight = _local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+                        obs_min = (self._surplus_positive_since - midnight).total_seconds() / 60.0
+                        self._observed_takeover_minutes.append(obs_min)
+                        if len(self._observed_takeover_minutes) > 14:
+                            self._observed_takeover_minutes = self._observed_takeover_minutes[-14:]
+                        self._takeover_observed_today = True
+                        _LOGGER.info(
+                            "Observerad solar takeover: %.0f min fr midnatt (kl %s)",
+                            obs_min, self._surplus_positive_since.strftime("%H:%M"),
+                        )
+                        await self._save_takeover_store()
+                else:
+                    self._surplus_positive_since = None
+
+            # Viktad blend: 60% Solcast-prognos + 40% historisk observation
+            solar_takeover_dt = self._blend_takeover_dt(solar_takeover_dt, _now_for_takeover)
+            if solar_takeover_dt is None and (sun_rising := self._get_sun_datetime("next_rising")):
+                solar_takeover_dt = sun_rising + timedelta(hours=3)
+                _LOGGER.debug("solar_takeover_dt: fallback soluppgång+3h → %s", solar_takeover_dt)
 
             # Utomhustemperatur och förbrukningsprognos
             outdoor_temp: Optional[float] = None
