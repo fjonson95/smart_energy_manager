@@ -645,12 +645,23 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 self._surplus_positive_since = None
                 self._takeover_observed_today = False
                 self._takeover_obs_date = _today_str
+                if hasattr(self, "_had_negative_surplus_today"):
+                    del self._had_negative_surplus_today
 
             if not self._takeover_observed_today:
                 net_surplus = solar_w - house_load_w
                 if net_surplus > 0:
                     if self._surplus_positive_since is None:
-                        self._surplus_positive_since = _local_now
+                        # Om surplus redan är positivt vid första cykeln efter uppstart
+                        # (ingen tidigare negativ cykel sedd) vet vi inte när det startade –
+                        # skippa dagens observation för att undvika felaktig tid.
+                        if not hasattr(self, "_had_negative_surplus_today"):
+                            self._takeover_observed_today = True
+                            _LOGGER.debug(
+                                "solar_takeover obs: surplus positiv vid uppstart – skippar dagens observation"
+                            )
+                        else:
+                            self._surplus_positive_since = _local_now
                     elif (_local_now - self._surplus_positive_since).total_seconds() >= 900:
                         # 15 min sammanhängande surplus – spara starttiden
                         midnight = _local_now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -666,6 +677,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         await self._save_takeover_store()
                 else:
                     self._surplus_positive_since = None
+                    self._had_negative_surplus_today = True
 
             # Viktad blend: 60% Solcast-prognos + 40% historisk observation
             solar_takeover_dt = self._blend_takeover_dt(solar_takeover_dt, _now_for_takeover)
