@@ -60,6 +60,7 @@ from .energy_controller import (
     EnergyController, EnergyState, ControlDecision,
     ChargerConfig, CarConfig, ChargerState,
 )
+from .energy_planner import EnergyPlanner, DayPlan
 from .legionella import LegionellaManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -117,6 +118,17 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
         self._grid_scale = 1000.0 if self._config.get(CONF_GRID_POWER_UNIT, UNIT_W) == UNIT_KW else 1.0
         self._ev_scale   = 1000.0 if self._config.get(CONF_EV_POWER_UNIT,   UNIT_W) == UNIT_KW else 1.0
+
+        # Dag-framåt planerare (parallellt med EnergyController – påverkar inga beslut)
+        self._energy_planner = EnergyPlanner(
+            battery_min_soc=float(self._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
+            battery_max_soc=float(self._config.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)),
+            export_sell_percentile=float(self._config.get(CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE)),
+            export_min_sell_price_sek_kwh=float(self._config.get(CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH)),
+            export_min_solar_tomorrow_kwh=float(self._config.get(CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH)),
+        )
+        self._day_plan: Optional[DayPlan] = None
+        self._last_plan_ps_sig: tuple = (0, None, None)
 
         # active_car[charger_name] = car_name eller NO_CAR_SELECTED
         # Styrs av select-entiteten i select.py
@@ -798,8 +810,66 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             )
             self._state = state
 
+            # ── Dag-framåt plan (parallell, påverkar inga beslut) ────────
+            if price_schedule:
+                ps_sig = (
+                    len(price_schedule.slots),
+                    price_schedule.slots[0].start if price_schedule.slots else None,
+                    price_schedule.slots[-1].start if price_schedule.slots else None,
+                )
+                plan_expired = self._day_plan is None or now >= self._day_plan.valid_until
+                if plan_expired or ps_sig != self._last_plan_ps_sig:
+                    try:
+                        self._day_plan = self._energy_planner.build_plan(
+                            now=now,
+                            battery_soc_pct=state.battery_soc_pct,
+                            battery_capacity_kwh=state.battery_capacity_kwh,
+                            battery_max_power_kw=state.battery_max_power_kw,
+                            ps=price_schedule,
+                            predicted_daily_kwh=state.predicted_daily_kwh,
+                            solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
+                            solar_takeover_dt=state.solar_takeover_dt,
+                        )
+                        self._last_plan_ps_sig = ps_sig
+                        _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)
+                    except Exception as _plan_err:
+                        _LOGGER.warning("DayPlan: kunde inte byggas: %s", _plan_err)
+
             decision = self._controller.compute(state)
             self._last_decision = decision
+
+            # ── Jämför plan mot faktiskt beslut ─────────────────────────
+            if self._day_plan:
+                plan_slot = self._day_plan.slot_at(now)
+                if plan_slot:
+                    ctrl_export = decision.battery_discharge_power_w > 100
+                    ctrl_charge = decision.battery_charge_power_w > 100
+                    ctrl_idle   = not ctrl_export and not ctrl_charge
+
+                    plan_export = plan_slot.action == "export"
+                    plan_charge = plan_slot.action in ("solar_charge", "grid_charge")
+                    plan_idle   = plan_slot.action in ("idle", "cover_load")
+
+                    match = (
+                        (plan_export and ctrl_export)
+                        or (plan_charge and ctrl_charge)
+                        or (plan_idle and ctrl_idle)
+                    )
+                    if not match:
+                        _LOGGER.warning(
+                            "DayPlan AVVIKELSE kl %s: plan=%s %.0fW (%s) | faktiskt=%s chg=%.0fW dis=%.0fW | %s",
+                            now.strftime("%H:%M"),
+                            plan_slot.action, abs(plan_slot.target_power_w), plan_slot.reason,
+                            "export" if ctrl_export else ("charge" if ctrl_charge else "idle"),
+                            decision.battery_charge_power_w, decision.battery_discharge_power_w,
+                            decision.reason[:120],
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "DayPlan ✓ kl %s: plan=%s ≈ faktisk=%s",
+                            now.strftime("%H:%M"), plan_slot.action,
+                            "export" if ctrl_export else ("charge" if ctrl_charge else "idle"),
+                        )
 
             if legionella_active:
                 decision.reason = legionella_reason + " | " + decision.reason
@@ -837,6 +907,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "peak_solar_kw_next_8h": price_schedule.peak_solar_kw_next_8h if price_schedule else 0.0,
                 "hours_to_solar_peak": price_schedule.hours_to_solar_peak if price_schedule else 0.0,
                 "should_wait_for_solar": price_schedule.should_wait_for_solar if price_schedule else False,
+                "day_plan": self._day_plan,
             }
 
         except Exception as err:
@@ -997,3 +1068,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     @property
     def legionella(self) -> LegionellaManager:
         return self._legionella
+
+    @property
+    def day_plan(self) -> Optional[DayPlan]:
+        return self._day_plan
