@@ -1,8 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.16-blue)
+![Version](https://img.shields.io/badge/version-0.5.17-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.17
+
+- **Fix: proaktiv export orsakade nätuttag när huslast översteg sol** – batteriets `discharge_power_setpoint` vid proaktiv export sattes till det prisväktade exportmålet (t.ex. 500 W), men Sonnenbatteriet tolkar detta som *total* batteriuteffekt, inte som nätmatning utöver självförbrukning. När huslasten (t.ex. 988 W) översteg sol (t.ex. 70 W), täckte batteriet 500 W av 488 W-underskottet, och huset importerade resterande ~488 W från nätet – medan den avsedda exporten till nätet var noll. Urladdningsvärdet inkluderar nu husunderskottet: `discharge_w = exportmål + max(0, huslast − sol)`. Batteriet täcker hela husunderskottet och nettoexporten till nätet matchar det planerade exportmålet.
 
 ## Nyheter i 0.5.16
 

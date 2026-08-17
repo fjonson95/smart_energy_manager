@@ -1,10 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.16-blue)
+![Version](https://img.shields.io/badge/version-0.5.17-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.17
+
+- **Fix: proactive export caused grid draw when house load exceeded solar** – the battery's `discharge_power_setpoint` during proactive export was set to the price-weighted export target (e.g. 500 W), but the Sonnenbatterie interprets this as the *total* battery output, not the grid feed-in on top of self-consumption. When house load (e.g. 988 W) exceeded solar (e.g. 70 W), the battery covered 500 W of that 488 W deficit, and the house imported the remaining ~488 W from the grid — while the intended export to the grid was zero. The discharge setpoint now adds the house deficit: `discharge_w = export_target + max(0, house_load − solar)`. The battery covers the full house deficit and the net feed-in to the grid matches the planned export target.
 
 ## What's New in 0.5.16
 

@@ -688,7 +688,15 @@ class EnergyController:
                     else:
                         _safe_hours = max(1.0, _high_hours)
                         _target_w = (_exportable_kwh / _safe_hours) * 1000.0
-                    discharge_w = max(500.0, min(_target_w, state.battery_max_power_kw * 1000.0))
+                    # Sonnen discharge_setpoint = totalt batteriutflöde (hus + nät).
+                    # Lägg till husunderskott så att batteriet täcker huset och exporterar
+                    # _target_w netto till nätet – annars kompenserar nätet huslasten.
+                    _house_deficit_w = max(0.0, house_load_w - solar_w)
+                    discharge_w = max(500.0, min(
+                        _target_w + _house_deficit_w,
+                        state.battery_max_power_kw * 1000.0,
+                    ))
+                    _net_export_w = max(0.0, discharge_w - _house_deficit_w)
 
                     decision.battery_discharge_power_w = discharge_w
                     _morning_slots = [s for s in _high_slots if s.start.astimezone().date() > _today_date]
@@ -697,14 +705,14 @@ class EnergyController:
                         f" ({_trigger_label})"
                         f" sol imorgon {state.solar_forecast_tomorrow_kwh:.1f} kWh"
                         f" golv {_export_floor_kwh:.1f} kWh ({_hours_dark:.1f}h mörker)"
-                        f" {discharge_w:.0f}W vikt {sell_price:.2f}/{_price_sum:.2f}"
+                        f" {_net_export_w:.0f}W netto ({discharge_w:.0f}W tot) vikt {sell_price:.2f}/{_price_sum:.2f}"
                         + (f" +{len(_morning_slots)} morgonslots" if _morning_slots else "")
                     )
                     _LOGGER.info(
-                        "Proaktiv export: %.0f W (%.1f kWh viktad) säljpris %.3f kr/kWh (%s)"
+                        "Proaktiv export: %.0f W netto (%.0f W tot, hus %.0f W) säljpris %.3f kr/kWh (%s)"
                         " | batteri %.1f kWh > golv %.1f kWh | prisvikt %.3f/%.3f"
                         " | fönster: %d slots (%d imorgon)",
-                        discharge_w, _exportable_kwh,
+                        _net_export_w, discharge_w, _house_deficit_w,
                         sell_price, _trigger_label,
                         _battery_energy_kwh, _export_floor_kwh, sell_price, _price_sum,
                         len(_high_slots), len(_morning_slots),
@@ -822,6 +830,13 @@ class EnergyController:
         if battery_soc <= self.battery_min_soc:
             decision.battery_discharge_power_w = 0
             decision.reason += " | Batteri vid min SOC"
+
+        if decision.battery_charge_power_w > 0 and decision.battery_discharge_power_w > 0:
+            _LOGGER.warning(
+                "Konflikt: charge=%.0fW och discharge=%.0fW satta samtidigt – ignorerar discharge. Orsak: %s",
+                decision.battery_charge_power_w, decision.battery_discharge_power_w, decision.reason,
+            )
+            decision.battery_discharge_power_w = 0.0
 
         self._check_car_selection(state, decision)
         return self._apply_phase_limits(state, decision)
