@@ -477,8 +477,16 @@ class EnergyController:
         evening_target_soc = self.evening_min_soc
         evening_needed_kwh = 0.0
 
-        if state.predicted_daily_kwh > 0 and ps and ps.slots:
-            hourly_load_kw = state.predicted_daily_kwh / 24.0
+        # Bästa förbrukningsestimering: max av temperaturmodell och gårdagens faktiska.
+        # Temperaturmodellen underskattar baslasten kraftigt i sommar (modellerar bara
+        # värmepump, inte elektronik/kyl/belysning). yesterday_consumption_kwh inkluderar
+        # allt utom EV-laddning → korrekt jämförelseunderlag.
+        _eff_daily_kwh = max(
+            state.predicted_daily_kwh,
+            state.yesterday_consumption_kwh or 0.0,
+        )
+        if _eff_daily_kwh > 0 and ps and ps.slots:
+            hourly_load_kw = _eff_daily_kwh / 24.0
             # Hitta första slot imorgon där soleffekten täcker huslasten
             solar_covers_at: Optional[datetime] = None
             for slot in ps.slots:

@@ -1,10 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.15-blue)
+![Version](https://img.shields.io/badge/version-0.5.16-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.16
+
+- **Fix: evening target SOC was near zero in summer** – the dynamic evening target used `predicted_daily_kwh` (the temperature-based heating model) as a proxy for total house load. In summer, heating demand is zero, so the model returned ~1–2 kWh/day, making the evening target ~8% SOC even when the house was drawing 1 000 W. The evening target now uses `max(predicted_daily_kwh, yesterday_consumption_kwh)`. In summer, yesterday's actual consumption (e.g. 20 kWh/day) dominates; in winter, the temperature model can exceed it. The `solar_covers_at` search uses the same effective load, so the derived hours-dark and energy target are consistent with the export floor (which already used `yesterday_consumption_kwh`).
 
 ## Recently Added
 

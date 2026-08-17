@@ -1,8 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.15-blue)
+![Version](https://img.shields.io/badge/version-0.5.16-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.16
+
+- **Fix: kvällsmål nära noll på sommaren** – det dynamiska kvällsmålet använde `predicted_daily_kwh` (temperaturbaserad uppvärmningsmodell) som proxy för total huslast. På sommaren är uppvärmningsbehov noll, vilket gav ~1–2 kWh/dag och ett kvällsmål på ~8% SOC trots att huset drog 1 000 W. Kvällsmålet använder nu `max(predicted_daily_kwh, yesterday_consumption_kwh)`. Sommartid dominerar gårdagens faktiska förbrukning (t.ex. 20 kWh/dag); vintertid kan temperaturmodellen överstiga den. `solar_covers_at`-sökningen använder samma effektiva last, så beräknad mörkertid och energimål är konsistenta med exportgolvet (som redan använde `yesterday_consumption_kwh`).
 
 ## Nyligen
 
