@@ -1,12 +1,26 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.12-blue)
+![Version](https://img.shields.io/badge/version-0.5.15-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
 ## Recently Added
+
+- **Fix: evening fill charged too little when solar was being exported** – the system computes a dynamic `evening_target_soc` (e.g. 55%) based on hours to solar takeover × house load. But the condition that triggers filling required `solar_until_sunset_kwh < battery_remaining_kwh`. With strong remaining solar (5–9 kW until sunset), that condition was always false — the system assumed future solar would naturally fill the battery. The problem: that solar was exported by `prefer_sell` and never reached the battery. The deadlock was never broken. Fix: `evening_fill` now also triggers when `sell_price >= sell_solar_min_price`, i.e. when future solar would have been exported anyway. The battery fills immediately from surplus (e.g. 5 200 W for ~20 min), then export resumes automatically once the SOC target is reached.
+
+- **Fix: proactive export ignores tomorrow morning's higher prices** – the export dispatch window was capped at `solar_takeover_dt`, meaning any morning slots with higher prices (e.g. 07:00–09:00 at 1.20 SEK/kWh vs tonight at 0.80 SEK/kWh) were invisible to the price-weighted dispatch. The system exported everything at lower prices tonight and had nothing left for the morning peak. The window boundary is now based on solar production from Solcast (`solar_kw < 2 kW`) rather than a clock cutoff: night and early-morning slots are included automatically, while midday slots (full solar) are excluded. The price-weighting then naturally allocates more kWh to the highest-priced slots regardless of whether they fall tonight or tomorrow morning.
+
+- **Fix: proactive export over-drains battery overnight** – the export floor (`hours_dark × load + 2 kWh`) was computed relative to *now* rather than the start of the export window. During a 3-4h export window this caused the floor to shrink by ~4 kWh (3.5h × 1.05 kW), silently revealing extra headroom that the system then exported — leaving the battery closer to the Sonnenbatterie's 20% minimum than planned. `hours_dark` is now anchored to the earliest today price slot, so the floor stays stable throughout the export window and only shrinks once the window has passed.
+
+- **New: Energy Plan Lovelace card** (`www/sem-energy-plan-card.js`) – a custom card that simulates the battery from now through 09:00 the next morning. Shows a canvas chart with price bars, battery kWh curve, and solar kW profile, plus phase cards for the export window, overnight coast, and solar takeover. Reads live data from Nordpool, Sonnenbatterie, and Solcast. Add to a dashboard with `type: custom:sem-energy-plan-card`. Copy `www/sem-energy-plan-card.js` to `/config/www/` on your HA instance and add it as a Lovelace resource (Dashboard → Resources → Add → `/local/sem-energy-plan-card.js`).
+
+- **Fix: legionella triggers on date, not exact hour** – the `due` check compared exact elapsed hours (`days_since >= interval_days`). If the last run was Thursday at 14:00, the next trigger window opened Thursday 14:00 the following week; good opportunities earlier that day (e.g. solar surplus at 10:00) were missed. Now the due date is compared: if today ≥ due date, a run is allowed any time during the day at a suitable moment.
+
+- **Fix: solar takeover observation duplicated on restart** – `_takeover_observed_today` was always reset to `False` on startup. If HA restarted and net surplus was briefly negative in the first update cycle (cloud, restart near the solar edge), a second observation was appended for the same day. The store now persists the last observation date; on load, `_takeover_observed_today` is restored to `True` if today's observation was already recorded. Backwards-compatible with the old list format.
+
+- **Fix: price-weighted proactive export** – discharge power during proactive export was previously calculated as `exportable / remaining_hours`, producing the same wattage regardless of price. Each 15-minute slot is now weighted against the sum of all remaining high-price slots: `W = exportable × (current_price / price_sum) / 0.25 h`. More energy is sold at high prices and less at low prices, without changing the total exported volume.
 
 - **Official Nord Pool integration support** – in addition to the HACS variant (`custom_components/nordpool`), the official HA Nord Pool integration is now supported. Select integration type and price area (e.g. `SE3`) under Grid & Pricing. Prices are fetched via the `nordpool.get_prices_for_date` service, converted from SEK/MWh to SEK/kWh and cached per day. All scheduler logic (proactive export, opportunistic charging, morning export) works identically regardless of source.
 - **Morning export – needs-based logic** – battery export in the morning to make room for incoming solar is now triggered based on actual need rather than a fixed time gate. The logic checks: (1) expected solar surplus > available battery headroom, (2) current sell price > production-weighted solar average, (3) battery is not empty. Prevents incorrect export in the afternoon and export at low prices.

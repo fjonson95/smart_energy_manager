@@ -182,11 +182,20 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
     async def _load_takeover_store(self) -> None:
         data = await self._takeover_store.async_load()
-        if isinstance(data, list):
+        if isinstance(data, dict):
+            obs = data.get("observations", [])
+            self._observed_takeover_minutes = [float(v) for v in obs if isinstance(v, (int, float))]
+            last_date = data.get("last_obs_date", "")
+            if last_date == datetime.now().astimezone().strftime("%Y-%m-%d"):
+                self._takeover_observed_today = True
+        elif isinstance(data, list):
             self._observed_takeover_minutes = [float(v) for v in data if isinstance(v, (int, float))]
 
     async def _save_takeover_store(self) -> None:
-        await self._takeover_store.async_save(self._observed_takeover_minutes)
+        await self._takeover_store.async_save({
+            "observations": self._observed_takeover_minutes,
+            "last_obs_date": datetime.now().astimezone().strftime("%Y-%m-%d"),
+        })
 
     def _weighted_observed_minutes(self) -> Optional[float]:
         obs = self._observed_takeover_minutes

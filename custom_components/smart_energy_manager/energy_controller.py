@@ -513,9 +513,14 @@ class EnergyController:
 
         evening_fill = (
             sun_set is not None
-            and solar_w > 100                              # sol fortfarande igång
+            and solar_w > 100
             and battery_soc < evening_target_soc
-            and solar_until_sunset_kwh < battery_remaining_kwh  # prognosen räcker inte
+            and (
+                solar_until_sunset_kwh < battery_remaining_kwh
+                # Framtida sol exporteras om säljpriset är högt → räkna den inte som
+                # garanterad batteriladdning; fyll luckan nu med överskott istället.
+                or sell_price >= self.sell_solar_min_price
+            )
         )
 
         _LOGGER.debug(
@@ -579,12 +584,26 @@ class EnergyController:
         #   4. Batteri > battery_min_soc (absolut golv oavsett)
         _now_utc = datetime.now(timezone.utc)
         _ref_dt = state.solar_takeover_dt or state.sun_next_rising
-        if _ref_dt and _ref_dt > _now_utc:
+        _ref_load_w = (state.yesterday_consumption_kwh / 24.0 * 1000.0) if state.yesterday_consumption_kwh else house_load_w
+
+        # Exportgolvets "mörker" räknas från exportfönstrets start (första höga prisslot),
+        # inte från nu. Annars krymper golvet under hela exportfönstret (~3-4h × lastW),
+        # vilket frigör extra kWh att exportera och tömmer batteriet mer än planerat.
+        if ps and ps.slots and _ref_dt and _ref_dt > _now_utc:
+            _today_date_f = datetime.now().astimezone().date()
+            _today_slots_f = [s for s in ps.slots if s.start.astimezone().date() == _today_date_f]
+            if _today_slots_f:
+                _first_slot_start_utc = min(s.start for s in _today_slots_f).astimezone(timezone.utc)
+                _window_start_utc = max(_first_slot_start_utc, _now_utc)
+            else:
+                _window_start_utc = _now_utc
+            _hours_dark = (_ref_dt - _window_start_utc).total_seconds() / 3600.0
+        elif _ref_dt and _ref_dt > _now_utc:
             _hours_dark = (_ref_dt - _now_utc).total_seconds() / 3600.0
         else:
             _hours_dark = 0.0
-        _ref_load_w = (state.yesterday_consumption_kwh / 24.0 * 1000.0) if state.yesterday_consumption_kwh else house_load_w
-        _export_floor_kwh = _hours_dark * (_ref_load_w / 1000.0) + 2.0
+
+        _export_floor_kwh = max(0.0, _hours_dark) * (_ref_load_w / 1000.0) + 2.0
         _battery_energy_kwh = battery_soc / 100.0 * state.battery_capacity_kwh
 
         _avg_cost = state.battery_avg_cost_sek_kwh
@@ -619,43 +638,68 @@ class EnergyController:
                         else f"≥{self.export_sell_percentile*100:.0f}:e percentil {price_threshold:.2f}"
                     )
 
-                    # Modulera effekten: dela exporterbar energi jämnt över
-                    # återstående lönsamma prisslotar DENNA natt (fram till solar_takeover_dt
-                    # eller sun_next_rising). Morgondagens export är ett separat problem –
-                    # solar laddar batteriet igen innan dess.
+                    # Modulera effekten med prisväktad dispatch över HELA den lönsamma
+                    # fönstret – kväll + morgon imorgon om priset är högre då.
+                    # Avgränsning via solproduktion (< 2 kW) snarare än klockslag så att
+                    # höga morgontimmar (07–09) inkluderas medan middagen exkluderas.
+                    # Utan detta exporteras allt kväll och inget finns kvar till morgonens topp.
                     _now_local = datetime.now().astimezone()
                     _effective_threshold = min(price_threshold, self.export_min_sell_price_sek_kwh) if _abs_triggered else price_threshold
                     _solar_resume = state.solar_takeover_dt or state.sun_next_rising
                     _solar_resume_local = _solar_resume.astimezone() if _solar_resume else None
+                    _has_solar_data = any(s.solar_kw > 0 for s in ps.slots)
+                    _window_end = _now_local + timedelta(hours=20)
+                    _COMPETING_SOLAR_KW = 2.0
                     _high_slots = [
                         s for s in ps.slots
                         if s.sell_sek >= _effective_threshold
                         and s.end > _now_local
-                        and (_solar_resume_local is None or s.start < _solar_resume_local)
+                        and s.start < _window_end
+                        and (
+                            # Med Solcast: exkludera slots där sol verkligen producerar
+                            # (> 2 kW) – natt och tidig morgon inkluderas automatiskt
+                            s.solar_kw < _COMPETING_SOLAR_KW if _has_solar_data
+                            # Utan Solcast: klipp vid sol-resume (gammal logik)
+                            else (_solar_resume_local is None or s.start < _solar_resume_local)
+                        )
                     ]
                     _high_hours = sum(
                         (s.end - max(s.start, _now_local)).total_seconds() / 3600.0
                         for s in _high_slots
                     )
                     _exportable_kwh = _battery_energy_kwh - _export_floor_kwh
-                    _safe_hours = max(1.0, _high_hours)
-                    _target_w = (_exportable_kwh / _safe_hours) * 1000.0
+                    _remaining_slots = [
+                        s for s in _high_slots
+                        if s.end > _now_local
+                    ]
+                    _price_sum = sum(s.sell_sek for s in _remaining_slots)
+                    if _price_sum > 0:
+                        _weight = sell_price / _price_sum
+                        _slot_hours = 0.25
+                        _target_w = (_weight * _exportable_kwh / _slot_hours) * 1000.0
+                    else:
+                        _safe_hours = max(1.0, _high_hours)
+                        _target_w = (_exportable_kwh / _safe_hours) * 1000.0
                     discharge_w = max(500.0, min(_target_w, state.battery_max_power_kw * 1000.0))
 
                     decision.battery_discharge_power_w = discharge_w
+                    _morning_slots = [s for s in _high_slots if s.start.astimezone().date() > _today_date]
                     decision.reason += (
                         f" | Proaktiv export {sell_price:.2f} kr/kWh"
                         f" ({_trigger_label})"
                         f" sol imorgon {state.solar_forecast_tomorrow_kwh:.1f} kWh"
                         f" golv {_export_floor_kwh:.1f} kWh ({_hours_dark:.1f}h mörker)"
-                        f" {discharge_w:.0f}W/{_high_hours:.1f}h"
+                        f" {discharge_w:.0f}W vikt {sell_price:.2f}/{_price_sum:.2f}"
+                        + (f" +{len(_morning_slots)} morgonslots" if _morning_slots else "")
                     )
                     _LOGGER.info(
-                        "Proaktiv export: %.0f W (%.1f kWh / %.1fh) säljpris %.3f kr/kWh (%s)"
-                        " | batteri %.1f kWh > golv %.1f kWh | snittpris %.3f kr/kWh",
-                        discharge_w, _exportable_kwh, _high_hours,
+                        "Proaktiv export: %.0f W (%.1f kWh viktad) säljpris %.3f kr/kWh (%s)"
+                        " | batteri %.1f kWh > golv %.1f kWh | prisvikt %.3f/%.3f"
+                        " | fönster: %d slots (%d imorgon)",
+                        discharge_w, _exportable_kwh,
                         sell_price, _trigger_label,
-                        _battery_energy_kwh, _export_floor_kwh, _avg_cost,
+                        _battery_energy_kwh, _export_floor_kwh, sell_price, _price_sum,
+                        len(_high_slots), len(_morning_slots),
                     )
 
         # Morgonexport: sälj för att ge plats åt kommande solöverskott.

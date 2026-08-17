@@ -67,6 +67,32 @@ www/
 ### Proaktiv absorption
 Håller bara headroom (reducerar `battery_max_soc`) inför kommande negativt pris. Startar **inte** varmvatten eller EV-laddning proaktivt – det sker först när priset är faktiskt negativt eller redan passerat (`had_negative_today`).
 
+### Proaktiv export – prisväktad dispatch över kväll + morgon
+Exportfönstret inkluderar **båda** kväll och imorgon bitti. Gränsen är solproduktion (`solar_kw < 2 kW` per Solcast-slot) istället för ett tidsklocksklipp vid `solar_takeover_dt`. Natt- och tidiga morgonslots (sol < 2 kW) ingår alltid; middagsslots utesluts automatiskt.
+
+Urladdningseffekten viktas mot aktuellt pris relativt summan av alla kvarvarande slots i fönstret:
+```
+discharge_w = (sell_price / sum(remaining_high_slot_prices)) × exportable_kwh / 0.25h × 1000
+```
+Om imorgon bittis pris är 1,20 kr och kvällens är 0,80 kr allokeras proportionellt mer kWh till morgonen – utan att den totala exporterade volymen förändras. Fallback (utan Solcast-data) använder `solar_takeover_dt` som klipp. Fallback till jämn fördelning om prissumman är noll.
+
+### Exportgolvets referenstid – låst till fönstrets start
+`_hours_dark` i exportgolvsberäkningen (`_export_floor_kwh = _hours_dark × last + 2 kWh`) räknas från den **tidigaste prisslotens starttid** (eller nu, om vi redan passerat den) fram till solar takeover – **inte från klockan nu**. Utan denna fix krymper golvet under hela exportfönstret (t.ex. 3.5h × 1.05 kW ≈ 3.7 kWh extra utrymme per kväll), vilket gör att systemet exporterar mer än planerat och batteriet når Sonnenbatteriets 20%-minimum innan solen tar över.
+
+### Observerad solar takeover – Store-format
+`coordinator._takeover_store` (`{DOMAIN}_solar_takeover`) sparar:
+```json
+{"observations": [480.0, 481.5, ...], "last_obs_date": "2026-08-14"}
+```
+Vid uppstart återställs `_takeover_observed_today = True` om `last_obs_date` är idag – förhindrar dubbel-observation vid omstart. Bakåtkompatibelt med gammalt listformat (utan datum).
+
+### Legionella – förfallokontroll på datum
+`due`-kontrollen i `LegionellaManager.should_run_now()` jämför *datum*, inte exakt timantal:
+```python
+due = today >= (last_run + timedelta(days=interval_days)).date()
+```
+Hela förfallodagen räknas som tillgänglig. Kördes senast torsdag 14:00 → nästa förfallodag är torsdag om 7 dagar, och sol/billigt pris tidigt på morgonen den dagen räcker för att trigga.
+
 ### EV-vakthund
 Om bil är vald, laddning är beordrad men `charger_power < 50 W` i >5 minuter → `_active_cars[charger_name]` återställs till `NO_CAR_SELECTED`. Hanteras i `coordinator._build_charger_states()` via `_charge_command_times`.
 

@@ -147,11 +147,15 @@ class LegionellaManager:
         interval_days = int(self._config.get(CONF_LEGIONELLA_INTERVAL_DAYS, DEFAULT_LEGIONELLA_INTERVAL_DAYS))
         if self._last_run is None:
             days_since = interval_days + 1
+            due = True
+            overdue = True
         else:
             days_since = (now - self._last_run).total_seconds() / 86400
-
-        overdue = days_since >= interval_days * 1.5
-        due = days_since >= interval_days
+            today = now.date() if hasattr(now, "date") else now.astimezone().date()
+            due_date = (self._last_run + timedelta(days=interval_days)).date()
+            overdue_date = (self._last_run + timedelta(days=int(interval_days * 1.5))).date()
+            due = today >= due_date
+            overdue = today >= overdue_date
 
         if not due:
             return False, f"legionella: {days_since:.1f}/{interval_days} dagar sedan senaste"
