@@ -546,6 +546,15 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             buy_price  = self._controller.calculate_buy_price(spot_price, grid_fees, energy_tax, vat_rate)
             sell_price = self._controller.calculate_sell_price(spot_price, extra_revenue)
 
+            # Gårdagens förbrukning – behövs tidigt för huslastgolvet nedan
+            yesterday_kwh: Optional[float] = None
+            yest_entity = c.get(CONF_YESTERDAY_CONSUMPTION_ENTITY)
+            if yest_entity:
+                _yest_st = self.hass.states.get(yest_entity)
+                if _yest_st:
+                    _lp = _yest_st.attributes.get("last_period")
+                    yesterday_kwh = float(_lp) if _lp is not None else None
+
             grid_l1 = self._get_grid_power_w(c.get(CONF_GRID_POWER_L1))
             grid_l2 = self._get_grid_power_w(c.get(CONF_GRID_POWER_L2))
             grid_l3 = self._get_grid_power_w(c.get(CONF_GRID_POWER_L3))
@@ -559,6 +568,18 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             house_load_w = self._get_house_load_w(
                 grid_l1, grid_l2, grid_l3, solar_w, battery_pwr_w, ev_total_w
             )
+            # Skydda mot formelbuggar vid batteribyte (urladdning→laddning):
+            # Grid-sensorn visar export (-) i övergångscykeln → house_load ≈ 0W →
+            # solöverskott = hela solproduktionen → batteriet ber om maxladdning från nätet.
+            # Golvskydd: huslast kan inte vara under gårdagens dygnsmedelsnitt när solen är igång.
+            if solar_w > 200 and yesterday_kwh:
+                _load_floor = yesterday_kwh / 24.0 * 1000.0
+                if house_load_w < _load_floor:
+                    _LOGGER.debug(
+                        "Huslast %.0fW under golvet %.0fW (formelbuggar vid batteribyte) – korrigeras",
+                        house_load_w, _load_floor,
+                    )
+                    house_load_w = _load_floor
             solar_surplus_w = max(0.0, solar_w - house_load_w)
 
             # Prisschema från Nordpool + Solcast-attributen
@@ -605,15 +626,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             )
                 except Exception as e:
                     _LOGGER.warning("Kunde inte beräkna prisschema: %s", e)
-
-            # Gårdagens förbrukning via last_period-attributet (= hela gårdagen i kWh)
-            yesterday_kwh: Optional[float] = None
-            yest_entity = c.get(CONF_YESTERDAY_CONSUMPTION_ENTITY)
-            if yest_entity:
-                _yest_st = self.hass.states.get(yest_entity)
-                if _yest_st:
-                    _lp = _yest_st.attributes.get("last_period")
-                    yesterday_kwh = float(_lp) if _lp is not None else None
 
             # Tidpunkt då sol förväntas täcka huslasten.
             # Referenslast = gårdagens snitt (stabil, immun mot nattliga spikar).

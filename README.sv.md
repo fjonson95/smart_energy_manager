@@ -1,8 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.17-blue)
+![Version](https://img.shields.io/badge/version-0.5.18-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.18
+
+- **Fix: batteri laddades delvis från nätet när sol översteg huslast** – i övergångscykeln när batteriet byter från urladdning (proaktiv export) till laddning rapporterar grid-sensorn fortfarande ett stort exportvärde från föregående cykel. Den beräknade huslasten (`grid + sol − bat_urladdning + bat_laddning − EV`) ger ett negativt resultat som kapas till 0 W, och regulatorn tror att solöverskottet är hela solproduktionen (t.ex. 3 600 W). Batteriet beordrades då ladda med maxkapacitet (t.ex. 3 300 W) trots att faktiskt solöverskott bara var ~2 800 W — vilket drog ~500 W från nätet. Fix: `yesterday_consumption_kwh` hämtas nu innan huslastberäkningen; när sol överstiger 200 W och formeln ger ett värde under gårdagens dygnsmedelsnitt används det snittet som golv, vilket håller överskottsberäkningen realistisk och förhindrar oönskat nätuttag.
 
 ## Nyheter i 0.5.17
 

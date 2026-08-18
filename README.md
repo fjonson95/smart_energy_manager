@@ -1,10 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.17-blue)
+![Version](https://img.shields.io/badge/version-0.5.18-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.18
+
+- **Fix: battery charge command pulled from grid when solar exceeded house load** – during the transition cycle when the battery switches from discharge (proactive export) to charge mode, the grid sensor still reports a large export value from the previous cycle. The derived house-load formula (`grid + solar − battery_discharge + battery_charge − EV`) produces a negative result that is clamped to 0 W, making the controller believe solar surplus equals the full solar output (e.g. 3 600 W). The battery was then commanded to charge at its maximum rate (e.g. 3 300 W), while actual solar surplus was only ~2 800 W — causing ~500 W grid draw. Fix: `yesterday_consumption_kwh` is now fetched before the house-load calculation; when solar exceeds 200 W and the formula result is below yesterday's 24 h average load, that average is used as a floor, keeping the surplus estimate realistic and preventing spurious grid import.
 
 ## What's New in 0.5.17
 
