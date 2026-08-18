@@ -1,10 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.18-blue)
+![Version](https://img.shields.io/badge/version-0.5.19-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.19
+
+- **Fix: EnergyPlanner AVVIKELSE spam during opportunity charging** – the planner planned `idle` for solar slots where the battery was already above the export floor but still below maximum capacity. The controller then applied opportunity charging (buy price below threshold) from solar surplus, causing a divergence warning every 30 seconds. The planner now plans `solar_charge` whenever solar surplus is available *and* the battery has room below max SOC, regardless of export-floor position. `idle` during solar hours is reserved for the case where the battery is already full. This removes false-positive divergence warnings while keeping accurate divergence detection for cases where the controller genuinely deviates.
 
 ## What's New in 0.5.18
 

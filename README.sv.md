@@ -1,8 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.18-blue)
+![Version](https://img.shields.io/badge/version-0.5.19-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.19
+
+- **Fix: EnergyPlanner AVVIKELSE-spam vid opportunity charging** – planen planerade `idle` för solslots där batteriet redan var ovanför exportgolvet men fortfarande under maxkapacitet. Regulatorn tillämpade sedan opportunity charging (inköpspris under tröskeln) från solöverskott, vilket utlöste en avvikelse-varning var 30:e sekund. Planen planerar nu `solar_charge` när det finns solöverskott *och* utrymme i batteriet under max-SOC, oavsett exportgolvets position. `idle` under soltimmar är reserverat för det fall batteriet är fullt. Detta eliminerar falskt-positiva avvikelsevarna­ingar men behåller korrekt detektering när regulatorn faktiskt avviker.
 
 ## Nyheter i 0.5.18
 

@@ -211,18 +211,21 @@ class EnergyPlanner:
             elif not is_dark:
                 surplus = max(0.0, solar_kwh - load_kwh)
                 needs_kwh = max(0.0, export_floor_kwh - batt_kwh)
+                room_kwh = max(0.0, batt_max_kwh - batt_kwh)
 
-                if surplus > 0.01:
-                    if needs_kwh > 0.1 or slot.sell_sek < self.sell_solar_min_price:
-                        charge_target = needs_kwh if needs_kwh > 0.1 else (batt_max_kwh - batt_kwh)
-                        charge_kwh = min(surplus * 0.95, batt_max_kwh - batt_kwh, battery_max_power_kw * slot_h, charge_target)
-                        batt_kwh = min(batt_max_kwh, batt_kwh + charge_kwh)
-                        power_w = min(charge_kwh / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
-                        action = "solar_charge"
-                        reason = f"sol {slot.solar_kw:.1f}kW → laddar (kvällsmål {needs_kwh:.1f}kWh kvar)"
-                    else:
-                        action = "idle"
-                        reason = f"sol {slot.solar_kw:.1f}kW → sälj naturligt ({slot.sell_sek:.2f} kr)"
+                if surplus > 0.01 and room_kwh > 0.1:
+                    charge_kwh = min(surplus * 0.95, room_kwh, battery_max_power_kw * slot_h)
+                    batt_kwh = min(batt_max_kwh, batt_kwh + charge_kwh)
+                    power_w = min(charge_kwh / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
+                    action = "solar_charge"
+                    reason = (
+                        f"sol {slot.solar_kw:.1f}kW → laddar (kvällsmål {needs_kwh:.1f}kWh kvar)"
+                        if needs_kwh > 0.1
+                        else f"sol {slot.solar_kw:.1f}kW → laddar mot max ({slot.sell_sek:.2f} kr)"
+                    )
+                elif surplus > 0.01:
+                    action = "idle"
+                    reason = f"sol {slot.solar_kw:.1f}kW → batteri fullt, sälj ({slot.sell_sek:.2f} kr)"
                 else:
                     action = "cover_load"
                     reason = f"sol {slot.solar_kw:.1f}kW täcker last {hourly_load_kw:.2f}kW"
