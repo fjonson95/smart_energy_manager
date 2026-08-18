@@ -91,6 +91,14 @@ async def async_setup_entry(
     if coordinator._config.get(CONF_OUTDOOR_TEMP_ENTITY):
         entities.append(PredictedHouseLoadSensor(coordinator, entry))
 
+    # EnergyPlanner-sensorer (plan vs faktisk)
+    entities += [
+        DayPlanActionSensor(coordinator, entry),
+        DayPlanChargePowerSensor(coordinator, entry),
+        DayPlanDischargePowerSensor(coordinator, entry),
+        DayPlanReasonSensor(coordinator, entry),
+    ]
+
     async_add_entities(entities)
 
 
@@ -929,4 +937,83 @@ class NordpoolPriceScheduleSensor(_BaseEnergySensor):
             "slot_count_today":    len(prices_today),
             "slot_count_tomorrow": len(prices_tomorrow),
             "total_slot_count":    len(ps.slots),
+        }
+
+
+# ── EnergyPlanner-sensorer ───────────────────────────────────────────────────
+
+class _DayPlanBase(_BaseEnergySensor):
+    """Bas för plan-sensorer – hämtar aktuell planslott."""
+
+    def _current_slot(self):
+        plan = self.coordinator.day_plan
+        if not plan:
+            return None
+        return plan.slot_at(datetime.now().astimezone())
+
+
+class DayPlanActionSensor(_DayPlanBase):
+    _attr_unique_id = "sem_day_plan_action"
+    _attr_translation_key = "day_plan_action"
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def native_value(self) -> str:
+        s = self._current_slot()
+        return s.action if s else "unknown"
+
+
+class DayPlanChargePowerSensor(_DayPlanBase):
+    _attr_unique_id = "sem_day_plan_charge_power"
+    _attr_translation_key = "day_plan_charge_power"
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:battery-arrow-up-outline"
+
+    @property
+    def native_value(self) -> float:
+        s = self._current_slot()
+        if not s:
+            return 0.0
+        return round(max(0.0, s.target_power_w), 0)
+
+
+class DayPlanDischargePowerSensor(_DayPlanBase):
+    _attr_unique_id = "sem_day_plan_discharge_power"
+    _attr_translation_key = "day_plan_discharge_power"
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:battery-arrow-down-outline"
+
+    @property
+    def native_value(self) -> float:
+        s = self._current_slot()
+        if not s:
+            return 0.0
+        return round(max(0.0, -s.target_power_w), 0)
+
+
+class DayPlanReasonSensor(_DayPlanBase):
+    _attr_unique_id = "sem_day_plan_reason"
+    _attr_translation_key = "day_plan_reason"
+    _attr_icon = "mdi:information-outline"
+
+    @property
+    def native_value(self) -> str:
+        s = self._current_slot()
+        return s.reason[:255] if s else "Ingen plan"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        plan = self.coordinator.day_plan
+        s = self._current_slot()
+        if not plan or not s:
+            return {}
+        return {
+            "battery_soc_est_pct": s.battery_soc_est_pct,
+            "export_floor_kwh": round(plan.export_floor_kwh, 2),
+            "evening_target_soc_pct": round(plan.evening_target_soc_pct, 1),
+            "plan_generated_at": plan.generated_at.isoformat(),
         }

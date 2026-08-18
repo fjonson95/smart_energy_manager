@@ -358,6 +358,18 @@
       },
       "battery_energy": {
         "name": "Battery Energy"
+      },
+      "day_plan_action": {
+        "name": "Plan: action"
+      },
+      "day_plan_charge_power": {
+        "name": "Plan: charge power"
+      },
+      "day_plan_discharge_power": {
+        "name": "Plan: discharge power"
+      },
+      "day_plan_reason": {
+        "name": "Plan: reason"
       }
     },
     "switch": {

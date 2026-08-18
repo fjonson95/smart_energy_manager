@@ -1,10 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.20-blue)
+![Version](https://img.shields.io/badge/version-0.5.21-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.21
+
+- **New: EnergyPlanner sensors for plan-vs-actual comparison** – four new entities expose the current planned slot from the day planner, making dashboard comparison with actual battery commands straightforward without diving into logs: `Plan: åtgärd` (action text: export/solar_charge/idle/…), `Plan: laddningseffekt` (W, mirrors battery charge setpoint), `Plan: urladdningseffekt` (W, mirrors battery discharge setpoint), `Plan: anledning` (reason text, with `battery_soc_est_pct`, `export_floor_kwh`, and `evening_target_soc_pct` as attributes).
 
 ## What's New in 0.5.20
 

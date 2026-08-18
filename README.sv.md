@@ -1,8 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.20-blue)
+![Version](https://img.shields.io/badge/version-0.5.21-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.21
+
+- **Nytt: EnergyPlanner-sensorer för plan-vs-faktisk-jämförelse** – fyra nya entiteter exponerar aktuell planslott från dagsplaneraren, vilket gör det enkelt att jämföra med faktiska batteribeslut på Lovelace-dashboarden utan att läsa loggar: `Plan: åtgärd` (text: export/solar_charge/idle/…), `Plan: laddningseffekt` (W, speglar laddningssetpunkt), `Plan: urladdningseffekt` (W, speglar urladdningssetpunkt), `Plan: anledning` (text med `battery_soc_est_pct`, `export_floor_kwh` och `evening_target_soc_pct` som attribut).
 
 ## Nyheter i 0.5.20
 

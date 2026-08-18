@@ -358,6 +358,18 @@
       },
       "battery_energy": {
         "name": "Batterienergi"
+      },
+      "day_plan_action": {
+        "name": "Plan: åtgärd"
+      },
+      "day_plan_charge_power": {
+        "name": "Plan: laddningseffekt"
+      },
+      "day_plan_discharge_power": {
+        "name": "Plan: urladdningseffekt"
+      },
+      "day_plan_reason": {
+        "name": "Plan: anledning"
       }
     },
     "switch": {
