@@ -1,8 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.19-blue)
+![Version](https://img.shields.io/badge/version-0.5.20-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.20
+
+- **Fix: EnergyPlanner falskt-positiva AVVIKELSE vid prefer-sell och proaktiv export** – tre divergensmönster som är förväntade beteenden, inte planeringsbuggar, löses nu som tysta "mjuka matchningar" (DEBUG istället för WARNING): (1) plan=idle men regulatorn laddar — opportunity charging tar över prefer-sell; (2) plan=solar_charge men regulatorn exporterar — prefer-sell låter sol flöda till nätet naturligt medan proaktiv export tömmer återstående batterikudde ovanför golvet; (3) plan=solar_charge men regulatorn är idle — prefer-sell är aktiv, ingen batteriladdning beordrad. Verkliga avvikelser (t.ex. plan=export men regulatorn laddar, eller plan=grid_charge men regulatorn är idle) loggas fortsatt som WARNING.
 
 ## Nyheter i 0.5.19
 

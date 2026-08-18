@@ -867,7 +867,17 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         or (plan_charge and ctrl_charge)
                         or (plan_idle and ctrl_idle)
                     )
-                    if not match:
+                    # Mjuk match: kända planeringsgap som inte indikerar fel
+                    # 1. Plan=idle men laddning sker → opportunity charging tar över prefer_sell
+                    # 2. Plan=solar_charge men export sker → prefer_sell + proaktiv export (batteri ovan golvet)
+                    # 3. Plan=solar_charge men idle → prefer_sell (säljer sol naturligt utan batteriladdning)
+                    _batt_kwh_now = state.battery_soc_pct / 100.0 * state.battery_capacity_kwh
+                    soft_match = (
+                        (plan_idle and ctrl_charge)
+                        or (plan_charge and ctrl_export and _batt_kwh_now > self._day_plan.export_floor_kwh)
+                        or (plan_charge and ctrl_idle)
+                    )
+                    if not match and not soft_match:
                         _LOGGER.warning(
                             "DayPlan AVVIKELSE kl %s: plan=%s %.0fW (%s) | faktiskt=%s chg=%.0fW dis=%.0fW | %s",
                             now.strftime("%H:%M"),
@@ -878,9 +888,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         )
                     else:
                         _LOGGER.debug(
-                            "DayPlan ✓ kl %s: plan=%s ≈ faktisk=%s",
+                            "DayPlan ✓ kl %s: plan=%s ≈ faktisk=%s%s",
                             now.strftime("%H:%M"), plan_slot.action,
                             "export" if ctrl_export else ("charge" if ctrl_charge else "idle"),
+                            " (mjuk)" if soft_match else "",
                         )
 
             if legionella_active:

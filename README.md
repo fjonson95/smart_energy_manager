@@ -1,10 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.19-blue)
+![Version](https://img.shields.io/badge/version-0.5.20-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.20
+
+- **Fix: EnergyPlanner false-positive AVVIKELSE during prefer-sell and proactive export** – three divergence patterns that are expected behavior, not planning errors, now resolve to a silent "soft match" (DEBUG instead of WARNING): (1) plan=idle but controller charges — opportunity charging overrides prefer-sell; (2) plan=solar_charge but controller exports — prefer-sell lets solar flow to grid naturally while proactive export drains residual battery headroom above the floor; (3) plan=solar_charge but controller is idle — prefer-sell is active, no battery charge commanded. True divergences (e.g. plan=export but controller charges, or plan=grid_charge but controller is idle) continue to log at WARNING.
 
 ## What's New in 0.5.19
 
