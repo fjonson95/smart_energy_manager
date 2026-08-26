@@ -893,7 +893,7 @@ class EnergyController:
             _solar_soc_gain = 0.8 * ps.solar_next_2h_kwh / state.battery_capacity_kwh * 100.0
             _effective_evening_target = max(self.battery_min_soc, evening_target_soc - _solar_soc_gain)
         _cheap_refill_price = ps.best_charge_slot.buy_sek if (ps and ps.best_charge_slot) else buy_price
-        _economic_peak = _cheap_refill_price > 0 and buy_price >= _cheap_refill_price * 2.0
+        _economic_peak = _cheap_refill_price > 0 and buy_price >= _cheap_refill_price * 1.5
         if _economic_peak:
             _effective_evening_target = self.battery_min_soc
         if not export_active and decision.battery_charge_power_w == 0.0 and solar_w < house_load_w and battery_soc > self.battery_min_soc and battery_soc > _effective_evening_target:
@@ -906,7 +906,7 @@ class EnergyController:
                     decision.reason += " | Bästa urladdningstimmen"
             decision.battery_discharge_power_w = discharge_w
             if _economic_peak:
-                decision.reason += f" | Självkonsumtion {deficit_w:.0f}W (ekonomisk topp {buy_price:.2f}>{_cheap_refill_price:.2f}×2)"
+                decision.reason += f" | Självkonsumtion {deficit_w:.0f}W (ekonomisk topp {buy_price:.2f}>{_cheap_refill_price:.2f}×1.5)"
             else:
                 solar_note = f" (sol {ps.solar_next_2h_kwh:.1f}kWh/2h)" if wait_solar and ps is not None else ""
                 decision.reason += f" | Självkonsumtion {deficit_w:.0f}W{solar_note}"

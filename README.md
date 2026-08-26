@@ -1,10 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.45-blue)
+![Version](https://img.shields.io/badge/version-0.5.46-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.46
+
+- **Fix: economic-peak self-consumption threshold lowered from 2.0× to 1.5×** – the v0.5.44 guard (`buy_price ≥ best_charge_price × 2.0`) required a very large spread before the battery would discharge during expensive peak hours. At a typical evening spread (e.g. 3.65 SEK/kWh now vs. 2.43 SEK/kWh overnight), the ratio is only 1.5× — below the old 2.0× floor — so the battery stayed idle and the grid covered house load. The threshold is lowered to 1.5× so the battery discharges whenever buying now costs ≥ 50 % more than the cheapest upcoming charge slot. The decision reason suffix changes from `×2` to `×1.5`.
 
 ## What's New in 0.5.45
 

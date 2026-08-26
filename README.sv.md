@@ -1,8 +1,12 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.45-blue)
+![Version](https://img.shields.io/badge/version-0.5.46-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.5.46
+
+- **Fix: tröskel för ekonomisk topp-självkonsumtion sänkt från 2,0× till 1,5×** – v0.5.44-villkoret (`köppris ≥ bästa_laddpris × 2,0`) krävde en mycket stor prisskillnad innan batteriet laddade ur under dyra timmar. Vid ett typiskt kväll-spread (t.ex. 3,65 kr/kWh nu vs 2,43 kr/kWh natten) är kvoten bara 1,5× — under det gamla 2,0×-golvet — så batteriet stod stilla och nätet täckte huslasten. Tröskeln sänks till 1,5× så att batteriet laddar ur när det kostar ≥ 50% mer att köpa nu jämfört med billigaste kommande laddslot. Beslutsanledningens suffix ändras från `×2` till `×1.5`.
 
 ## Nyheter i 0.5.45
 
