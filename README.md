@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.46-blue)
+![Version](https://img.shields.io/badge/version-0.5.47-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.5.46
+## What's New in 0.5.47
 
-- **Fix: economic-peak self-consumption threshold lowered from 2.0× to 1.5×** – the v0.5.44 guard (`buy_price ≥ best_charge_price × 2.0`) required a very large spread before the battery would discharge during expensive peak hours. At a typical evening spread (e.g. 3.65 SEK/kWh now vs. 2.43 SEK/kWh overnight), the ratio is only 1.5× — below the old 2.0× floor — so the battery stayed idle and the grid covered house load. The threshold is lowered to 1.5× so the battery discharges whenever buying now costs ≥ 50 % more than the cheapest upcoming charge slot. The decision reason suffix changes from `×2` to `×1.5`.
+- **Fix: economic-peak self-consumption threshold lowered from 2.0× to 1.2×** – the v0.5.44 guard (`buy_price ≥ best_charge_price × 2.0`) required a very large spread before the battery would discharge during expensive peak hours. In practice prices like 3.17 SEK/kWh now vs. 2.37 SEK/kWh at 02:45 (ratio 1.34×) were still blocked by both the 2.0× and the intermediate 1.5× threshold. The threshold is set to 1.2× so the battery bypasses the evening-floor whenever buying now costs ≥ 20 % more than the cheapest upcoming charge slot — a spread that is always worth an arbitrage trade (0.80 SEK/kWh net gain at tonight's prices). The decision reason suffix is now `×1.2`.
 
 ## What's New in 0.5.45
 
