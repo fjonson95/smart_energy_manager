@@ -1,10 +1,102 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.21-blue)
+![Version](https://img.shields.io/badge/version-0.5.45-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.5.45
+
+- **Fix: proactive export blocked when upcoming night electricity is more expensive** – the export logic sold battery energy during the day (e.g. at 1.50–2.10 SEK/kWh) without checking whether upcoming dark hours would require buying electricity back at a higher price (e.g. 3.77 SEK/kWh). This was a losing trade: sell cheap, buy expensive. Fix: a new `_export_price_ok` guard is calculated before the export gate: `sell_price ≥ max(dark-slot buy prices in floor period) × 0.9`. If the current sell price is less than 90 % of the peak upcoming night buy price, export is blocked — the energy is more valuable held for evening self-consumption. The 90 % factor allows export when prices are close (e.g. sell 1.80 vs night 1.90 — slight gain worth taking). Same filter applied to morning export and mirrored in `EnergyPlanner` (high-slots are filtered to only those with sell ≥ 90 % of peak night buy). Tonight's case: sell 2.10 < 3.77 × 0.9 = 3.39 → export blocked ✓.
+
+## What's New in 0.5.44
+
+- **Fix: battery sat idle during expensive evening peak — grid covered house load at 3.77 SEK/kWh** – the `evening_target_soc` guard (SOC floor protecting the night reserve) correctly blocked self-consumption when the battery was below 71 % target. But it made no economic distinction between cheap grid electricity (0.30–0.50 SEK/kWh at night) and expensive peak electricity (3.77 SEK/kWh in the evening). Fix: a new economic-peak condition checks whether the current buy price is ≥ 2× the cheapest upcoming charge price (`ps.best_charge_slot.buy_sek`). When true, the effective SOC floor drops to `battery_min_soc` — the battery discharges to cover house load now, and the opportunity-charge logic buys back cheap electricity later that night. Tonight's case: 3.77 / 1.25 = 3.0× → economic peak active → battery discharges 1 041 W instead of importing. The decision reason shows `| Självkonsumtion XXXW (ekonomisk topp Y.YY>Z.ZZ×2)` when this path is active.
+
+## What's New in 0.5.43
+
+- **Fix: battery sat idle during morning price peak while waiting for solar** – when `wait_for_solar` is active (solar expected within 2 h) the `evening_target_soc` guard was still blocking self-consumption discharge. The battery would sit at ~39 % SOC while the house drew from the grid at morning peak prices (~1.26 SEK/kWh), even though solar would replenish the reserve by noon. Fix: when `wait_for_solar = True` and `solar_next_2h_kwh > 0`, the effective evening-target floor is reduced by 80 % of the expected solar SOC gain (`0.8 × solar_next_2h_kwh / capacity × 100 %`). With 5.7 kWh expected and 33 kWh capacity this shifts the threshold from 39.7 % down to ≈ 22 %, allowing the battery to cover morning load. The 80 % factor provides a safety margin in case clouds reduce actual production. The decision reason now appends `(sol X.X kWh/2h)` when this path is active. The same logic is mirrored in `EnergyPlanner`: dark slots now look ahead 2 h and reduce the floor by 80 % of expected solar, so the plan accurately reflects the controller's morning behaviour.
+
+## What's New in 0.5.42
+
+- **Fix: EnergyPlanner simulation did not decrement battery for self-consumption** – the forward simulation in `energy_planner.py` produced `cover_load` slots (solar < house, daytime) and dark `idle` slots (night) without decrementing `batt_kwh`. As a result the plan overestimated available battery energy throughout the day and night, leading to inflated export capacity predictions and an inaccurate SOC trace. Fix: both cases now simulate battery self-consumption discharge — battery discharges to cover the house deficit (or full house load at night) while `batt_kwh > batt_min_kwh + export_floor_kwh`. The export-floor guard mirrors the controller's `battery_soc > evening_target_soc` check and protects the night-coverage reserve. When the battery is at its floor, the slot is shown as grid-covered with a clear reason string.
+
+## What's New in 0.5.41
+
+- **Fix: battery never discharged for self-consumption — all house load above solar came from grid** – the self-consumption discharge block existed but was gated on `buy_price > 0.20 SEK/kWh`. In summer, when spot prices are low and total buy price can be near this threshold, the condition was never met. Result: the battery sat idle all day and every watt of house load that solar could not cover was imported from the grid. Fix: the price gate is removed. Stored solar is always cheaper than grid import regardless of current spot price — the battery now discharges to cover house deficit whenever `battery_soc > evening_target_soc` and `battery_soc > battery_min_soc`. The evening-target guard already protects the night energy reserve.
+
+## What's New in 0.5.39
+
+- **New: number entities for proactive export thresholds** – two new adjustable parameters are now exposed as `number` entities in Home Assistant: `Proactive Export Price Percentile` (50–100%, step 5, default 75 — export triggers when sell price ≥ this percentile of today's prices) and `Proactive Export Absolute Min Price` (0.00–3.00 SEK/kWh, step 0.05, default 0.70 — always-export floor regardless of percentile). Both update the controller immediately without a restart and survive as long as HA is running (reset to config-flow defaults on restart).
+
+## What's New in 0.5.38
+
+- **Fix: plan executor discharge sensor showed non-zero for idle/cover_load slots below evening floor** – v0.5.36 added the `evening_target` guard only for `export` slots. For `idle` and `cover_load` slots (battery covers house deficit at night), the same guard was missing — the sensor still returned `house_deficit_w` even when `battery_soc ≤ evening_target_soc_pct`. The guard is now applied to all discharge actions: any slot returns 0 W when `battery_soc ≤ evening_target`.
+
+## What's New in 0.5.37
+
+- **Fix: "Bästa urladdningstimmen" discharged below evening floor after sunset** – the house-load discharge path (line `if not export_active … battery_soc > battery_min_soc`) only guarded against absolute min SOC. After sunset, `solar_w` drops below 100 W so `evening_fill = False` (solar check fails) even when `battery_soc < evening_target_soc`. At ~19:35, with battery at ~50% and evening target 53.3%, "Bästa urladdningstimmen" triggered (peak buy-price window) and discharged 1 384 W to cover house load — draining below the night-coverage floor and causing min-SOC depletion overnight. Fix: added `battery_soc > evening_target_soc` to the guard so the battery is protected below the night floor even when `evening_fill` is temporarily False (no solar).
+
+## What's New in 0.5.36
+
+- **Fix: proactive export ignored `battery_min_soc` in energy check, discharging below floor** – the export guard `_battery_energy_kwh > _export_floor_kwh` compared the *total* battery energy (e.g. 51% × 33 kWh = 16.83 kWh) against the floor (10.98 kWh), concluding there was 5.85 kWh to export. But only the energy *above* min SOC is usable: `(51 − 20)% × 33 = 10.23 kWh < 10.98 kWh floor` → nothing to export. The controller discharged at 4.9 kW into the evening peak despite the battery already being below the night-coverage floor. Same bug was present in `EnergyPlanner.exportable_kwh`. Fix: both calculations now use `usable_kwh = (battery_soc − battery_min_soc)% × capacity`. The plan executor discharge sensor also gains an `evening_target` guard: for `export` slots it returns 0 W when `battery_soc ≤ evening_target_soc_pct`.
+
+## What's New in 0.5.35
+
+- **Fix: `evening_target_soc` excluded `battery_min_soc`, causing severe underestimation** – the formula `evening_target_soc = evening_needed_kwh / capacity × 100` treated the battery as if all capacity were usable. But `battery_min_soc = 20%` is an absolute floor — the bottom 6.6 kWh are never accessible. Result: an 11.5 kWh evening need gave a 34.9% target, but at 34.9% only `(34.9 − 20) / 100 × 33 = 4.9 kWh` is actually usable — less than half the required amount. Battery depleted to min SOC every night even from 49–51% starting SOC. Fix: `evening_target_soc = min(battery_max_soc, battery_min_soc + evening_needed_kwh / capacity × 100)`. With the same 11.5 kWh need: `20 + 34.9 = 54.9%`, giving `(54.9 − 20) / 100 × 33 = 11.5 kWh` usable — exactly what's needed. Same fix applied to `EnergyPlanner.build_plan()`.
+
+## What's New in 0.5.34
+
+- **Fix: `evening_target_soc` underestimated on sunny days — battery depleted overnight** – the dynamic evening target was computed as `(_eff_daily_kwh / 24) × hours_dark + 2 kWh`, where `_eff_daily_kwh = max(predicted_daily_kwh, yesterday_consumption_kwh)`. On sunny days `yesterday_consumption_kwh` is grid import only (~7 kWh), giving ~0.29 kW average — even though actual night load is ~0.9–1.2 kW. Result: `evening_target_soc ≈ 17%`, battery above that all day → `evening_fill = False` → controller exported solar instead of charging. Battery then depleted overnight from ~49–51% to min SOC. Fix: `hourly_load_kw` is now clamped to `min(max(daily_avg, house_load_w / 1000, 0.5), 1.5)`, matching the v0.5.27 fix applied to the export floor. With house load ~1.24 kW the evening target becomes ~53%, triggering `evening_fill = True` (49% < 53%) and forcing the controller to store solar before selling.
+
+## What's New in 0.5.33
+
+- **Fix: Plan executor charge sensor used plan's `evening_target_soc_pct` instead of controller's** – the `prefer_sell` check in the charge sensor compared battery SOC against the plan's `evening_target_soc_pct` (computed from `solar_takeover_dt`, which could be set to the current day's solar ~11:15 → giving only ~16.5% target). The controller computes its `evening_target_soc` differently — searching `ps.slots` for the first slot after sunset where solar covers load, falling back to sunrise + 3 h, giving a realistic dark-period floor (~39% at 33% battery). This caused the sensor to show 0 W (prefer_sell=True, evening_fill=False) while the controller was charging at full surplus (evening_fill=True). Fix: `evening_target_soc` is now added to `ControlDecision`, set in `_auto_mode()` after the dynamic calculation, and stored in `coordinator.data` as `evening_target_soc_pct` — replacing the plan value. The charge sensor now mirrors the controller's own `evening_fill` result.
+
+## What's New in 0.5.32
+
+- **Fix: Plan executor charge sensor ignored `prefer_sell` logic** – for `solar_charge` slots the sensor always showed the battery charge estimate, but the controller skips charging and exports solar whenever `sell_price ≥ sell_solar_min_price AND NOT evening_fill`. This caused the charge sensor to show e.g. 4 000 W while the controller was actually exporting at 0 W charge. Fix: `sell_solar_min_price` (from controller config) and `evening_target_soc_pct` (from day plan) are now stored in coordinator data. The sensor computes `prefer_sell = sell_price ≥ sell_solar_min_price AND battery_soc ≥ evening_target_soc` and returns 0 W when true — matching the controller's export decision. Attributes expose `prefer_sell`, `evening_fill`, `sell_price`, and `sell_solar_min_price` for full transparency.
+
+## What's New in 0.5.31
+
+- **Fix: Plan executor charge sensor ignored EV charging priority** – the `Plan executor: charge` sensor showed `min(solar_surplus, battery_max)` as if all solar surplus went to the battery, but in practice the controller allocates surplus to EV chargers first. When an EV was drawing e.g. 5.5 kW from a 7 kW surplus, only 1.5 kW would actually reach the battery. Fix: for `solar_charge` slots the sensor now subtracts `ev_total_power_w` from solar surplus before calculating battery charge (`max(0, surplus − ev_total) → battery`). `ev_total_power_w` (sum of all charger `power_w` readings) is added to coordinator data and exposed as an attribute on the charge sensor alongside `battery_surplus_w`.
+
+## What's New in 0.5.30
+
+- **Fix: Plan executor discharge sensor showed non-zero at min SOC** – when battery reached minimum SOC (20%), the controller correctly set discharge to 0 W, but the plan executor discharge sensor still reported the house deficit (e.g. 774 W) because it lacked a SOC guard. Fix: `battery_soc_pct` and `battery_min_soc` are now stored in coordinator data; the sensor returns 0 W whenever `battery_soc_pct ≤ battery_min_soc`, matching the controller's hard floor.
+
+## What's New in 0.5.29
+
+- **Fix: Plan executor discharge showed only net export, not total battery discharge** – for `export` slots the sensor showed only the price-weighted dispatch component (e.g. 830 W to grid) but not the house-coverage component (e.g. 524 W). The actual controller discharge was their sum (1 354 W). Fix: the sensor now returns `min(net_export_w + house_deficit_w, battery_max_w)` for export slots, where `house_deficit_w = max(0, house_load_w − solar_power_w)`. A new `solar_power_w` key is added to coordinator data (used by the sensor). Attributes now expose `net_export_w`, `house_deficit_w`, `house_load_w`, and `solar_power_w` separately for full transparency.
+
+## What's New in 0.5.28
+
+- **Fix: Plan executor discharge sensor showed 0 W for idle slots at night** – the `Plan executor: discharge` sensor only returned a value for `export` action slots. During `idle` slots at night (no planned export, but battery still covers house load), the sensor read 0 W even though the controller was discharging 1200–1500 W to power the house. Fix: for `idle` and `cover_load` slots, the sensor now returns `min(house_load_w − solar_surplus_w, battery_max_w)` — the same house-deficit logic the controller uses. `solar_surplus_w` and `house_load_w` are added as sensor attributes. `export` slot behavior is unchanged.
+
+## What's New in 0.5.27
+
+- **Fix: export floor underestimated on sunny days, causing overnight battery drain** – on summer days with high solar production, `yesterday_consumption_kwh` only captures grid import (solar covered the rest), giving an average of ~320 W instead of the actual ~900 W night load. The export floor was then calculated as 320 W × 9 h + 2 kWh = 4.88 kWh, covering only ~4.6 hours of night — not the full 10+ hour dark period. After exporting down to that floor the battery hit min SOC around 00:30, leaving the house on expensive grid power until sunrise. Fix: `_hourly_load_kw` is now clamped to `min(max(yesterday_avg, house_load_w, 500 W), 1500 W)`, using the higher of the daily average and the current instantaneous house load (floor 500 W, cap 1500 W to exclude EV charging spikes). This raises the export floor to ~9–12 kWh on typical summer evenings, correctly preventing export when the battery cannot cover the full night. The same fix is applied to `EnergyPlanner.build_plan()` (new `house_load_w` parameter) for consistency.
+
+## What's New in 0.5.26
+
+- **New: Plan executor shadow sensors** – two new sensors show what the plan executor *would have* commanded if running in plan mode, without affecting actual control. `Plan executor: charge` gives the charge setpoint (W) the executor would send — for `solar_charge` slots it is capped at actual solar surplus (not the Solcast forecast), for `grid_charge` slots it uses the plan's target directly. `Plan executor: discharge` gives the discharge setpoint for `export` slots. Both sensors include attributes (`plan_power_w`, `actual_surplus_w`, `capped`) to compare plan estimates against reality. Use these to gain confidence in plan-mode accuracy before switching the controller to plan-driven operation.
+
+## What's New in 0.5.25
+
+- **Fix: EnergyPlanner AVVIKELSE spam after 0.5.24** – the EnergyPlanner was still using the old single-number export conditions (`solar_forecast_tomorrow_kwh >= 20 kWh` and `hours × average_load` floor) while the controller had already been updated to slot-based logic in 0.5.24. This caused continuous divergence warnings (plan=export, actual=idle) whenever the controller correctly blocked export because net solar tomorrow was below the floor. Both calculations in the planner now mirror the controller exactly: (1) export floor is Σ max(0, load_kwh − solar_kwh) per slot until solar takeover + 2 kWh safety margin; (2) `can_export` requires `net_solar_tomorrow_kwh >= export_floor_kwh` where net solar tomorrow is Σ max(0, solar_kwh − load_kwh) per slot for tomorrow's date.
+
+## What's New in 0.5.24
+
+- **Fix: proactive export used crude raw-production check and overestimated export floor** – two related accuracy improvements: (1) The "can we refill tomorrow?" gate previously checked raw Solcast production ≥ 20 kWh, which passed even when house consumption ate most of the solar (e.g. 22 kWh forecast − 13 kWh house = only 9 kWh net available, too little to cover tonight's floor). Export now only runs when **net solar tomorrow** (slot-by-slot: Σ max(0, solar_kwh − load_kwh)) ≥ export floor. (2) The export floor itself was calculated as `hours × average_load + 2 kWh`, treating every hour until solar takeover as a full 875 W drain — ignoring that solar partially covers the house during the morning and evening ramps. The floor is now computed slot-by-slot as Σ max(0, load_kwh − solar_kwh), so the 3 h morning ramp (05:59–08:59) and 1.75 h evening wind-down (19:00–20:47) contribute only their actual deficit rather than full load, giving a more realistic floor (~2 kWh lower) and more accurate export headroom.
+
+## What's New in 0.5.23
+
+- **Fix: battery didn't charge from solar surplus during daytime** – the dynamic `evening_target_soc` was being calculated from the *next daytime slot* where solar covers load (e.g. 8 minutes away at 11:00), giving `hours_dark = 8 min` and `evening_target_soc ≈ 6%`. With the battery at 20% min SOC, `battery_soc < evening_target_soc` was False → `evening_fill = False` → `prefer_sell = True` → the controller exported solar instead of charging the battery. Root cause: the `solar_covers_at` slot search started from `now` and immediately found today's solar production, not tomorrow morning's. Fix: during daytime (next sunset is before next sunrise), the search starts from **tonight's sunset**, so `solar_covers_at` is correctly anchored to tomorrow morning's solar takeover. `hours_dark` is now calculated as `solar_covers_at − sunset` (the actual dark period), giving a realistic `evening_target_soc` (~30–50%) and restoring `evening_fill` logic during the day.
+
+## What's New in 0.5.22
+
+- **Fix: overnight battery drain to minimum SOC** – proactive export ran continuously from the evening peak window (19:00–21:00) all the way to 04:00 the next morning, draining the battery to 20% min SOC. Root cause: when the absolute minimum price threshold (0.70 kr/kWh) triggered export instead of the percentile, `_effective_threshold` was lowered to 0.70, causing the dispatch window to include every overnight slot (all prices ≥ 0.70 kr/kWh). The price-weighted dispatch then spread the battery's energy over 8–10 cheap night slots, and the floor kept shrinking as sunrise approached — leaving the system always above the floor and exporting continuously. Fix: the dispatch window (`_high_slots`) always uses the percentile threshold regardless of what triggered the export; and when no high-price slots remain in the window but only the absolute minimum is met, `export_active` is forced to `False`, stopping all export. The battery now stops exporting once the genuine high-price evening/morning window closes, even if the current sell price is still above 0.70 kr/kWh.
 
 ## What's New in 0.5.21
 

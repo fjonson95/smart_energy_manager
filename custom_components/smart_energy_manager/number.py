@@ -15,6 +15,8 @@ from .const import (
     CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC, CONF_EV_SOC_TARGET,
     CONF_WINTER_CHEAP_HOUR_THRESHOLD, CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD,
     CONF_WINTER_MIN_SOC, CONF_WINTER_MAX_SOC,
+    CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE,
+    CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH,
 )
 from .coordinator import SmartEnergyCoordinator
 
@@ -33,6 +35,8 @@ async def async_setup_entry(
         WinterExpensiveThresholdNumber(coordinator, entry),
         WinterMinSocNumber(coordinator, entry),
         WinterMaxSocNumber(coordinator, entry),
+        ExportSellPercentileNumber(coordinator, entry),
+        ExportMinSellPriceNumber(coordinator, entry),
     ])
 
 
@@ -185,3 +189,38 @@ class WinterMaxSocNumber(_BaseSEMNumber):
 
     def _update_controller(self):
         self.coordinator._controller.winter_max_soc = self._value
+
+
+class ExportSellPercentileNumber(_BaseSEMNumber):
+    _attr_unique_id = "sem_export_sell_percentile"
+    _attr_translation_key = "export_sell_percentile"
+    _attr_native_unit_of_measurement = "%"
+    _attr_native_min_value = 50.0
+    _attr_native_max_value = 100.0
+    _attr_native_step = 5.0
+    _attr_icon = "mdi:chart-bar"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        raw = float(self._config.get(CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE))
+        self._value = round(raw * 100.0)
+
+    def _update_controller(self):
+        self.coordinator._controller.export_sell_percentile = self._value / 100.0
+
+
+class ExportMinSellPriceNumber(_BaseSEMNumber):
+    _attr_unique_id = "sem_export_min_sell_price"
+    _attr_translation_key = "export_min_sell_price"
+    _attr_native_unit_of_measurement = "SEK/kWh"
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 3.0
+    _attr_native_step = 0.05
+    _attr_icon = "mdi:currency-usd"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._value = float(self._config.get(CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH))
+
+    def _update_controller(self):
+        self.coordinator._controller.export_min_sell_price_sek_kwh = self._value

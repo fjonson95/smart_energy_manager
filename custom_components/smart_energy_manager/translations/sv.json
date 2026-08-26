@@ -370,48 +370,74 @@
       },
       "day_plan_reason": {
         "name": "Plan: anledning"
+      },
+      "plan_executor_charge": {
+        "name": "Plan executor: laddning"
+      },
+      "plan_executor_discharge": {
+        "name": "Plan executor: urladdning"
       }
     },
     "switch": {
       "force_ev_charge": {
-        "name": "Tvångsladdning bil"
+        "name": "Tvångsladdning bil",
+        "description": "Tvingar bilen att ladda oavsett solöverskott och pris. Stängs av automatiskt när EV SOC-målet nås."
       },
       "winter_mode": {
-        "name": "Vinterläge"
+        "name": "Vinterläge",
+        "description": "Aktiverar vinterläge: batteriet laddas från nätet under billiga timmar och laddas ur under dyra timmar."
       },
       "force_charge_battery": {
-        "name": "Tvångsladdning batteri"
+        "name": "Tvångsladdning batteri",
+        "description": "Tvingar batteriet att ladda från nätet oavsett pris. Används manuellt för att snabbt fylla batteriet."
       },
       "opportunistic_charge": {
-        "name": "Opportunistisk nätladdning"
+        "name": "Opportunistisk nätladdning",
+        "description": "Laddar batteriet från nätet om köppriset är under den billiga priströskeln, även utanför vinterläge."
       }
     },
     "number": {
       "battery_min_soc": {
-        "name": "Batteri min SOC"
+        "name": "Batteri min SOC",
+        "description": "Lägsta tillåtna SOC för batteriet. Energi under denna gräns är oanvändbar och räknas inte in i kvällsmålet."
       },
       "battery_max_soc": {
-        "name": "Batteri max SOC"
+        "name": "Batteri max SOC",
+        "description": "Högsta tillåtna SOC för batteriet. Reduceras automatiskt inför kommande negativpristimmar för att ha rum att absorbera."
       },
       "ev_soc_target": {
-        "name": "EV SOC-mål"
+        "name": "EV SOC-mål",
+        "description": "Bilens mål-SOC i procent. Laddningen stoppas automatiskt när bilen når detta värde."
       },
       "winter_cheap_threshold": {
-        "name": "Vinter billig priströskel"
+        "name": "Vinter billig priströskel",
+        "description": "Köppris (SEK/kWh) under vilket batteri och bil laddas från nätet i vinterläge."
       },
       "winter_expensive_threshold": {
-        "name": "Vinter dyr priströskel"
+        "name": "Vinter dyr priströskel",
+        "description": "Köppris (SEK/kWh) över vilket batteriet laddas ur för att täcka huslasten i vinterläge."
       },
       "winter_min_soc": {
-        "name": "Vinter min SOC"
+        "name": "Vinter min SOC",
+        "description": "Lägsta SOC batteriet får urladdas till i vinterläge. Skyddar mot att tömma batteriet under kalla nätter."
       },
       "winter_max_soc": {
-        "name": "Vinter max SOC"
+        "name": "Vinter max SOC",
+        "description": "Högsta SOC batteriet laddas till i vinterläge under billiga timmar."
+      },
+      "export_sell_percentile": {
+        "name": "Proaktiv export prispercentil",
+        "description": "Export triggas när säljpriset är ≥ denna percentil av dagens alla priser. 75 = topp 25 % dyraste timmarna."
+      },
+      "export_min_sell_price": {
+        "name": "Proaktiv export absolut minpris",
+        "description": "Export triggas även på enstaka slots under percentiltröskeln om priset är ≥ detta värde (SEK/kWh). Satt till 0 för att inaktivera."
       }
     },
     "select": {
       "operating_mode": {
-        "name": "Driftläge"
+        "name": "Driftläge",
+        "description": "Välj driftläge: auto = solöverskottsstyrt, winter = billigast-timmar-laddning, force_charge_ev/battery = tvångsladdning, manual = inga automatiska beslut."
       }
     }
   },

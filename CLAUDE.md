@@ -76,6 +76,8 @@ discharge_w = (sell_price / sum(remaining_high_slot_prices)) × exportable_kwh /
 ```
 Om imorgon bittis pris är 1,20 kr och kvällens är 0,80 kr allokeras proportionellt mer kWh till morgonen – utan att den totala exporterade volymen förändras. Fallback (utan Solcast-data) använder `solar_takeover_dt` som klipp. Fallback till jämn fördelning om prissumman är noll.
 
+**Absolut minimipris – trigger men inte dispatchfönster**: `export_min_sell_price_sek_kwh` (0,70 kr) fungerar som en extra trigger för enstaka slots under percentilen. Dispatchen (`_high_slots`) använder alltid percentiltröskeln, inte abs-minimum. Är det absoluta minimumet den enda orsaken till exporten och inga höga prisslots återstår i fönstret → `export_active = False`. Utan detta skulle `_effective_threshold = 0,70` skapa ett 8–10 timmar långt natt-fönster, batteri tömmes till min-SOC.
+
 ### Exportgolvets referenstid – låst till fönstrets start
 `_hours_dark` i exportgolvsberäkningen (`_export_floor_kwh = _hours_dark × last + 2 kWh`) räknas från den **tidigaste prisslotens starttid** (eller nu, om vi redan passerat den) fram till solar takeover – **inte från klockan nu**. Utan denna fix krymper golvet under hela exportfönstret (t.ex. 3.5h × 1.05 kW ≈ 3.7 kWh extra utrymme per kväll), vilket gör att systemet exporterar mer än planerat och batteriet når Sonnenbatteriets 20%-minimum innan solen tar över.
 

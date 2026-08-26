@@ -108,6 +108,7 @@ class EnergyPlanner:
         predicted_daily_kwh: float,
         solar_forecast_tomorrow_kwh: float,
         solar_takeover_dt: Optional[datetime],
+        house_load_w: float = 0.0,
     ) -> DayPlan:
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
@@ -115,14 +116,38 @@ class EnergyPlanner:
         batt_min_kwh = battery_capacity_kwh * self.battery_min_soc / 100.0
         batt_max_kwh = battery_capacity_kwh * self.battery_max_soc / 100.0
         batt_kwh     = battery_capacity_kwh * battery_soc_pct / 100.0
-        hourly_load_kw = max(0.3, (predicted_daily_kwh / 24.0) if predicted_daily_kwh > 0 else 1.0)
+        _daily_avg_w = (predicted_daily_kwh / 24.0 * 1000.0) if predicted_daily_kwh > 0 else 0.0
+        hourly_load_kw = min(max(_daily_avg_w, house_load_w, 500.0), 1500.0) / 1000.0
 
-        # Exportgolv: energi som batteriet måste hålla för att täcka natten
+        # Exportgolv slot-för-slot: Σ max(0, huslast − solar_kw) från nu till solar takeover.
+        # Speglar controllerns beräkning – morgon/kvällsramper bidrar med reducerat behov.
         takeover = solar_takeover_dt if (solar_takeover_dt and solar_takeover_dt > now_a) else now_a + timedelta(hours=9)
-        hours_dark = max(0.0, (takeover - now_a).total_seconds() / 3600.0)
-        export_floor_kwh = min(batt_max_kwh, hourly_load_kw * hours_dark + 2.0)
-        evening_target_soc = min(self.battery_max_soc, export_floor_kwh / battery_capacity_kwh * 100.0)
-        exportable_kwh = max(0.0, batt_kwh - export_floor_kwh)
+        takeover_local = takeover.astimezone()
+        _floor_slots = [s for s in (ps.slots or []) if s.end > now_a and s.start < takeover_local]
+        if _floor_slots:
+            export_floor_kwh = min(
+                batt_max_kwh,
+                sum(
+                    max(0.0, hourly_load_kw * (s.end - s.start).total_seconds() / 3600.0 - s.solar_kwh)
+                    for s in _floor_slots
+                ) + 2.0,
+            )
+        else:
+            export_floor_kwh = min(batt_max_kwh, hourly_load_kw * 9.0 + 2.0)
+        evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + export_floor_kwh / battery_capacity_kwh * 100.0)
+        # Användbar energi ovan min_soc – energin under batt_min_kwh kan aldrig nås.
+        exportable_kwh = max(0.0, batt_kwh - batt_min_kwh - export_floor_kwh)
+
+        # Nettosol imorgon slot-för-slot – speglar controllerns nettosolkontroll.
+        tomorrow_date = (now_a + timedelta(days=1)).date()
+        tomorrow_slots = [s for s in (ps.slots or []) if s.start.astimezone().date() == tomorrow_date]
+        net_solar_tomorrow_kwh = (
+            sum(
+                max(0.0, s.solar_kwh - hourly_load_kw * (s.end - s.start).total_seconds() / 3600.0)
+                for s in tomorrow_slots
+            ) if tomorrow_slots
+            else max(0.0, solar_forecast_tomorrow_kwh - hourly_load_kw * 13.0)
+        )
 
         future_slots = [
             s for s in (ps.slots or [])
@@ -144,7 +169,9 @@ class EnergyPlanner:
         export_threshold = sell_prices_sorted[
             min(int(self.export_sell_percentile * len(sell_prices_sorted)), len(sell_prices_sorted) - 1)
         ]
-        eff_threshold = min(export_threshold, self.export_min_sell_price) if self.export_min_sell_price > 0 else export_threshold
+        # Dispatch-fönstret använder alltid percentiltröskeln – abs-minimum är en trigger
+        # för enstaka slots, inte en licens att skapa ett natt-långt billig-pris-fönster.
+        eff_threshold = export_threshold
 
         # Export-slots: mörka, högt pris, inom 20h
         has_solar_data = any(s.solar_kw > 0 for s in future_slots)
@@ -158,13 +185,21 @@ class EnergyPlanner:
                  else s.start.astimezone() < takeover_local)
         ]
 
+        # Exportprisjämförelse: sälj bara om säljpriset för dessa slots täcker
+        # kommande dyra mörka slots (sell ≥ 90 % av max nattköppris i golvperioden).
+        _plan_floor_slots = [s for s in future_slots if s.end > now_a and s.start < takeover_local]
+        _max_night_buy_plan = max(
+            (s.buy_sek for s in _plan_floor_slots if s.solar_kw < _DARK_SOLAR_KW),
+            default=0.0,
+        )
+        # Filtrera bort export-slots vars säljpris understiger kvällstopp-tröskeln
+        if _max_night_buy_plan > 0:
+            high_slots = [s for s in high_slots if s.sell_sek >= _max_night_buy_plan * 0.9]
+
         # Prisväktad dispatch av exporterbara kWh
         export_plan: dict[datetime, float] = {}
         price_sum = sum(s.sell_sek for s in high_slots)
-        can_export = (
-            exportable_kwh > 0.1
-            and solar_forecast_tomorrow_kwh >= self.export_min_solar_tomorrow_kwh
-        )
+        can_export = exportable_kwh > 0.1 and net_solar_tomorrow_kwh >= export_floor_kwh
         if can_export and price_sum > 0:
             for s in high_slots:
                 slot_h = (s.end - s.start).total_seconds() / 3600.0
@@ -227,8 +262,18 @@ class EnergyPlanner:
                     action = "idle"
                     reason = f"sol {slot.solar_kw:.1f}kW → batteri fullt, sälj ({slot.sell_sek:.2f} kr)"
                 else:
-                    action = "cover_load"
-                    reason = f"sol {slot.solar_kw:.1f}kW täcker last {hourly_load_kw:.2f}kW"
+                    # Sol täcker inte lasten – självkonsumtion om batteri > golvet.
+                    deficit_kwh = load_kwh - solar_kwh
+                    avail_kwh = max(0.0, batt_kwh - batt_min_kwh - export_floor_kwh)
+                    if avail_kwh > 0.01:
+                        dis_kwh = min(deficit_kwh, avail_kwh, battery_max_power_kw * slot_h)
+                        batt_kwh -= dis_kwh
+                        power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
+                        action = "cover_load"
+                        reason = f"sol {slot.solar_kw:.1f}kW < last {hourly_load_kw:.2f}kW → batteri {-power_w:.0f}W"
+                    else:
+                        action = "cover_load"
+                        reason = f"sol {slot.solar_kw:.1f}kW < last {hourly_load_kw:.2f}kW → batteri vid golvet, nät"
 
             elif slot.start in cheap_set and batt_kwh < export_floor_kwh - 0.5:
                 needed = min(export_floor_kwh - batt_kwh, battery_max_power_kw * slot_h)
@@ -238,7 +283,25 @@ class EnergyPlanner:
                 reason = f"nätladda {slot.buy_sek:.2f} kr/kWh (gräns {cheap_threshold:.2f})"
 
             else:
-                reason = f"mörk idle sälj={slot.sell_sek:.2f}"
+                # Mörk slot utan export/nätladdning – självkonsumtion om batteri > golvet.
+                # Speglar controllerns morgonlogik: sänk effektivt golv med 80% av sol inom 2h.
+                deficit_kwh = max(0.0, load_kwh - solar_kwh)
+                _next_2h_solar_kwh = sum(
+                    s.solar_kw * (s.end - s.start).total_seconds() / 3600.0
+                    for s in future_slots
+                    if s.start >= slot.start and s.end <= slot.start + timedelta(hours=2) and s.solar_kw > 0
+                )
+                _eff_floor = max(0.0, export_floor_kwh - 0.8 * _next_2h_solar_kwh)
+                avail_kwh = max(0.0, batt_kwh - batt_min_kwh - _eff_floor)
+                if avail_kwh > 0.01 and deficit_kwh > 0.01:
+                    dis_kwh = min(deficit_kwh, avail_kwh, battery_max_power_kw * slot_h)
+                    batt_kwh -= dis_kwh
+                    power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
+                    action = "cover_load"
+                    solar_note = f" (sol {_next_2h_solar_kwh:.1f}kWh/2h)" if _next_2h_solar_kwh > 0.1 else ""
+                    reason = f"mörk: självkonsumtion {-power_w:.0f}W batteri kvar {batt_kwh:.1f}kWh{solar_note}"
+                else:
+                    reason = f"mörk idle: batteri vid golvet, nät täcker → sälj={slot.sell_sek:.2f}"
 
             planned.append(PlannedSlot(
                 start=slot.start.astimezone(),
@@ -253,7 +316,7 @@ class EnergyPlanner:
         morning_export = [s for s in planned if s.action == "export" and s.start.astimezone().date() > today_date]
         notes = (
             f"SOC {battery_soc_pct:.0f}% → {final_soc:.0f}% | "
-            f"golv {export_floor_kwh:.1f}kWh ({hours_dark:.1f}h mörker) | "
+            f"golv {export_floor_kwh:.1f}kWh netsol_imorgon {net_solar_tomorrow_kwh:.1f}kWh | "
             f"trösklar export≥{eff_threshold:.2f} nätladdning≤{cheap_threshold:.2f} | "
             f"morgonexport: {len(morning_export)} slots"
         )

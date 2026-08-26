@@ -97,6 +97,8 @@ async def async_setup_entry(
         DayPlanChargePowerSensor(coordinator, entry),
         DayPlanDischargePowerSensor(coordinator, entry),
         DayPlanReasonSensor(coordinator, entry),
+        PlanExecutorChargeSensor(coordinator, entry),
+        PlanExecutorDischargeSensor(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -1016,4 +1018,125 @@ class DayPlanReasonSensor(_DayPlanBase):
             "export_floor_kwh": round(plan.export_floor_kwh, 2),
             "evening_target_soc_pct": round(plan.evening_target_soc_pct, 1),
             "plan_generated_at": plan.generated_at.isoformat(),
+        }
+
+
+class PlanExecutorChargeSensor(_DayPlanBase):
+    """Skuggsetpoint: vad plan-executorn hade laddat med (W) om den styrde.
+
+    solar_charge → cappat mot faktiskt solöverskott (inte Solcast-prognos).
+    grid_charge  → planens target_power_w direkt.
+    Övriga       → 0 W.
+    """
+
+    _attr_unique_id = "sem_plan_executor_charge"
+    _attr_translation_key = "plan_executor_charge"
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:lightning-bolt-circle"
+
+    @property
+    def native_value(self) -> float:
+        s = self._current_slot()
+        if not s:
+            return 0.0
+        data = self.coordinator.data or {}
+        batt_max_w = float(data.get("battery_max_power_kw", 5.0)) * 1000.0
+        if s.action == "solar_charge":
+            surplus_w = float(data.get("solar_surplus_w", 0.0))
+            ev_w = float(data.get("ev_total_power_w", 0.0))
+            battery_surplus_w = max(0.0, surplus_w - ev_w)
+            # prefer_sell: controller exporterar sol istället för att ladda batteri
+            sell_price = float(data.get("sell_price", 0.0))
+            sell_min = float(data.get("sell_solar_min_price", 0.80))
+            batt_soc = float(data.get("battery_soc_pct", 100.0))
+            evening_target = float(data.get("evening_target_soc_pct", 30.0))
+            evening_fill = batt_soc < evening_target
+            prefer_sell = sell_price >= sell_min and not evening_fill
+            if prefer_sell:
+                return 0.0
+            return round(min(battery_surplus_w, batt_max_w), 0)
+        if s.action == "grid_charge":
+            return round(min(max(0.0, s.target_power_w), batt_max_w), 0)
+        return 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        s = self._current_slot()
+        data = self.coordinator.data or {}
+        surplus_w = float(data.get("solar_surplus_w", 0.0))
+        ev_w = float(data.get("ev_total_power_w", 0.0))
+        battery_surplus_w = max(0.0, surplus_w - ev_w)
+        sell_price = float(data.get("sell_price", 0.0))
+        sell_min = float(data.get("sell_solar_min_price", 0.80))
+        batt_soc = float(data.get("battery_soc_pct", 100.0))
+        evening_target = float(data.get("evening_target_soc_pct", 30.0))
+        evening_fill = batt_soc < evening_target
+        prefer_sell = sell_price >= sell_min and not evening_fill
+        plan_w = round(max(0.0, s.target_power_w), 0) if s else 0.0
+        return {
+            "plan_power_w": plan_w,
+            "actual_surplus_w": round(surplus_w, 0),
+            "ev_total_power_w": round(ev_w, 0),
+            "battery_surplus_w": round(battery_surplus_w, 0),
+            "prefer_sell": prefer_sell,
+            "evening_fill": evening_fill,
+            "sell_price": round(sell_price, 3),
+            "sell_solar_min_price": round(sell_min, 3),
+            "capped": s is not None and s.action == "solar_charge" and not prefer_sell and battery_surplus_w < plan_w,
+            "action": s.action if s else "unknown",
+        }
+
+
+class PlanExecutorDischargeSensor(_DayPlanBase):
+    """Skuggsetpoint: vad plan-executorn hade laddat ur med (W) om den styrde.
+
+    export        → planens prisväktade dispatch-effekt (target_power_w abs).
+    idle/cover_load → husets underskott (house_load_w − solar_surplus_w) capped mot batt_max.
+    Övriga (solar_charge, grid_charge) → 0 W.
+    """
+
+    _attr_unique_id = "sem_plan_executor_discharge"
+    _attr_translation_key = "plan_executor_discharge"
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:lightning-bolt-outline"
+
+    @property
+    def native_value(self) -> float:
+        s = self._current_slot()
+        data = self.coordinator.data or {}
+        batt_max_w = float(data.get("battery_max_power_kw", 5.0)) * 1000.0
+        battery_soc = float(data.get("battery_soc_pct", 100.0))
+        battery_min_soc = float(data.get("battery_min_soc", 20.0))
+        house_load_w = float(data.get("house_load_w", 0.0))
+        solar_w = float(data.get("solar_power_w", 0.0))
+        house_deficit_w = max(0.0, house_load_w - solar_w)
+        if not s or s.action in ("solar_charge", "grid_charge"):
+            return 0.0
+        if battery_soc <= battery_min_soc:
+            return 0.0
+        evening_target = float(data.get("evening_target_soc_pct", battery_min_soc))
+        if battery_soc <= evening_target:
+            return 0.0
+        if s.action == "export":
+            # Totalt urladdningsbehov: netto-export + husets underskott
+            return round(min(abs(s.target_power_w) + house_deficit_w, batt_max_w), 0)
+        # idle / cover_load: bara husets underskott
+        return round(min(house_deficit_w, batt_max_w), 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        s = self._current_slot()
+        data = self.coordinator.data or {}
+        house_load_w = float(data.get("house_load_w", 0.0))
+        solar_w = float(data.get("solar_power_w", 0.0))
+        return {
+            "action": s.action if s else "unknown",
+            "net_export_w": round(abs(s.target_power_w), 0) if s else 0.0,
+            "house_deficit_w": round(max(0.0, house_load_w - solar_w), 0),
+            "house_load_w": round(house_load_w, 0),
+            "solar_power_w": round(solar_w, 0),
         }

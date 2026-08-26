@@ -370,48 +370,74 @@
       },
       "day_plan_reason": {
         "name": "Plan: reason"
+      },
+      "plan_executor_charge": {
+        "name": "Plan executor: charge"
+      },
+      "plan_executor_discharge": {
+        "name": "Plan executor: discharge"
       }
     },
     "switch": {
       "force_ev_charge": {
-        "name": "Force EV Charge from Grid"
+        "name": "Force EV Charge from Grid",
+        "description": "Forces the EV to charge regardless of solar surplus or price. Automatically turns off when the EV SOC target is reached."
       },
       "winter_mode": {
-        "name": "Winter Mode"
+        "name": "Winter Mode",
+        "description": "Enables winter mode: battery charges from the grid during cheap hours and discharges during expensive hours."
       },
       "force_charge_battery": {
-        "name": "Force Charge Battery from Grid"
+        "name": "Force Charge Battery from Grid",
+        "description": "Forces the battery to charge from the grid regardless of price. Use manually to quickly top up the battery."
       },
       "opportunistic_charge": {
-        "name": "Opportunistic Grid Charge"
+        "name": "Opportunistic Grid Charge",
+        "description": "Charges the battery from the grid when the buy price is below the cheap price threshold, even outside winter mode."
       }
     },
     "number": {
       "battery_min_soc": {
-        "name": "Battery Min SOC"
+        "name": "Battery Min SOC",
+        "description": "Lowest allowed battery SOC. Energy below this threshold is unusable and is excluded from the evening target calculation."
       },
       "battery_max_soc": {
-        "name": "Battery Max SOC"
+        "name": "Battery Max SOC",
+        "description": "Highest allowed battery SOC. Automatically reduced before upcoming negative-price slots to make room for absorption."
       },
       "ev_soc_target": {
-        "name": "EV SOC Target"
+        "name": "EV SOC Target",
+        "description": "Target SOC percentage for the EV. Charging stops automatically when the car reaches this value."
       },
       "winter_cheap_threshold": {
-        "name": "Winter Cheap Price Threshold"
+        "name": "Winter Cheap Price Threshold",
+        "description": "Buy price (SEK/kWh) below which the battery and EV are charged from the grid in winter mode."
       },
       "winter_expensive_threshold": {
-        "name": "Winter Expensive Price Threshold"
+        "name": "Winter Expensive Price Threshold",
+        "description": "Buy price (SEK/kWh) above which the battery is discharged to cover house load in winter mode."
       },
       "winter_min_soc": {
-        "name": "Winter Min SOC"
+        "name": "Winter Min SOC",
+        "description": "Lowest SOC the battery may be discharged to in winter mode. Protects against draining the battery on cold nights."
       },
       "winter_max_soc": {
-        "name": "Winter Max SOC"
+        "name": "Winter Max SOC",
+        "description": "Highest SOC the battery charges to during cheap hours in winter mode."
+      },
+      "export_sell_percentile": {
+        "name": "Proactive Export Price Percentile",
+        "description": "Export triggers when the sell price is ≥ this percentile of today's prices. 75 = top 25% most expensive hours."
+      },
+      "export_min_sell_price": {
+        "name": "Proactive Export Absolute Min Price",
+        "description": "Export also triggers on individual slots below the percentile threshold if the price is ≥ this value (SEK/kWh). Set to 0 to disable."
       }
     },
     "select": {
       "operating_mode": {
-        "name": "Operating Mode"
+        "name": "Operating Mode",
+        "description": "Choose operating mode: auto = solar-surplus driven, winter = cheapest-hour charging, force_charge_ev/battery = forced charging, manual = no automatic decisions."
       }
     }
   },

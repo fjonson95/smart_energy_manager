@@ -841,6 +841,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             predicted_daily_kwh=state.predicted_daily_kwh,
                             solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
                             solar_takeover_dt=state.solar_takeover_dt,
+                            house_load_w=state.house_load_w,
                         )
                         self._last_plan_ps_sig = ps_sig
                         _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)
@@ -854,7 +855,14 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             if self._day_plan:
                 plan_slot = self._day_plan.slot_at(now)
                 if plan_slot:
-                    ctrl_export = decision.battery_discharge_power_w > 100
+                    # ctrl_export = aktivt nät-export (urladdning markant över huslasten).
+                    # Ren husbehovstäckning (urladdning ≈ husunderskott) räknas som idle
+                    # för planjämförelsen – annars skapas falskt AVVIKELSE på natten.
+                    _house_load_w = state.house_load_w or 500
+                    ctrl_export = (
+                        decision.battery_discharge_power_w > 100
+                        and decision.battery_discharge_power_w > _house_load_w + 200
+                    )
                     ctrl_charge = decision.battery_charge_power_w > 100
                     ctrl_idle   = not ctrl_export and not ctrl_charge
 
@@ -913,7 +921,15 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "sell_price": sell_price,
                 "spot_price": spot_price,
                 "house_load_w": house_load_w,
+                "solar_power_w": solar_w,
                 "solar_surplus_w": solar_surplus_w,
+                "ev_total_power_w": sum(ch.power_w for ch in state.chargers),
+                "battery_soc_pct": state.battery_soc_pct,
+                "battery_min_soc": float(c.get(CONF_BATTERY_MIN_SOC, 20)),
+                "sell_solar_min_price": self._controller.sell_solar_min_price,
+                "evening_target_soc_pct": decision.evening_target_soc if decision.evening_target_soc > 0 else (
+                    self._day_plan.evening_target_soc_pct if self._day_plan else 30.0
+                ),
                 "legionella_active": legionella_active,
                 "legionella_last_run": self._legionella.last_run,
                 "legionella_days_since": self._legionella.days_since_last_run,
