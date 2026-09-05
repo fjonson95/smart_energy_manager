@@ -1,3 +1,22 @@
 __pycache__/
 *.pyc
 .claude/
+
+# Diverse skärmdumpar/bilder som hamnat i repo-roten av misstag
+ChatGPT Image*.png
+Controller.png
+IVT värmekrets.png
+trast.png
+trast2.png
+
+# Genererade backtest-resultat (regenereras med testdata/backtest.py)
+backtest_result.csv
+results.csv
+testdata/backtest_result.csv
+
+# Manuella textdumpar från felsökning
+custom_components/Forcast Today.txt
+custom_components/Forecast Tomorrow.txt
+testdata/Current Setting.txt
+testdata/Sensor Attributes.txt
+testdata/TestRun.txt

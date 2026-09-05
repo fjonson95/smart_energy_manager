@@ -9,6 +9,7 @@
  *   active_car_sensor: select.sem_charger_garage_active_car    # "unknown" = no car selected
  *   power_sensor: sensor.sem_charger_garage_power              # W or kW
  *   power_unit: W        # W (default) or kW
+ *   battery_soc_sensor: sensor.my_battery_soc                  # optional – SOC in % (0-100)
  */
 
 class SemChargerCard extends HTMLElement {
@@ -35,6 +36,7 @@ class SemChargerCard extends HTMLElement {
   }
 
   _render() {
+    const hasBatt = !!(this._config && this._config.battery_soc_sensor);
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -127,6 +129,31 @@ class SemChargerCard extends HTMLElement {
           outline: 2px solid var(--primary-color);
           outline-offset: 1px;
         }
+        /* Batteri SOC-stapel (vertikal) */
+        .batt-side {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 5px;
+          min-width: 28px;
+        }
+        .batt-bar-track {
+          width: 10px;
+          height: 48px;
+          background: var(--divider-color, #e0e0e0);
+          border-radius: 5px;
+          overflow: hidden;
+          display: flex;
+          align-items: flex-end;
+        }
+        .batt-bar-fill {
+          width: 100%;
+          border-radius: 5px;
+          background: var(--success-color, #4caf50);
+          transition: height 0.6s ease, background 0.3s;
+        }
+        .batt-bar-fill.warn { background: #ff9800; }
+        .batt-bar-fill.crit { background: var(--error-color, #f44336); }
       </style>
 
       <ha-card>
@@ -145,6 +172,14 @@ class SemChargerCard extends HTMLElement {
           <ha-icon class="side-icon" id="car-icon" icon="mdi:car-electric"></ha-icon>
           <span class="side-label" id="car-label">–</span>
         </div>
+
+        ${hasBatt ? `
+        <div class="batt-side" id="batt-side">
+          <div class="batt-bar-track">
+            <div class="batt-bar-fill" id="batt-fill" style="height:0%"></div>
+          </div>
+          <span class="side-label" id="batt-label">–</span>
+        </div>` : ""}
       </ha-card>
     `;
   }
@@ -248,6 +283,25 @@ class SemChargerCard extends HTMLElement {
       carLbl.className  = "side-label";
       carLbl.textContent = "Ingen bil";
     }
+
+    // ── Ytterst höger: husbatteriets SOC-stapel ──────────────────────
+    const battFill  = this.shadowRoot.getElementById("batt-fill");
+    const battLabel = this.shadowRoot.getElementById("batt-label");
+    if (battFill && battLabel && cfg.battery_soc_sensor) {
+      const battState = h.states[cfg.battery_soc_sensor];
+      const soc = battState && battState.state !== "unavailable"
+        ? Math.min(100, Math.max(0, parseFloat(battState.state) || 0))
+        : null;
+      if (soc !== null) {
+        battFill.style.height = soc + "%";
+        battFill.className = "batt-bar-fill" +
+          (soc < 25 ? " crit" : soc < 70 ? " warn" : "");
+        battLabel.textContent = Math.round(soc) + "%";
+      } else {
+        battFill.style.height = "0%";
+        battLabel.textContent = "–";
+      }
+    }
   }
 
   _onSelectCar(e) {
@@ -268,6 +322,7 @@ class SemChargerCard extends HTMLElement {
       active_car_sensor: "",
       power_sensor: "",
       power_unit: "W",
+      battery_soc_sensor: "",
     };
   }
 }
@@ -278,6 +333,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "sem-charger-card",
   name: "SEM Charger Card",
-  description: "Visar anslutning, laddeffekt och aktiv bil för Smart Energy Manager.",
+  description: "Visar anslutning, laddeffekt, aktiv bil och valfri husbatteri-SOC för Smart Energy Manager.",
   preview: true,
 });

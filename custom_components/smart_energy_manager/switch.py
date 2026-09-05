@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MODE_AUTO, MODE_FORCE_CHARGE_EV, MODE_FORCE_CHARGE_BATTERY, MODE_WINTER
+from .const import DOMAIN, MODE_AUTO, MODE_FORCE_CHARGE_EV, MODE_FORCE_CHARGE_BATTERY
 from .coordinator import SmartEnergyCoordinator
 
 
@@ -19,7 +19,6 @@ async def async_setup_entry(
     coordinator: SmartEnergyCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([
         ForceEVChargeSwitch(coordinator, entry),
-        WinterModeSwitch(coordinator, entry),
         ForceChargeBatterySwitch(coordinator, entry),
         OpportunisticChargeSwitch(coordinator, entry),
     ])
@@ -54,27 +53,6 @@ class ForceEVChargeSwitch(_BaseSEMSwitch):
 
     async def async_turn_on(self, **kwargs) -> None:
         self.coordinator.operating_mode = MODE_FORCE_CHARGE_EV
-        await self.coordinator.async_request_refresh()
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs) -> None:
-        self.coordinator.operating_mode = MODE_AUTO
-        await self.coordinator.async_request_refresh()
-        self.async_write_ha_state()
-
-
-class WinterModeSwitch(_BaseSEMSwitch):
-    """Enable winter mode (charge cheap / discharge expensive)."""
-    _attr_unique_id = "sem_winter_mode"
-    _attr_translation_key = "winter_mode"
-    _attr_icon = "mdi:snowflake"
-
-    @property
-    def is_on(self) -> bool:
-        return self.coordinator.operating_mode == MODE_WINTER
-
-    async def async_turn_on(self, **kwargs) -> None:
-        self.coordinator.operating_mode = MODE_WINTER
         await self.coordinator.async_request_refresh()
         self.async_write_ha_state()
 

@@ -13,6 +13,7 @@
           "grid_current_l2_entity": "Grid current L2",
           "grid_current_l3_entity": "Grid current L3",
           "max_current_per_phase": "Max current per phase (A)",
+          "max_export_w": "Inverter max export power (W)",
           "grid_voltage": "Grid voltage (V)",
           "grid_fees_sek_kwh": "Grid fees (SEK/kWh)",
           "energy_tax_sek_kwh": "Energy tax (SEK/kWh)",
@@ -37,7 +38,8 @@
           "solar_power_l2_entity": "Solar power L2",
           "solar_power_l3_entity": "Solar power L3",
           "solcast_today_entity": "Solcast forecast today (kWh)",
-          "solcast_tomorrow_entity": "Solcast forecast tomorrow (kWh)"
+          "solcast_tomorrow_entity": "Solcast forecast tomorrow (kWh)",
+          "actual_solar_daily_entity": "Actual solar production today (kWh, resets at midnight) – for snow/soiling detection"
         }
       },
       "battery": {
@@ -48,6 +50,7 @@
           "battery_inverter_power_entity": "Battery power (W)",
           "battery_inverter_charge_entity": "Charge setpoint",
           "battery_inverter_discharge_entity": "Discharge setpoint",
+          "battery_operating_mode_entity": "Battery operating mode (select) – warns if not set to \"manual\"",
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "battery_max_power_kw": "Max power (kW)",
           "battery_min_soc": "Min SOC (%)",
@@ -55,6 +58,8 @@
           "export_sell_percentile": "Proactive export: price percentile (0.75 = top 25%)",
           "export_min_solar_tomorrow_kwh": "Proactive export: min Solcast tomorrow (kWh)",
           "export_min_sell_price_sek_kwh": "Proactive export: absolute minimum sell price (SEK/kWh, 0 = disabled)",
+          "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
+          "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
           "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
         }
       },
@@ -144,6 +149,7 @@
           "grid_current_l2_entity": "Grid current L2",
           "grid_current_l3_entity": "Grid current L3",
           "max_current_per_phase": "Max current per phase (A)",
+          "max_export_w": "Inverter max export power (W)",
           "grid_voltage": "Grid voltage (V)",
           "grid_fees_sek_kwh": "Grid fees (SEK/kWh)",
           "energy_tax_sek_kwh": "Energy tax (SEK/kWh)",
@@ -168,7 +174,8 @@
           "solar_power_l2_entity": "Solar power L2",
           "solar_power_l3_entity": "Solar power L3",
           "solcast_today_entity": "Solcast forecast today (kWh)",
-          "solcast_tomorrow_entity": "Solcast forecast tomorrow (kWh)"
+          "solcast_tomorrow_entity": "Solcast forecast tomorrow (kWh)",
+          "actual_solar_daily_entity": "Actual solar production today (kWh, resets at midnight) – for snow/soiling detection"
         }
       },
       "battery_opts": {
@@ -179,6 +186,7 @@
           "battery_inverter_power_entity": "Battery power (W)",
           "battery_inverter_charge_entity": "Charge setpoint",
           "battery_inverter_discharge_entity": "Discharge setpoint",
+          "battery_operating_mode_entity": "Battery operating mode (select) – warns if not set to \"manual\"",
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "battery_max_power_kw": "Max power (kW)",
           "battery_min_soc": "Min SOC (%)",
@@ -186,6 +194,8 @@
           "export_sell_percentile": "Proactive export: price percentile (0.75 = top 25%)",
           "export_min_solar_tomorrow_kwh": "Proactive export: min Solcast tomorrow (kWh)",
           "export_min_sell_price_sek_kwh": "Proactive export: absolute minimum sell price (SEK/kWh, 0 = disabled)",
+          "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
+          "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
           "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
         }
       },
@@ -335,6 +345,9 @@
       "solar_next_4h": {
         "name": "Solar Forecast Next 4h"
       },
+      "pv_production_ratio": {
+        "name": "Production Ratio (3-day)"
+      },
       "solar_next_8h": {
         "name": "Solar Forecast Next 8h"
       },
@@ -383,17 +396,13 @@
         "name": "Force EV Charge from Grid",
         "description": "Forces the EV to charge regardless of solar surplus or price. Automatically turns off when the EV SOC target is reached."
       },
-      "winter_mode": {
-        "name": "Winter Mode",
-        "description": "Enables winter mode: battery charges from the grid during cheap hours and discharges during expensive hours."
-      },
       "force_charge_battery": {
         "name": "Force Charge Battery from Grid",
         "description": "Forces the battery to charge from the grid regardless of price. Use manually to quickly top up the battery."
       },
       "opportunistic_charge": {
         "name": "Opportunistic Grid Charge",
-        "description": "Charges the battery from the grid when the buy price is below the cheap price threshold, even outside winter mode."
+        "description": "Charges the battery from the grid when the buy price is below the cheap price threshold."
       }
     },
     "number": {
@@ -404,26 +413,6 @@
       "battery_max_soc": {
         "name": "Battery Max SOC",
         "description": "Highest allowed battery SOC. Automatically reduced before upcoming negative-price slots to make room for absorption."
-      },
-      "ev_soc_target": {
-        "name": "EV SOC Target",
-        "description": "Target SOC percentage for the EV. Charging stops automatically when the car reaches this value."
-      },
-      "winter_cheap_threshold": {
-        "name": "Winter Cheap Price Threshold",
-        "description": "Buy price (SEK/kWh) below which the battery and EV are charged from the grid in winter mode."
-      },
-      "winter_expensive_threshold": {
-        "name": "Winter Expensive Price Threshold",
-        "description": "Buy price (SEK/kWh) above which the battery is discharged to cover house load in winter mode."
-      },
-      "winter_min_soc": {
-        "name": "Winter Min SOC",
-        "description": "Lowest SOC the battery may be discharged to in winter mode. Protects against draining the battery on cold nights."
-      },
-      "winter_max_soc": {
-        "name": "Winter Max SOC",
-        "description": "Highest SOC the battery charges to during cheap hours in winter mode."
       },
       "export_sell_percentile": {
         "name": "Proactive Export Price Percentile",
@@ -437,7 +426,13 @@
     "select": {
       "operating_mode": {
         "name": "Operating Mode",
-        "description": "Choose operating mode: auto = solar-surplus driven, winter = cheapest-hour charging, force_charge_ev/battery = forced charging, manual = no automatic decisions."
+        "description": "Choose operating mode: auto = solar-surplus driven (percentile-based cheap/expensive hour logic included), force_charge_ev/battery = forced charging, manual = no automatic decisions."
+      },
+      "active_car": {
+        "name": "Active Car",
+        "state": {
+          "none": "No car selected"
+        }
       }
     }
   },

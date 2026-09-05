@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -9,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_HOT_WATER_TEMP_ENTITY, CONF_LEGIONELLA_SWITCH,
@@ -18,6 +20,7 @@ from .const import (
     DEFAULT_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
     DOMAIN, UPDATE_INTERVAL,
     CONF_BATTERY_SOC, CONF_BATTERY_INVERTER_CHARGE, CONF_BATTERY_INVERTER_DISCHARGE,
+    CONF_BATTERY_OPERATING_MODE_ENTITY,
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
     CONF_SOLAR_INVERTER_TOTAL,
     CONF_SOLAR_INVERTER_POWER_L1, CONF_SOLAR_INVERTER_POWER_L2, CONF_SOLAR_INVERTER_POWER_L3,
@@ -28,20 +31,15 @@ from .const import (
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
     CONF_NORDPOOL_ENTITY, CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS, NORDPOOL_TYPE_OFFICIAL,
     CONF_NORDPOOL_AREA, DEFAULT_NORDPOOL_AREA,
-    CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW,
+    CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW, CONF_ACTUAL_SOLAR_DAILY_ENTITY,
     CONF_GRID_FEES, CONF_ENERGY_TAX, CONF_VAT_RATE, CONF_SELL_EXTRA_REVENUE,
-    CONF_MAX_CURRENT_PER_PHASE, CONF_GRID_VOLTAGE,
+    CONF_MAX_CURRENT_PER_PHASE, CONF_GRID_VOLTAGE, CONF_MAX_EXPORT_W, DEFAULT_MAX_EXPORT_W,
     CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC,
-    CONF_WINTER_MODE_ENABLED,
-    CONF_WINTER_CHEAP_HOUR_THRESHOLD, CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD,
-    CONF_WINTER_MIN_SOC, CONF_WINTER_MAX_SOC,
     CONF_HOUSE_LOAD_ENTITY, CONF_GRID_POWER_UNIT, CONF_EV_POWER_UNIT,
     UNIT_W, UNIT_KW,
     DEFAULT_MAX_CURRENT, DEFAULT_GRID_VOLTAGE, DEFAULT_VAT_RATE,
     DEFAULT_GRID_FEES, DEFAULT_ENERGY_TAX, DEFAULT_SELL_EXTRA_REVENUE,
     DEFAULT_BATTERY_MIN_SOC, DEFAULT_BATTERY_MAX_SOC,
-    DEFAULT_WINTER_CHEAP_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD,
-    DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     CHARGER_CONNECTED_STATES, NO_CAR_SELECTED,
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
@@ -53,6 +51,7 @@ from .const import (
     CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, CONF_BATTERY_POWER_INVERTED,
     CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH,
     DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
+    CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
     MODE_AUTO,
 )
 from .price_scheduler import PriceScheduler
@@ -64,6 +63,11 @@ from .energy_planner import EnergyPlanner, DayPlan
 from .legionella import LegionellaManager
 
 _LOGGER = logging.getLogger(__name__)
+
+# P6-1: dödband på tjänsteanrop – skriv bara vid förändring, men aldrig glesare
+# än HEARTBEAT_INTERVAL (självläkning om en skrivning tappas bort, P0-2).
+_HEARTBEAT_INTERVAL = timedelta(minutes=5)
+_POWER_DEADBAND_W = 50.0
 
 
 def _migrate_ev_cars_to_chargers(ev_cars: list[dict]) -> list[dict]:
@@ -126,6 +130,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             export_sell_percentile=float(self._config.get(CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE)),
             export_min_sell_price_sek_kwh=float(self._config.get(CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH)),
             export_min_solar_tomorrow_kwh=float(self._config.get(CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH)),
+            eta_roundtrip=float(self._config.get(CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP)),
+            cycle_cost_sek_kwh=float(self._config.get(CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)),
         )
         self._day_plan: Optional[DayPlan] = None
         self._last_plan_ps_sig: tuple = (0, None, None)
@@ -138,6 +144,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # Vakthund: när laddning beordrades (bil vald) men ingen effekt syns ännu
         # charger_name → tidpunkt då laddning startades utan ström
         self._charge_command_times: dict[str, datetime] = {}
+
+        # Rullande median (3-5 sampel) av house_load_entity – dämpar mätarglapp
+        # när batteriet byter laddningsriktning.
+        self._house_load_samples: list[float] = []
 
         # Rullande temperaturmedelvärde för förbrukningsprognos
         # Modellen är kalibrerad mot dygnsmedeltemperatur, inte ögonblicksvärde
@@ -169,6 +179,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._surplus_positive_since: Optional[datetime] = None
         self._takeover_observed_today: bool = False
 
+        # Varning om batteriets egna driftläge inte står på "manual" – då är
+        # alla börvärden SEM skriver verkningslösa utan att något syns.
+        self._battery_mode_warning_active: bool = False
+
+        # Produktionskvot (P3-2): rullande 3-dygns kvot faktisk/prognos
+        # solproduktion – upptäcker snötäckta/nedsmutsade paneler som
+        # Solcast-prognosen inte känner till. Sparas i HA Store.
+        self._pv_ratio_store = Store(hass, 1, f"{DOMAIN}_pv_ratio")
+        self._pv_ratio_history: list[dict] = []   # senaste 3 dygn: [{date, actual_kwh, forecast_kwh}]
+        self._pv_ratio_date: str = ""
+        self._pv_today_forecast_kwh: Optional[float] = None
+        self._pv_last_actual_reading: float = 0.0
+
+        # P6-1: senaste skrivningstidpunkt per entitet, för dödband + heartbeat.
+        self._last_write_times: dict[str, datetime] = {}
+
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
         chargers = self._get_charger_configs()
@@ -190,7 +216,72 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     async def async_config_entry_first_refresh(self):
         await self._legionella.async_load()
         await self._load_takeover_store()
+        await self._load_pv_ratio_store()
         await super().async_config_entry_first_refresh()
+
+    async def _load_pv_ratio_store(self) -> None:
+        data = await self._pv_ratio_store.async_load()
+        if isinstance(data, dict):
+            self._pv_ratio_history = data.get("history", [])
+            self._pv_today_forecast_kwh = data.get("today_forecast_kwh")
+            self._pv_ratio_date = data.get("ratio_date", "")
+
+    async def _save_pv_ratio_store(self) -> None:
+        await self._pv_ratio_store.async_save({
+            "history": self._pv_ratio_history,
+            "today_forecast_kwh": self._pv_today_forecast_kwh,
+            "ratio_date": self._pv_ratio_date,
+        })
+
+    def _update_pv_production_ratio(self, now: datetime, solar_forecast_today_kwh: float) -> float:
+        """P3-2: rullande 3-dygns kvot faktisk/prognos solproduktion.
+
+        Källor: actual_solar_daily_entity (nollställs vid midnatt) mot Solcasts
+        prognos för samma dygn, fångad EN gång tidigt på dygnet (innan
+        produktion hunnit äta av "remaining"-värdet). Kvot < 0,6 → golvet
+        (build_plan) höjs mot full nattautonomi via _uncertainty_markup().
+        """
+        actual_entity = self._config.get(CONF_ACTUAL_SOLAR_DAILY_ENTITY)
+        if not actual_entity:
+            return 1.0
+
+        current_actual = self._get_state_float(actual_entity)
+        today_str = now.strftime("%Y-%m-%d")
+
+        if today_str != self._pv_ratio_date:
+            # Nytt dygn – gårdagens slutvärde är det SENAST SAMPLADE (från
+            # föregående cykel), eftersom current_actual redan kan ha
+            # nollställts för det nya dygnet av källsensorn.
+            if (
+                self._pv_ratio_date
+                and self._pv_today_forecast_kwh is not None
+                and self._pv_last_actual_reading > 0
+            ):
+                self._pv_ratio_history.append({
+                    "date": self._pv_ratio_date,
+                    "actual_kwh": self._pv_last_actual_reading,
+                    "forecast_kwh": self._pv_today_forecast_kwh,
+                })
+                self._pv_ratio_history = self._pv_ratio_history[-3:]
+                self.hass.async_create_task(self._save_pv_ratio_store())
+                _LOGGER.info(
+                    "Produktionskvot: %s faktisk=%.1f kWh prognos=%.1f kWh",
+                    self._pv_ratio_date, self._pv_last_actual_reading, self._pv_today_forecast_kwh,
+                )
+            self._pv_ratio_date = today_str
+            self._pv_today_forecast_kwh = None
+
+        if self._pv_today_forecast_kwh is None and solar_forecast_today_kwh > 0:
+            self._pv_today_forecast_kwh = solar_forecast_today_kwh
+            self.hass.async_create_task(self._save_pv_ratio_store())
+
+        self._pv_last_actual_reading = current_actual
+
+        if not self._pv_ratio_history:
+            return 1.0
+        total_actual = sum(h["actual_kwh"] for h in self._pv_ratio_history)
+        total_forecast = sum(h["forecast_kwh"] for h in self._pv_ratio_history)
+        return total_actual / total_forecast if total_forecast > 0 else 1.0
 
     async def _load_takeover_store(self) -> None:
         data = await self._takeover_store.async_load()
@@ -198,7 +289,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             obs = data.get("observations", [])
             self._observed_takeover_minutes = [float(v) for v in obs if isinstance(v, (int, float))]
             last_date = data.get("last_obs_date", "")
-            if last_date == datetime.now().astimezone().strftime("%Y-%m-%d"):
+            if last_date == dt_util.now().strftime("%Y-%m-%d"):
                 self._takeover_observed_today = True
         elif isinstance(data, list):
             self._observed_takeover_minutes = [float(v) for v in data if isinstance(v, (int, float))]
@@ -206,7 +297,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     async def _save_takeover_store(self) -> None:
         await self._takeover_store.async_save({
             "observations": self._observed_takeover_minutes,
-            "last_obs_date": datetime.now().astimezone().strftime("%Y-%m-%d"),
+            "last_obs_date": dt_util.now().strftime("%Y-%m-%d"),
         })
 
     def _weighted_observed_minutes(self) -> Optional[float]:
@@ -243,7 +334,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             blended_min = obs_min
 
         # Bygg datetime för imorgon (om blended_min är i det förflutna idag) eller idag
-        local_now = datetime.now().astimezone()
+        local_now = dt_util.now()
         midnight_today = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
         candidate = midnight_today + timedelta(minutes=blended_min)
         if candidate <= local_now:
@@ -255,15 +346,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         return EnergyController(
             max_current_per_phase=float(c.get(CONF_MAX_CURRENT_PER_PHASE, DEFAULT_MAX_CURRENT)),
             grid_voltage=float(c.get(CONF_GRID_VOLTAGE, DEFAULT_GRID_VOLTAGE)),
+            max_export_w=float(c.get(CONF_MAX_EXPORT_W, DEFAULT_MAX_EXPORT_W)),
             battery_min_soc=float(c.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
             battery_max_soc=float(c.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)),
-            winter_cheap_threshold=float(c.get(CONF_WINTER_CHEAP_HOUR_THRESHOLD, DEFAULT_WINTER_CHEAP_THRESHOLD)),
-            winter_expensive_threshold=float(c.get(CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD)),
-            winter_min_soc=float(c.get(CONF_WINTER_MIN_SOC, DEFAULT_WINTER_MIN_SOC)),
-            winter_max_soc=float(c.get(CONF_WINTER_MAX_SOC, DEFAULT_WINTER_MAX_SOC)),
-            export_sell_percentile=float(c.get(CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE)),
-            export_min_solar_tomorrow_kwh=float(c.get(CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH)),
-            export_min_sell_price_sek_kwh=float(c.get(CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH)),
         )
 
     # ── Avläsningshjälpare ────────────────────────────────────────────
@@ -285,6 +370,17 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         state = self.hass.states.get(entity_id)
         if state is None:
             return False
+        return state.state.lower() in ("on", "true", "1", "home", "charging")
+
+    def _get_state_tristate(self, entity_id: Optional[str]) -> Optional[bool]:
+        """Som _get_state_bool, men returnerar None vid unavailable/unknown istället
+        för att tolka det som av. Används där ett tillfälligt kommunikationsglapp
+        inte får misstolkas som en riktig av-övergång (t.ex. legionella-switchen)."""
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unavailable", "unknown"):
+            return None
         return state.state.lower() in ("on", "true", "1", "home", "charging")
 
     def _get_sun_datetime(self, attribute: str) -> Optional[datetime]:
@@ -406,8 +502,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 )
                 if prev_charger_enabled and power_w < 50.0:
                     if cfg.name not in self._charge_command_times:
-                        self._charge_command_times[cfg.name] = datetime.now()
-                    elif (datetime.now() - self._charge_command_times[cfg.name]).total_seconds() >= 300:
+                        self._charge_command_times[cfg.name] = dt_util.now()
+                    elif (dt_util.now() - self._charge_command_times[cfg.name]).total_seconds() >= 300:
                         _LOGGER.warning(
                             "Laddare '%s': laddning beordrad i >5 min utan ström (%.0f W) – återställer bilval",
                             cfg.name, power_w,
@@ -432,16 +528,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
         return result
 
-    def _get_house_load_w(self, grid_l1, grid_l2, grid_l3, solar_w, battery_power_w, ev_total_w) -> float:
+    def _get_house_load_w(self, grid_l1, grid_l2, grid_l3, solar_w, battery_power_w, ev_total_w) -> tuple[float, bool]:
+        """Returnerar (huslast_w, from_sensor). from_sensor=True innebär att en
+        riktig mätarläsning (median-filtrerad) användes – golvskyddet mot gårdagens
+        snitt ska då INTE tillämpas, bara när vi föll tillbaka på energibalansformeln."""
         house_entity = self._config.get(CONF_HOUSE_LOAD_ENTITY)
         if house_entity:
-            val = self._get_state_float(house_entity)
+            val = self._get_state_float(house_entity, default=-1.0)
             if val > 0:
-                return val
+                self._house_load_samples.append(val)
+                if len(self._house_load_samples) > 5:
+                    self._house_load_samples = self._house_load_samples[-5:]
+                return statistics.median(self._house_load_samples), True
         grid_total = grid_l1 + grid_l2 + grid_l3
         bat_charge    = max(0.0,  battery_power_w)
         bat_discharge = max(0.0, -battery_power_w)
-        return max(0.0, grid_total + solar_w - bat_discharge + bat_charge - ev_total_w)
+        return max(0.0, grid_total + solar_w - bat_discharge + bat_charge - ev_total_w), False
 
     # ── Bilval ────────────────────────────────────────────────────────
 
@@ -481,7 +583,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
         entry_id = entries[0].entry_id
         area = self._config.get(CONF_NORDPOOL_AREA, DEFAULT_NORDPOOL_AREA)
-        today = datetime.now().date()
+        today = dt_util.now().date()
         today_str = today.isoformat()
         tomorrow_str = (today + timedelta(days=1)).isoformat()
 
@@ -565,14 +667,16 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             chargers      = self._build_charger_states()
 
             ev_total_w = sum(ch.power_w for ch in chargers)
-            house_load_w = self._get_house_load_w(
+            house_load_w, _house_load_from_sensor = self._get_house_load_w(
                 grid_l1, grid_l2, grid_l3, solar_w, battery_pwr_w, ev_total_w
             )
-            # Skydda mot formelbuggar vid batteribyte (urladdning→laddning):
-            # Grid-sensorn visar export (-) i övergångscykeln → house_load ≈ 0W →
-            # solöverskott = hela solproduktionen → batteriet ber om maxladdning från nätet.
-            # Golvskydd: huslast kan inte vara under gårdagens dygnsmedelsnitt när solen är igång.
-            if solar_w > 200 and yesterday_kwh:
+            # Golvskydd gäller BARA energibalansformeln (house_load_entity saknas/unavailable).
+            # Den formeln har en känd bugg vid batteribyte (urladdning→laddning): grid-sensorn
+            # visar export (-) i övergångscykeln → house_load ≈ 0W → solöverskott = hela
+            # solproduktionen → batteriet ber om maxladdning från nätet. En riktig mätarläsning
+            # (median-filtrerad ovan) ska aldrig klämmas mot gårdagens snitt – en genuin dipp
+            # mitt på dagen är då legitim, inte en formelbugg.
+            if not _house_load_from_sensor and solar_w > 200 and yesterday_kwh:
                 _load_floor = yesterday_kwh / 24.0 * 1000.0
                 if house_load_w < _load_floor:
                     _LOGGER.debug(
@@ -583,7 +687,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             solar_surplus_w = max(0.0, solar_w - house_load_w)
 
             # Prisschema från Nordpool + Solcast-attributen
-            now = datetime.now().astimezone()
+            now = dt_util.now()
             nordpool_entity = c.get(CONF_NORDPOOL_ENTITY)
             nordpool_type = c.get(CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS)
             price_schedule = None
@@ -670,7 +774,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
             # Observera när solöverskott > 0 i ≥15 min – bygger historisk takeover-tid.
             # Nollställ vid midnatt (nytt dygn).
-            _local_now = datetime.now().astimezone()
+            _local_now = dt_util.now()
             _today_str = _local_now.strftime("%Y-%m-%d")
             if not hasattr(self, "_takeover_obs_date"):
                 self._takeover_obs_date = _today_str
@@ -758,13 +862,16 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     extra = float(c.get(CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH))
                     predicted_daily_kwh += extra
 
-            # Legionella – läs switch och temp
-            legionella_switch_on = self._get_state_bool(c.get(CONF_LEGIONELLA_SWITCH))
+            # Legionella – läs switch (tri-state: unavailable ska INTE tolkas som av,
+            # annars misstolkas ett kort kommunikationsglapp mot ems-esp som att
+            # pannan avslutat körningen) och temp
+            legionella_switch_on = self._get_state_tristate(c.get(CONF_LEGIONELLA_SWITCH))
             hot_water_temp = self._get_hot_water_temp()
             legionella_active, legionella_reason = self._legionella.should_run_now(
                 now, solar_surplus_w, buy_price,
                 switch_is_on=legionella_switch_on,
                 water_temp=hot_water_temp,
+                price_schedule=price_schedule,
             )
 
             state = EnergyState(
@@ -807,7 +914,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 sell_price_sek_kwh=sell_price,
 
                 operating_mode=self.operating_mode,
-                winter_mode=bool(c.get(CONF_WINTER_MODE_ENABLED, False)),
+                now=now,
                 price_schedule=price_schedule,
                 yesterday_consumption_kwh=yesterday_kwh,
                 outdoor_temp_c=outdoor_temp,
@@ -822,7 +929,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             )
             self._state = state
 
-            # ── Dag-framåt plan (parallell, påverkar inga beslut) ────────
+            pv_production_ratio = self._update_pv_production_ratio(now, state.solar_forecast_today_kwh)
+
+            # ── Dag-framåt plan ────────────────────────────────────────────
             if price_schedule:
                 ps_sig = (
                     len(price_schedule.slots),
@@ -842,16 +951,31 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
                             solar_takeover_dt=state.solar_takeover_dt,
                             house_load_w=state.house_load_w,
+                            battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
+                            pv_production_ratio=pv_production_ratio,
                         )
                         self._last_plan_ps_sig = ps_sig
                         _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)
                     except Exception as _plan_err:
                         _LOGGER.warning("DayPlan: kunde inte byggas: %s", _plan_err)
 
+            if self._day_plan:
+                _cs = self._day_plan.slot_at(now)
+                state.plan_action = _cs.action if _cs else None
+                state.plan_export_floor_kwh = self._day_plan.export_floor_kwh
+
             decision = self._controller.compute(state)
             self._last_decision = decision
 
-            # ── Jämför plan mot faktiskt beslut ─────────────────────────
+            # Plan-executor: enda skrivställe för batteriets börvärden när en
+            # plan finns (P2-5). Delad metod med backtest-simulatorn – se
+            # EnergyController.apply_plan_executor() för hela resonemanget.
+            decision = self._controller.apply_plan_executor(
+                self._day_plan, self.operating_mode, state, decision, now, solar_surplus_w,
+            )
+            self._last_decision = decision
+
+            # ── Jämför plan mot faktiskt (slutgiltigt, efter executorn) beslut ──
             if self._day_plan:
                 plan_slot = self._day_plan.slot_at(now)
                 if plan_slot:
@@ -875,17 +999,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         or (plan_charge and ctrl_charge)
                         or (plan_idle and ctrl_idle)
                     )
-                    # Mjuk match: kända planeringsgap som inte indikerar fel
-                    # 1. Plan=idle men laddning sker → opportunity charging tar över prefer_sell
-                    # 2. Plan=solar_charge men export sker → prefer_sell + proaktiv export (batteri ovan golvet)
-                    # 3. Plan=solar_charge men idle → prefer_sell (säljer sol naturligt utan batteriladdning)
-                    _batt_kwh_now = state.battery_soc_pct / 100.0 * state.battery_capacity_kwh
-                    soft_match = (
-                        (plan_idle and ctrl_charge)
-                        or (plan_charge and ctrl_export and _batt_kwh_now > self._day_plan.export_floor_kwh)
-                        or (plan_charge and ctrl_idle)
-                    )
-                    if not match and not soft_match:
+                    if not match:
                         _LOGGER.warning(
                             "DayPlan AVVIKELSE kl %s: plan=%s %.0fW (%s) | faktiskt=%s chg=%.0fW dis=%.0fW | %s",
                             now.strftime("%H:%M"),
@@ -896,10 +1010,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         )
                     else:
                         _LOGGER.debug(
-                            "DayPlan ✓ kl %s: plan=%s ≈ faktisk=%s%s",
+                            "DayPlan ✓ kl %s: plan=%s ≈ faktisk=%s",
                             now.strftime("%H:%M"), plan_slot.action,
                             "export" if ctrl_export else ("charge" if ctrl_charge else "idle"),
-                            " (mjuk)" if soft_match else "",
                         )
 
             if legionella_active:
@@ -912,7 +1025,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             if decision.chargers_needing_selection:
                 await self._notify_car_selection_needed(decision.chargers_needing_selection)
 
-            await self._execute_decision(state, decision)
+            await self._check_battery_operating_mode()
+            await self._execute_decision(state, decision, now)
 
             return {
                 "state": state,
@@ -926,6 +1040,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "ev_total_power_w": sum(ch.power_w for ch in state.chargers),
                 "battery_soc_pct": state.battery_soc_pct,
                 "battery_min_soc": float(c.get(CONF_BATTERY_MIN_SOC, 20)),
+                "battery_max_power_kw": state.battery_max_power_kw,
                 "sell_solar_min_price": self._controller.sell_solar_min_price,
                 "evening_target_soc_pct": decision.evening_target_soc if decision.evening_target_soc > 0 else (
                     self._day_plan.evening_target_soc_pct if self._day_plan else 30.0
@@ -947,11 +1062,47 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "hours_to_solar_peak": price_schedule.hours_to_solar_peak if price_schedule else 0.0,
                 "should_wait_for_solar": price_schedule.should_wait_for_solar if price_schedule else False,
                 "day_plan": self._day_plan,
+                "pv_production_ratio": pv_production_ratio,
             }
 
         except Exception as err:
             _LOGGER.exception("Fel vid uppdatering av Smart Energy Manager")
             raise UpdateFailed(f"Error updating Smart Energy Manager: {err}") from err
+
+    async def _check_battery_operating_mode(self) -> None:
+        """Varna om batteriets egna driftläge inte står på 'manual' – utan detta
+        är alla börvärden SEM skriver verkningslösa, tyst."""
+        entity_id = self._config.get(CONF_BATTERY_OPERATING_MODE_ENTITY)
+        if not entity_id:
+            return
+        state = self.hass.states.get(entity_id)
+        is_manual = state is not None and state.state.lower() == "manual"
+
+        if not is_manual and not self._battery_mode_warning_active:
+            self._battery_mode_warning_active = True
+            _LOGGER.warning(
+                "Batteriets driftläge (%s) står inte på 'manual' – SEM:s börvärden har ingen effekt",
+                entity_id,
+            )
+            await self.hass.services.async_call(
+                "persistent_notification", "create",
+                {
+                    "title": "⚠️ Smart Energy Manager – batteriet lyssnar inte",
+                    "message": (
+                        f"`{entity_id}` står inte på **manual**. SEM:s laddnings-/urladdningsbörvärden "
+                        f"skrivs men har ingen effekt förrän driftläget ändras."
+                    ),
+                    "notification_id": "sem_battery_mode_warning",
+                },
+                blocking=False,
+            )
+        elif is_manual and self._battery_mode_warning_active:
+            self._battery_mode_warning_active = False
+            await self.hass.services.async_call(
+                "persistent_notification", "dismiss",
+                {"notification_id": "sem_battery_mode_warning"},
+                blocking=False,
+            )
 
     async def _notify_car_selection_needed(self, charger_names: list[str]) -> None:
         """Skicka persistent HA-notifiering för laddare som behöver bilval."""
@@ -971,38 +1122,91 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 blocking=False,
             )
 
-    async def _execute_decision(self, state: EnergyState, decision: ControlDecision) -> None:
+    def _should_write_number(self, entity_id: str, target_value: float, now: datetime) -> bool:
+        """P6-1: skriv bara om värdet ändrats mer än dödbandet, eller om
+        heartbeat-intervallet passerat sedan senaste skrivningen (självläkning
+        om en tidigare skrivning tappades bort). Jämför mot ENTITETENS LIVE-
+        tillstånd, inte en egen cache – annars missas externa ändringar."""
+        last_write = self._last_write_times.get(entity_id)
+        if last_write is None or (now - last_write) >= _HEARTBEAT_INTERVAL:
+            return True
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return True
+        try:
+            current = float(state.state)
+        except (ValueError, TypeError):
+            return True
+        return abs(current - target_value) > _POWER_DEADBAND_W
+
+    def _should_write_switch(self, entity_id: str, target_on: bool, now: datetime) -> bool:
+        """Som _should_write_number, men för switchar (exakt tillståndsjämförelse)."""
+        last_write = self._last_write_times.get(entity_id)
+        if last_write is None or (now - last_write) >= _HEARTBEAT_INTERVAL:
+            return True
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return True
+        return (state.state == "on") != target_on
+
+    async def _write_battery_setpoints(self, charge_w: float, discharge_w: float, now: Optional[datetime] = None) -> None:
+        """Skriv batteriets börvärden – nolla alltid motsatt riktning FÖRST (blockerande)
+        innan den aktiva riktningen sätts, så att Sonnen aldrig ser båda skilda från noll
+        samtidigt vid ett riktningsbyte. P6-1-dödband hoppas bara över om `now` ges
+        (async_zero_battery vid unload måste alltid skriva på riktigt, ingen deadband)."""
         charge_entity    = self._config.get(CONF_BATTERY_INVERTER_CHARGE)
         discharge_entity = self._config.get(CONF_BATTERY_INVERTER_DISCHARGE)
 
-        if charge_entity:
+        async def _write(entity_id: Optional[str], value: float, blocking: bool) -> None:
+            if not entity_id:
+                return
+            if now is not None and not self._should_write_number(entity_id, value, now):
+                return
             await self.hass.services.async_call(
                 "number", "set_value",
-                {"entity_id": charge_entity, "value": round(decision.battery_charge_power_w)},
-                blocking=False,
+                {"entity_id": entity_id, "value": round(value)},
+                blocking=blocking,
             )
-        if discharge_entity:
-            await self.hass.services.async_call(
-                "number", "set_value",
-                {"entity_id": discharge_entity, "value": round(decision.battery_discharge_power_w)},
-                blocking=False,
-            )
+            if now is not None:
+                self._last_write_times[entity_id] = now
+
+        if charge_w <= 0:
+            await _write(charge_entity, 0, blocking=True)
+        if discharge_w <= 0:
+            await _write(discharge_entity, 0, blocking=True)
+        if charge_w > 0:
+            await _write(charge_entity, charge_w, blocking=False)
+        if discharge_w > 0:
+            await _write(discharge_entity, discharge_w, blocking=False)
+
+    async def async_zero_battery(self) -> None:
+        """Nolla båda batteribörvärdena. Anropas vid unload så att integrationen
+        aldrig lämnar batteriet fruset i sitt senaste laddnings-/urladdningsläge."""
+        await self._write_battery_setpoints(0.0, 0.0)
+
+    async def _execute_decision(self, state: EnergyState, decision: ControlDecision, now: datetime) -> None:
+        await self._write_battery_setpoints(
+            decision.battery_charge_power_w, decision.battery_discharge_power_w, now
+        )
 
         for ch_state, ch_dec in zip(state.chargers, decision.charger_decisions):
             cfg = ch_state.config
             if ch_dec.enable and ch_dec.current_a > 0 and cfg.charger_current:
-                await self.hass.services.async_call(
-                    "number", "set_value",
-                    {"entity_id": cfg.charger_current, "value": round(ch_dec.current_a)},
-                    blocking=False,
-                )
-            if cfg.charger_switch:
+                if self._should_write_number(cfg.charger_current, ch_dec.current_a, now):
+                    await self.hass.services.async_call(
+                        "number", "set_value",
+                        {"entity_id": cfg.charger_current, "value": round(ch_dec.current_a)},
+                        blocking=False,
+                    )
+                    self._last_write_times[cfg.charger_current] = now
+            if cfg.charger_switch and self._should_write_switch(cfg.charger_switch, ch_dec.enable, now):
                 service = "turn_on" if ch_dec.enable else "turn_off"
                 await self.hass.services.async_call(
                     "switch", service,
                     {"entity_id": cfg.charger_switch},
                     blocking=False,
                 )
+                self._last_write_times[cfg.charger_switch] = now
 
         # Stäng av notifiering för laddare som inte längre behöver bilval
         for ch_state in state.chargers:
@@ -1016,13 +1220,14 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
         # Extra varmvatten (elpatron) – styrs av styrlogik
         hot_water_entity = self._config.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)
-        if hot_water_entity:
+        if hot_water_entity and self._should_write_switch(hot_water_entity, decision.extra_hot_water, now):
             service = "turn_on" if decision.extra_hot_water else "turn_off"
             await self.hass.services.async_call(
                 "switch", service,
                 {"entity_id": hot_water_entity},
                 blocking=False,
             )
+            self._last_write_times[hot_water_entity] = now
 
         # Legionella-switch – separat switch som pannan äger av-sidan
         # Vi slår bara PÅ; pannan slår AV när programmet är klart.

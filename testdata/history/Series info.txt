@@ -1,0 +1,57 @@
+P7-1 — extraherad historik, dokumenterat startdatum per serie
+================================================================
+Genererad: 2026-09-05, via HA:s statistik-API (source=statistics, period=hour)
+för huslast/sol/utomhustemp/SOC, och source=history (kvartsupplösning) för pris.
+
+VIKTIGT FYND: den fulla gemensamma perioden är bara ~10 dagar, inte de ~30
+dagar hourly-statistiken i sig räcker. Se "Begränsande faktorer" nedan.
+
+Fil                        Storhet              Upplösning   Start                      Slut                       Rader
+--------------------------------------------------------------------------------------------------------------------------
+solar_hourly.csv            Solproduktion (W)    1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
+house_load_hourly.csv       Huslast (W)          1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
+outdoor_temp_hourly.csv     Utomhustemp (°C)     1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
+battery_soc_hourly.csv      Batteri-SOC (%)      1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      724
+price_quarterhour.csv       Spotpris (SEK/kWh)   15min        2026-08-26T04:15:00+02:00  2026-09-05T19:45:00+02:00 1001
+
+Källentiteter:
+  solar_hourly.csv          sensor.sg_total_active_power
+  house_load_hourly.csv     sensor.el_forbruk_power_power
+  outdoor_temp_hourly.csv   sensor.boiler_outdoortemp
+  battery_soc_hourly.csv    sensor.sonnenbatterie_271100_state_battery_percentage_real
+  price_quarterhour.csv     sensor.nordpool_kwh_se3_sek_3_10_0_2 (öre/kWh omvandlat till SEK/kWh)
+
+Kolumner (statistics-filerna): timestamp_utc, mean, min, max (HA:s timvisa aggregat).
+Kolumner (price_quarterhour.csv): timestamp (lokal tid, ISO), spot_sek_kwh.
+
+Begränsande faktorer
+---------------------
+- sensor.sg_total_active_power (soldata) har bara ~726 timmar historik totalt –
+  sensorn är ny sedan ~2026-08-06. Det är DEN faktorn som satte hela fönstret
+  ovan; huslast/temp/SOC har flera års historik i statistik-API:t men hämtades
+  bara för samma fönster eftersom mer historik utan matchande soldata inte är
+  användbar för att mata planeraren (som behöver alla fyra samtidigt).
+- Rå (kvartsupplöst) historik för prissensorn sparas bara ~10 dygn av recordern
+  (purge_keep_days) – därav att price_quarterhour.csv bara täcker
+  2026-08-26 till 2026-09-05, kortare än de andra fyra filerna.
+- Den praktiskt användbara perioden där ALLA FEM storheter finns samtidigt är
+  alltså bara 2026-08-26 till 2026-09-05 (~10 dygn), inte de fulla ~30 dagarna.
+
+Återskapa/utöka
+-----------------
+_convert.py och _convert_price.py i den här mappen konverterar en rå JSON-dump
+(HA-statistik/history-svar) till CSV. Kör om med ett senare start_time när
+sol-sensorn hunnit samla mer historik för ett längre gemensamt fönster.
+
+Använd med backtest.py
+------------------------
+testdata/backtest.py läser den här mappen direkt:
+  python testdata/backtest.py testdata/history --out results.csv
+
+OBS: den här mappen har INGEN historisk nätfaseffekt (grid_power_l1/l2/l3)
+eller batteri-inout-effekt – bara SOC, inte faktisk laddnings-/urladdningseffekt.
+"Verklig"-raderna i backtestens sammanfattning (nätimport/-export, kostnad,
+batteriladdning/-urladdning) är därför INTE tillgängliga för den här källan
+och redovisas som sådana. Kolumnerna som visar SEM:s BESLUT (plan_action,
+decision_bat_charge_w/discharge_w, reason) är fullt meningsfulla – de kräver
+bara pris, sol, huslast och SOC, som alla finns.

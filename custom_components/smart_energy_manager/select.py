@@ -65,6 +65,7 @@ class OperatingModeSelect(_BaseSEMSelect):
 class ActiveCarSelect(_BaseSEMSelect):
     """Välj vilken bil som är inkopplad på en specifik laddare."""
     _attr_icon = "mdi:car-electric"
+    _attr_translation_key = "active_car"
 
     def __init__(
         self,

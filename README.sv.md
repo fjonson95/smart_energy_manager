@@ -1,8 +1,159 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.47-blue)
+![Version](https://img.shields.io/badge/version-0.7.1-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.7.1
+
+Etapp 7 i utvecklingsplanen, delvis (endast P7-2; P7-1 – extrahering av sammanhängande historik via HA:s statistik-API – är inte implementerat).
+
+- **Extraherade plan-executorn till en återanvändbar `EnergyController.apply_plan_executor()`-metod** – den fanns tidigare bara inline inuti `coordinator.py`s async-uppdateringsloop, vilket innebar att inget utanför en levande Home Assistant-instans kunde köra den. `coordinator.py` anropar nu bara denna metod; beteendet är oförändrat, det är samma kod flyttad dit både den levande coordinatorn och fristående verktyg kan anropa den.
+- **Fixade `testdata/backtest.py`, som varit tyst trasig sedan Etapp 2-refaktoreringen** – den anropade `EnergyController(export_sell_percentile=..., export_min_solar_tomorrow_kwh=...)`, båda parametrarna borttagna för månader sedan när exportlogiken flyttade till `EnergyPlanner`; den kraschade omedelbart. Den föregick också varje fix i Etapp 1–6: föråldrade sensor-entitets-ID:n (`sungrow_sg12rt_active_generation`, `solcast_pv_forecast_forecast_today`), de förkorrigerade P1-4-konfigurationsvärdena (33 kWh batteri, 0,07 säljpåslag, 20A fasgräns), och den bokstavliga `"unknown"`-sentinel för ingen bil vald. Allt korrigerat, och backtesten bygger nu en riktig `DayPlan` via `EnergyPlanner` och kör den genom samma `apply_plan_executor()` som det levande systemet använder, istället för att bara köra den (till stor del vilande) `EnergyController.compute()`-självkonsumtionsvägen.
+- **Sol per prisslot approximeras från faktisk historisk produktion** (inget historiskt Solcast p10/p50-arkiv finns att spela upp) – en p50-proxy från den verkliga avläsningen, med en fast nedskrivning för p10, precis nog för att köra golv-/exportlogiken meningsfullt.
+- **Ärlig avgränsning**: det här är en "skugg-läge"-utvärderare – för varje historisk timme frågar den "vad hade SEM beslutat just nu", med det VERKLIGA historiska batteri-SOC:et, inte ett simulerat som följer SEM:s egna tidigare beslut. Både P7-2:s fulla ambition (en förenklad batterimodell som integrerar besluten framåt till sin egen SOC-bana) och P7-1 (hämta sammanhängande historik från HA:s statistik-API istället för de små handplockade `testdata/timdata/*.csv`-proven) är fortfarande öppna.
+
+## Nyheter i 0.7.0
+
+Etapp 6 i utvecklingsplanen — driftsäkerhetshygien. Ingen ändring i vad som beslutas, bara i hur ofta och hur säkert det skrivs och sparas.
+
+- **Dödband på tjänsteanrop** – coordinatorn anropade `switch.turn_on`/`turn_off` och `number.set_value` ovillkorligt varje 30s-cykel även när inget ändrats (uppskattningsvis ~2900 verkningslösa switch-anrop/dygn mot EV-laddaren och varmvattenswitchen). Skrivningar hoppas nu över när målvärdet ligger inom 50 W av entitetens egna live-avlästa tillstånd (exakt matchning för switchar) – men aldrig i mer än 5 minuter i sträck, vilket bevarar den självläkande heartbeaten från det tidigare kraschsäkerhetsarbetet. Jämförelserna läser entitetens LIVE HA-tillstånd, inte en egen cache, så en externt ändrad inställning upptäcks och rättas ändå.
+- **Recorder-attributstorlek** – `sem_day_plan_reason`s `slots`-attribut bar hela 28h-planhorisonten, tillräckligt stort för att överskrida recorderns 16 kB-gräns för attribut och tyst sluta sparas. Begränsat till kommande 24h.
+- **Blockerande sensoruppdatering** – `sem_nordpool_price_schedule` byggde om hela sina `prices_today`/`prices_tomorrow`-attributlistor vid VARJE tillståndsavläsning (uppmätt till 2,57s), trots att det underliggande prisschemat bara ändras när Nordpool-/Solcast-data faktiskt uppdateras. Cachas nu på schemaobjektets identitet och byggs bara om när det ändras.
+- **Sentinel-krock** – platshållaren för "ingen bil vald" var den bokstavliga strängen `"unknown"`, vilket krockar med Home Assistants eget reserverade tillstånd för saknad data (`STATE_UNKNOWN`) – det fick bilvals-select-entiteterna att se ut som att de inte hade något värde alls istället för ett explicit val. Ändrat till `"none"`, med en översatt visningsetikett ("Ingen bil vald" / "No car selected").
+- **Tidszonskorrekthet** – varje `datetime.now()`-anrop (som använder CONTAINERNS systemtidszon, inte Home Assistants konfigurerade – en verklig källa till subtila fel när de skiljer sig åt) ersattes med `homeassistant.util.dt.now()`. `energy_controller.py` har inga Home Assistant-beroenden av design (den behöver förbli körbar fristående för den planerade backtest-simulatorn), så den får nu "nu" från coordinatorn via ett nytt `EnergyState.now`-fält istället, med fallback till vanlig `datetime.now()` bara om det inte är satt.
+- **Legionella markerar aldrig en körning som startad förrän den bekräftats** – tidigare satte beslutet "dags att starta" omedelbart managerns interna "pågår"-flagga, innan `switch.turn_on`-anropet ens försökts. Om det anropet misslyckades (enheten nere, nätverksglapp) skulle managern tro att en körning pågick som aldrig fysiskt hände, och skulle inte försöka igen. Den betraktar nu en körning som "pågår" först när pannans switch faktiskt OBSERVERAS vara på – en starkare garanti än ett lyckat API-anrop, och det ger automatiskt återförsök på köpet: så länge switchen läser av, upprepas samma startbeslut nästa cykel.
+- **Tog bort de gamla manuella styrhjälparna** planen flaggade (`Charge_uncharge`, `Max Charge`, `Ladda effekt batteri`, `In_Out_Charge`, `Stop urladdning pris negativt`, `VV På`, `VV_fran`, `vv_till`) från Home Assistant. Alla åtta bekräftades inaktiva först: sju var read-only mall-sensorer som ingenting refererade till, och den åttonde (`VV På`, en mall-switch) hade `turn_on`/`turn_off`-åtgärder som bara innehöll en `wait_template` utan något faktiskt tjänsteanrop, så att slå på/av den gjorde aldrig något. Raderade efter bekräftelse från användaren.
+
+## Nyheter i 0.6.7
+
+Etapp 5 i utvecklingsplanen, delvis — legionellaschemaläggning (resten av etapp 5 behöver en riktig vinterdag först, se nedan).
+
+- **Legionella siktar nu på den faktiskt bästa sloten i sitt fönster, inte den första som råkar slå ett fast tröskelvärde** – `PriceSchedule` har fått `is_best_opportunity_now()`: är aktuell slots solprognos ≥ 6 kW, eller ligger dess köppris inom billigaste tredjedelen av dagens slots i det konfigurerade fönstret? `LegionellaManager.should_run_now()` använder den när ett prisschema finns, annars faller den tillbaka på de gamla absoluta tröskelvärdena. Soltröskeln höjdes från 3 kW till 6 kW — det gamla värdet var lägre än vad elpatronerna själva drar, så "startar på solöverskott" kunde betyda att starta på ett överskott mindre än lasten som var på väg att slås på.
+
+## Nyheter i 0.6.6
+
+- **Fix: tvångsladdning av bilen stoppade batteriet från att fånga sol, exporterade istället** – rapporterad live: med `switch.sem_force_ev_charge` på rörde `_force_charge_ev()` aldrig `decision.battery_charge_power_w`, som defaultar till 0 — eftersom coordinatorn skriver det värdet till batteriets tvångsladdnings-number varje cykel, kommenderade det aktivt batteriet att sluta ladda, så allt solöverskott utöver bilens uttag gick rakt till export. Laddar nu batteriet med det överskott som blir kvar efter bilens tvångslast.
+- **Fix: spegelbilden av samma bugg i `_force_charge_battery()`** – tvångsladdning av batteriet lämnade på samma sätt alla `ChargerDecision` på sitt `enable=False`-standardvärde, vilket blockerade EV-laddning helt även med gott om kvarvarande solöverskott efter batteriets laddeffekt. Fördelar nu kvarvarande överskott till en ansluten, vald bil på samma sätt som normalt automatiskt läge.
+
+## Nyheter i 0.6.5
+
+- **Fix: `sem_decision_reason` tappade tyst EV-/varmvattenresonemang så fort en plan fanns** – hittad vid felsökning av varför ett EV-laddningsbeslut inte syntes i orsakstexten. Plan-executor-konsolideringen i 0.6.1 **ersatte** `decision.reason` helt i alla sina grenar istället för att utöka den, vilket kastade bort `_auto_mode`s egen orsakstext (som namnger vilken laddare som fick solström, om varmvatten startade, etc.) trots att själva EV-/varmvattenbesluten fortfarande tillämpades korrekt — bara den synliga förklaringen var fel. Executorn lägger nu sitt batterispecifika resonemang FÖRE den ursprungliga orsakstexten istället för att skriva över den.
+
+## Nyheter i 0.6.4
+
+- **Fix: `idle`/`cover_load`-planslots laddade aldrig batteriet, ens med stort verkligt solöverskott** – hittad live: planen klassade aktuell slot som `cover_load` (mörk/egenförbrukning) baserat på sin 15 minuter gamla prognos, men det faktiska solöverskottet var över 10 kW. Plan-executor-konsolideringen i 0.6.1 laddade batteriet bara för `solar_charge`/`grid_charge`-åtgärder, så `cover_load`/`idle`-slots stod stilla på 0 W åt båda hållen istället för att fånga det oplanerade överskottet – och exporterade det istället för nästan inget. Executorn laddar nu även från verkligt överskott under `idle`/`cover_load`-slots (med samma `prefer_sell`-kontroll som `solar_charge`), och faller bara tillbaka till självkonsumtionsurladdning när det finns ett verkligt underskott istället för ett överskott.
+
+## Nyheter i 0.6.3
+
+Etapp 4 i utvecklingsplanen — absorptionstrappan vid negativt pris (delvis: steg 1, 2, 4).
+
+- **Fix: negativt pris nattetid utan sol utnyttjades aldrig** – blocket för negativt pris krävde `solar_w > 0`, så ett negativt nattpris (ingen sol) gjorde ingenting alls, trots att det är ren vinst att ladda batteriet från nätet vid negativt pris. Solkravet borttaget.
+- **Fix: den proaktiva headroom-blocket stängde av allt i flera timmar, inte bara batteriladdningen** – när ett negativt pris väntades inom 2h gjorde gamla koden `return` tidigt, vilket tyst blockerade självkonsumtion, EV-laddning och varmvatten under hela väntetiden. Nu sänker den bara batteriets laddningstak (för att hålla headroom) och fortsätter genom den vanliga beslutslogiken istället för att korta ut den.
+- **Nytt: en explicit, sekventiell absorptionstrappa för negativa priser** — batteri (full effekt) → varmvatten → bil, där varje steg bara aktiveras när föregående är mättat, istället för att sprida solöverskott proportionellt över alla samtidigt. `sem_decision_reason` namnger nu vilket steg som är aktivt (t.ex. "Negativt pris steg 1: batteri full effekt").
+- **Inte implementerat än**: höjning av värmebörvärden (hör till etapp 5) och strypning av växelriktaren (etapp 4:s sista trappsteg). Strypning kräver specifikt att `number.sg_power_limitation_setting`s svarskurva kalibreras manuellt först — planen är tydlig med att det inte går att ställa in blint. När alla andra absorptionssteg är mättade och batteriet ändå exporterar vid negativt pris säger orsakstexten det rakt ut istället för att låtsas att det är hanterat.
+
+## Nyheter i 0.6.2
+
+Etapp 3 i utvecklingsplanen — prognosreserv och snödetektor.
+
+- **Planera mot pessimistisk (p10) sol, inte medianen** – `PriceSlot` bär nu `solar_kwh_p10` vid sidan av den befintliga medianbaserade `solar_kwh` (`price_scheduler.py`). Exportgolvsberäkningen och spärren "är morgondagens sol stark nog för att exportera ikväll" (`energy_planner.py`) läser nu p10 istället för medianen – en prognos som råkar vara optimistisk gör inte längre att batteriet töms djupare än det borde. Intäktsuppskattningar och den generella SOC-simuleringen använder fortfarande medianen, eftersom försiktighet där bara skulle göra planen pessimistisk om intäkter, inte säkrare.
+- **Nytt: produktionskvot-sensor upptäcker snö/nedsmutsning** (`sem_pv_production_ratio`) – en rullande 3-dygnskvot av faktisk solproduktion (ny valfri konfiguration: `actual_solar_daily_entity`) mot dagens Solcast-prognos, sparad över omstarter. Normala dagar ligger runt 0,8–1,3; en kvot under ~0,6 (snötäckta eller smutsiga paneler som prognosen inte känner till) skalar automatiskt upp exportgolvet mot full nattautonomi och stramar åt exportspärren, tills produktionen återhämtar sig. Exponerad som egen sensor och som attribut på `sem_day_plan_reason` så det syns *varför* systemet blivit försiktigt.
+- **Ny golvformel**: `behov_kwh` (p10-baserat behov fram till solen tar över) → `reserv_kwh` (skalad upp av ett osäkerhetspåslag styrt av produktionskvoten) → `golv_kwh = min(batt_max, max(hårt_golv, reserv_kwh))`. Det hårda golvet är fast satt till 10 % av batterikapaciteten och tillämpas nu alltid, oavsett hur liten den beräknade reserven blir en solig dag.
+
+## Nyheter i 0.6.1
+
+- **Slog ihop de tre parallella kopiorna av batteribeslutslogik** (`_auto_mode`s självkonsumtionsblock, coordinatorns plan-mode-override, och en skuggberäkning i `PlanExecutorCharge/DischargeSensor`) till en enda plan-executor i `coordinator.py`. Den sätter nu batteriets laddnings-/urladdningsbörvärde för **alla** planslot-åtgärder (`solar_charge`, `grid_charge`, `export`, `idle`/`cover_load`), inte bara de två den tidigare skrev över – med faktiskt realtida solöverskott och husunderskott, inte planens prognossiffror. Executorn kör om fas-/exporttaksklämningen (`_apply_phase_limits`) efter att ha satt de nya värdena, vilket täpper till en lucka där en planstyrd override kunde kringgå fasskyddet som lades till i 0.6.0.
+- `sem_plan_executor_charge`/`sem_plan_executor_discharge` rapporterar nu bara coordinatorns faktiska senaste beslut istället för att självständigt räkna om en skuggad uppskattning – de garanteras matcha `sem_battery_charge_power_setpoint`/`..._discharge_power_setpoint` per konstruktion.
+- Avvikelseloggen (plan mot faktiskt) jämför nu mot det *slutgiltiga* beslutet efter executorn och behöver inte längre de "mjuka matchningarna" som tidigare maskerade kända planeringsluckor – en loggad avvikelse är nu en riktig avvikelse, och `sem_decision_reason` förklarar vilken realtidsgräns som slog till.
+
+## Nyheter i 0.6.0
+
+Etapp 2 i utvecklingsplanen — en regulator med rätt värdemodell.
+
+- **Fix: export triggades aldrig i praktiken** – dagplanens exportfilter jämförde säljpris mot ett "referensköppris" som inkluderade energiskatt, så 90 %-tröskeln kunde aldrig slås av ett säljpris (`build_plan()` i `energy_planner.py`). Ersatt med en marginalvärdesmodell: exporterbar energi (redan isolerad som "ovanför golvet" av befintlig beräkning) dispatchas bara till en slot om den slotens säljpris överstiger batteriets faktiska snittpris (`sem_battery_average_price`, tidigare beräknat men aldrig läst) plus en konfigurerbar cykel-/slitagekostnad. Kopplade även in `export_min_solar_tomorrow_kwh` som en faktiskt läst spärr – tidigare sparad men aldrig konsulterad, så proaktiv export kunde triggas även när morgondagens prognos var för svag för att fylla på batteriet igen.
+- **Ny konfiguration: `eta_roundtrip` (standard 0,87) och `cycle_cost_sek_kwh` (standard 0,05 kr/kWh)** i Batteri-sektionen – tur-och-retur-verkningsgraden och slitagekostnaden per kWh går nu in i exportlönsamhetskontrollen ovan.
+- **Fix: fasskydd var bara importriktat** – `_apply_phase_limits()` i `energy_controller.py` kontrollerade bara `phase_current <= max_current`, så en fas som gick högt på *export* (stor batteriurladdning, t.ex. under en planstyrd export-slot) fångades aldrig. Kontrollerar nu båda riktningarna; en överskriden exportgräns minskar batteriets urladdningseffekt (den enda kontrollerbara exportkällan) istället för att röra EV/elpatron-laster som inte kan orsaka exportöverström. Lade till en marginal på 2 A (`max_current_effective`) för att kompensera för regleringens 30s-cykel plus växelriktarens egen fördröjning.
+- **Nytt: separat exporttak** (`max_export_w`, standard 14000 W, konfigurerbart i Nät-sektionen) – växelriktarens AC-exportmärkning är en annan begränsning än fasströmmen; batteriurladdningen klipps nu även så att `sol + urladdning` aldrig överstiger den.
+- **Vinterläget helt borttaget** – `_winter_mode()`, `WinterModeSwitch`, de fyra `winter_*`-number-entiteterna och all tillhörande konfiguration är borttagna. Dagplanens percentilbaserade prissättning (redan säsongsoberoende, använder varje dags egen prisfördelning) och export-/nätladdningsdispatchen täcker redan det vinterläget var till för; `winter`-driftläget är borta från select-entiteten.
+
+## Nyheter i 0.5.63
+
+- **Fix: omladdning av integrationen mitt i en legionellakörning kunde utlösa en felaktig dubbelstart** – `LegionellaManager`s spårning av pågående körning (`running`, `run_started_at`, `temp_confirmed`) levde bara i minnet. En sparning i inställnings-flödet (eller vilken omladdning av config entry som helst) återskapade coordinatorn och nollställde detta; om pannans switch råkade visa `unavailable` bara en cykel direkt efter omladdningen (ett vanligt kommunikationsglapp mot ems-esp) tolkade managern det som att "pannan just stängde av sig själv" och startade, vid nästa förfallokontroll, en andra körning – trots att den ursprungliga fortfarande kördes fysiskt och aldrig blivit klar. Två fixar: (1) körningsspårningen sparas nu i samma lagring som `last_run` och återställs vid `async_load()`, så en omladdning/omstart aldrig längre tappar bort en pågående körning eller dess verkliga starttid; (2) switchen läses nu som tri-state (på/av/otillgänglig) – en `unavailable`-avläsning behåller nuvarande körningsstatus istället för att tolkas som "av".
+
+## Nyheter i 0.5.62
+
+- **Fix: solenergi per prisslot var ungefär dubbelt för stor** – `_match_solar_to_slots()` i `price_scheduler.py` konverterade alltid soleffekt (kW) till energi (kWh) med en hårdkodad 0,5h (antog en halvtimmesslot), men Nordpool-prisslots är kvartstimmar. Använder nu prisslotens faktiska längd.
+- **Fix: huslastgolvet skrev över legitima mätarvärden** – golvet mot gårdagens dygnsmedel tillämpades tidigare ovillkorligt så fort solen var igång, även när `house_load_entity` gav en riktig, giltig avläsning – vilket klämde bort genuina dippar mitt på dagen. Golvet gäller nu bara när entiteten saknas/är unavailable och koden faller tillbaka på energibalansformeln (den faktiska källan till övergångsbugg vid batteribyte som golvet var tänkt att skydda mot). Lade till en rullande median över de senaste 3–5 sampel av den riktiga sensorn för att dämpa tillfälliga mätarglapp istället.
+- **Tog bort taket på 1,5 kW** för uppskattad timlast i både `energy_controller.py` (kvällsfyllningsmål) och `energy_planner.py` (dagplanens lastuppskattning) – taket underskattade tyst vinterförbrukningen för ett hus där all värme är el. Golvet på 0,5 kW finns kvar.
+- **Fixade två number-entiteter som tyst slutat fungera i v0.5.60**: `ExportSellPercentileNumber` och `ExportMinSellPriceNumber` skrev till `EnergyController`-attribut som togs bort när exportlogiken flyttade till `EnergyPlanner`. Pekar nu om till `coordinator._energy_planner`.
+- **Tog bort `EvSocTargetNumber`** (global "EV SOC-mål"-entitet) – den skrev till ett `EnergyController.ev_soc_target`-attribut som aldrig lästes någonstans; varje bils eget mål-SOC (satt i laddarkonfigurationen) är det som faktiskt styr laddningen.
+- **Alla `number.py`-entiteter ärver nu `RestoreEntity` och skriver tillbaka till `entry.options`** – ett värde ändrat via UI levde tidigare bara i minnet och återställdes till config-flow-standarden vid omstart. Skrivs nu tillbaka till konfigurationsposten (överlever omstart/omladdning) med `RestoreEntity` som snabb återställning vid entitetstillägg.
+
+## Nyheter i 0.5.61
+
+- **Fix: krasch i opportunistisk nätladdning** – `_auto_mode()` refererade `_export_floor_kwh` och `_battery_energy_kwh` utan att någonsin definiera dem i scope, vilket orsakade `NameError` varje gång villkoren för opportunistisk laddning uppfylldes (låg solprognos, ingen ekonomisk topp, ingen aktiv export). Golvet härleds nu från dagplanen (`state.plan_export_floor_kwh`, satt av coordinator från `DayPlan.export_floor_kwh`) med fallback till `battery_min_soc` när ingen plan finns; batterienergin härleds från SOC × kapacitet. Tog även bort en dubblerad/död tilldelning av `_charge_target_kwh`.
+- **Säkerhet: batteriets börvärden nollställs alltid vid avlastning** – `async_unload_entry` skriver nu 0 till både laddnings- och urladdningssetpunkten innan plattformarna avlastas, så att en omkonfigurering eller HA-omstart aldrig lämnar batteriet fruset mitt i en laddning eller urladdning.
+- **Säkerhet: garanterad nolla-först-ordning vid skrivning** – batteriets börvärden nollar nu alltid den inaktiva riktningen (laddning/urladdning) FÖRE den aktiva riktningens effekt skrivs, med ett blockerande service-anrop för nollställningen. Det förhindrar ett kort fönster där växelriktaren kan se både laddnings- och urladdningssetpunkt skilda från noll samtidigt vid ett riktningsbyte.
+- **Ny valfri konfiguration: vakthund för batteriets driftläge** – lade till `battery_operating_mode_entity` (Batteri-sektionen). Om konfigurerad kontrollerar SEM denna `select`-entitet varje cykel och skapar en beständig notifiering + loggvarning om den inte står på `manual` – i så fall har alla börvärden SEM skriver ingen effekt på växelriktaren.
+
+## Nyheter i 0.5.60
+
+- **Refaktorering: dubblerad exportlogik borttagen ur EnergyController** – kontrollern innehöll ~230 rader proaktiv export och morgonexport som duplicerade vad EnergyPlanner redan beslutar. Eftersom coordinatorns plan-exekutor ändå skriver över kontrollerns battery-setpunkter för `export`- och `grid_charge`-slots användes kontrollerns egna exportberäkning aldrig. Den är nu borttagen. Kontrollern läser istället `state.plan_action` (satt av coordinator från aktuell planslot) och använder det enbart som guard-flagga — blockerar självkonsumtion och opportunistisk nätladdning under aktiv export. Exporteffekter kommer uteslutande från planerarens prisväktade dispatch via coordinatorns plan-exekutor.
+
+## Nyheter i 0.5.59
+
+- **Fix: dagplan schemalade felaktigt export till låga säljpriser** – planerarens "max nattköp"-filter jämförde säljpriset mot `PriceSchedule.slot.buy_sek`, som bara innehåller Nordpool-spotkomponenten (~1,7 kr/kWh) utan energiskatt och nätavgifter. Det faktiska fulla köppriset var ~3,18 kr/kWh, vilket innebar att 90 %-tröskeln blev 1,53 kr/kWh — filtret passerade nästan alltid och skapade export-slots i planen även när det är en förlusttransaktion att sälja för 1,63 kr/kWh när framtida nätköp kostar 3,18 kr/kWh. Fix: coordinator skickar nu in det faktiska fulla köppriset (`state.buy_price_sek_kwh`) till `build_plan()`. Filtret använder nu 3,18 × 0,90 = 2,86 kr/kWh som tröskel och blockerar korrekt export-slots när säljpriset är under denna nivå.
+
+## Nyheter i 0.5.58
+
+- **Förbättring: Tydligare energiplan-kort** (`sem-energy-plan-card.js`) – tre UI-förbättringar för att göra nuläget omedelbart avläsbart: (1) Plan-textraden visar nu aktuell planåtgärd, t.ex. "Plan skapad 19:00 · Nu: Egenförb. · slots: 12", så du direkt ser vad systemet gör utan att behöva kolla sensorerna. (2) En färgad åtgärdsetikett ritas direkt i canvasen vid "nu"-markören, t.ex. "Export" i orange eller "Egenförb." i blå. (3) Fixat ett visningsfel där export-fasfältet visade "19:00–19:00" (identisk start och slut) när bara ett export-slot finns — visas nu bara starttiden i det kantfallet.
+
+## Nyheter i 0.5.57
+
+- **Fix: EV blockerades när batteriet var nästan fullt och Sonnen throttlade** – v0.5.56 pre-emptade hela solöverskottet för husbatteriet oavsett om Sonnen faktiskt absorberade det. När batteriet är nära fullt (~94 % SOC) går Sonnen i standby och tar bara ett fåtal watt, men den pre-emptade effekten hölls ändå borta från EV — vilket resulterade i 2,7 kW ut på nätet utan att någon laddades. Fix: pre-emptionen körs nu bara om batteriet faktiskt absorberar mer än 100 W (`state.battery_power_w > 100`). När Sonnen throttlar (t.ex. 7 W) pre-emptas inget överskott och EV får hela solöverskottet.
+
+## Nyheter i 0.5.56
+
+- **Fix: husbatteri prioriteras före EV-laddning** – EV-överskottsloopen körde FÖRE batteriladdningsblocket, vilket innebar att t.ex. 2342 W solöverskott gick till bilen (~2300 W) och lämnade bara 42 W till batteriet (under 100 W-tröskeln). Resultat: husbatteriet stod still medan bilen laddade. Fix: innan EV-loopen reserveras batteriets andel ur `remaining_surplus` (upp till `battery_max_power_kw`). EV-loopen körs sedan bara på det som finns kvar. Efter EV-loopen återläggs det reserverade beloppet så att batteriladdningsblocket tar det. Vid stort solöverskott (t.ex. 5 000 W) laddar båda samtidigt.
+
+## Nyheter i 0.5.55
+
+- **Fix: sol exporterades till lågt pris istället för att lagras i batteriet** – `prefer_sell` triggades när `sell_price ≥ 0,80 kr/kWh`, vilket gjorde att batteriladdningsblocket hoppades över helt — även när säljpriset var mediokert (t.ex. 0,86 kr/kWh) och billigaste framtida köppris var mycket högre (t.ex. 1,74 kr/kWh). Det är en förlustaffär: sälj nu för 0,86, köp tillbaka för 1,74. Fix: `prefer_sell` kräver nu dessutom att säljpriset är minst 90 % av `best_charge_slot.buy_sek` — billigaste kommande nätladdningspris. Om att sälja är billigare än vad du betalar för att fylla på, lagra i batteriet istället. Exempel: 0,86 < 1,74 × 0,90 = 1,57 → `prefer_sell = False` → batteriet laddar ✓. Högt prisdag: 3,50 ≥ 1,57 → `prefer_sell = True` → export ✓.
+
+## Nyheter i 0.5.54
+
+- **Fix: batteriet laddades från elnätet pga feedback-loop i surplusformeln** – v0.5.53 introducerade `_effective_surplus_w = _raw_export_w + _batt_charge_w`. När solen sjönk och nätet gick från export till import föll `_raw_export_w` till 0, men `_batt_charge_w` speglade fortfarande föregående setpunkt (t.ex. 767 W). Resultatet: formeln returnerade 767 W, batteriet fortsatte ladda och huset drog 632 W från nätet som kompensation. Fix: korrigeringen appliceras nu **bara när nätet faktiskt exporterar** (`_raw_export_w > 0`). Vid nätimport används inte formeln och `solar_surplus_w` faller tillbaka till standardberäkningen `solar − house_load`, som korrekt ger 0 W när solen inte längre överstiger lasten.
+
+## Nyheter i 0.5.53
+
+- **Fix: solöverskott exporterades fortfarande när batteriet redan laddade** – v0.5.52 fixade fallet där batteriet var i standby (0 W) och verklig nätexport översteg beräknat överskott. Men om batteriet redan laddade (t.ex. 559 W) speglade nätexportavläsningen bara vad som återstod *efter* att batteriet tagit sin andel (t.ex. 312 W), och supplementet blev verkningslöst: `max(558, 312) = 558 W`. Rotorsak: formeln för effektivt överskott måste ta hänsyn till båda: `riktigt_överskott = nätexport_efter_laddning + batteriladdningseffekt`. I exemplet: 312 + 559 = 871 W → setpunkt höjs till 871 W → export sjunker mot noll. Fix: `_effective_surplus_w = _raw_export_w + _batt_charge_w`.
+
+## Nyheter i 0.5.52
+
+- **Fix: solöverskott gick till nätet istället för batteriet** – när huslasten-sensorn inkluderar L3-laster som direktförsörjs av sol (utanför Sonnens mätning), underskattar beräkningen `solar_w − house_load_w` hur mycket batteriet faktiskt kan fånga. Resultatet: SEM skickade 0 W laddkommando, Sonnen gick i standby och verkligt solöverskott (upp till 480 W) flödade till nätet. Fix: överskottsberäkningen kompletteras med faktisk nätexport `−(grid_L1 + grid_L2 + grid_L3) − batteriladdning`. Om mer el faktiskt lämnar huset än formeln förutsåg, används det riktiga exportvärdet som effektiv surplus — batteriet får energin istället för nätet.
+
+## Nyheter i 0.5.51
+
+- **Fix: opportunistisk nätladdning blockerades på mulna dagar** – blocket krävde tidigare `battery_charge_power_w == 0.0`, vilket innebar att en pågående solöverskottsladdning (även bara 50 W på en mulen dag) stängde ute nätladdning helt. När solprognosen understiger 10 kWh kördes aldrig grid-kompletteringen ens under de billigaste timmarna. Fix: `== 0.0`-villkoret är borttaget. Blocket körs nu så länge dagens **eller** morgondagens solprognos är under `DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH` (10 kWh), och överskriver bara `battery_charge_power_w` om beräknad nätladdningstakt är **högre** än pågående solöverskottsladdning (`max()` istället för tilldelning) – solöverskott har alltid prioritet; nätet kompletterar bara upp till målet om solen inte räcker.
+
+## Nyheter i 0.5.50
+
+- **Fix: plan-export pausas vid exportgolvet** – plan-executor:ns `export`-gren kontrollerar nu faktisk batteri-kWh mot `export_floor_kwh` innan urladdning körs. Om batteriet når eller sjunker under golvet (+ 0,5 kWh säkerhetsmarginal) pausas exporten och skälet loggas som `Plan export PAUSAD`. Detta förhindrar att batteriet töms under nattreserven när faktisk SOC avviker från planens uppskattning vid genereringstillfället.
+
+## Nyheter i 0.5.49
+
+- **Plan-mode aktiverat**: DayPlan styr nu faktiska Sonnen-setpunkter i `auto`-läge (tidigare bara jämförelse/loggning). Coordinator åsidosätter `battery_charge_power_w`/`battery_discharge_power_w` baserat på aktuell planslot:
+  - `solar_charge` – behålls av controllern (faktisk solöverskott hanteras bäst realtid)
+  - `grid_charge` – laddar batteriet med planens måleffekt; avbryts om `economic_peak` är aktivt (köppris ≥ 1,2× billigaste slot) och ersätts av egenförbrukning
+  - `export` – laddar ur planens prisväktade exportvolym + husets underskott
+  - `idle` / `cover_load` – täcker huslasten från batteriet om SOC > kvällsmål; annars 0 W
+- **Fix plan-executor-sensorer**: `PlanExecutorChargeSensor` (grid_charge) och `PlanExecutorDischargeSensor` (grid_charge under economic_peak) returnerar nu korrekta värden. Sensorer speglar exakt vad coordinator faktiskt utför.
+- `battery_max_power_kw` tillagd i coordinator-data-dicten så sensorerna läser rätt konfigurerat maxvärde istället för 5 kW default.
+
+## Nyheter i 0.5.48
+
+- **Fix: opportunistisk laddning blockerade självkonsumtion-urladdning under economic peak** – varje natt när batteriet sjönk under exportgolvströskeln (>0,5 kWh underskott) och aktuell timmen råkade ha ett pris under percentilgränsen triggade "Opp. laddning"-blocket. Det satte `battery_charge_power_w > 0`, vilket fick självkonsumtions-urladdningsblocket att hoppas (villkor `decision.battery_charge_power_w == 0.0` misslyckades). Resultat: discharge-setpunkten föll till 0 i ~30 minuter (tills nästa timme med högre pris), nätet täckte hela huslasten och systemet körde dessutom nätladdning parallellt. Cykeln upprepades varje gång ett billigt pris-slot mötte ett batterisoc under golvet. Fix: `_economic_peak` beräknas nu *före* opportunistisk laddningsblocket och läggs till som `not _economic_peak`-villkor. Under economic peak (köppris ≥ billigaste framtida laddpris × 1,2) är det mer ekonomiskt att ladda ur nu och köpa billigare senare — opportunistisk laddning är kontraproduktivt och körs ej.
 
 ## Nyheter i 0.5.47
 

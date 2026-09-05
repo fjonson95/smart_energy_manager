@@ -24,6 +24,23 @@ _LOGGER = logging.getLogger(__name__)
 
 _DARK_SOLAR_KW   = 2.0   # Soleffekt under detta → "mörk" slot
 _PLAN_HORIZON_H  = 28    # Timmar framåt att planera
+_HARD_FLOOR_FRACTION = 0.10  # Hårt golv: andel av batterikapaciteten som aldrig underskrids
+
+
+def _uncertainty_markup(pv_production_ratio: float) -> float:
+    """Osäkerhetspåslag på golvreserven baserat på produktionskvoten (P3-2).
+
+    Kvot ~1.0 (normal produktion mot prognos) → litet baspåslag.
+    Kvot ≤0.3 (snötäckta paneler etc.) → stort påslag, golvet mättas mot
+    batteriets maxkapacitet ("full nattautonomi") via min()-klämningen i
+    build_plan().
+    """
+    if pv_production_ratio >= 0.9:
+        return 0.10
+    if pv_production_ratio <= 0.3:
+        return 3.0
+    frac = (0.9 - pv_production_ratio) / (0.9 - 0.3)
+    return 0.10 + frac * (3.0 - 0.10)
 
 
 @dataclass
@@ -48,6 +65,7 @@ class DayPlan:
     expected_revenue_sek: float
     solar_takeover_dt: Optional[datetime]
     hourly_load_kw: float
+    pv_production_ratio: float = 1.0
 
     slots: list[PlannedSlot] = field(default_factory=list)
     notes: str = ""
@@ -89,6 +107,8 @@ class EnergyPlanner:
         export_min_solar_tomorrow_kwh: float = 20.0,
         sell_solar_min_price: float = 0.80,
         cheap_charge_buy_percentile: float = 0.25,
+        eta_roundtrip: float = 0.87,
+        cycle_cost_sek_kwh: float = 0.05,
     ):
         self.battery_min_soc               = battery_min_soc
         self.battery_max_soc               = battery_max_soc
@@ -97,6 +117,8 @@ class EnergyPlanner:
         self.export_min_solar_tomorrow_kwh = export_min_solar_tomorrow_kwh
         self.sell_solar_min_price          = sell_solar_min_price
         self.cheap_charge_buy_percentile   = cheap_charge_buy_percentile
+        self.eta_roundtrip                 = eta_roundtrip
+        self.cycle_cost_sek_kwh            = cycle_cost_sek_kwh
 
     def build_plan(
         self,
@@ -109,6 +131,8 @@ class EnergyPlanner:
         solar_forecast_tomorrow_kwh: float,
         solar_takeover_dt: Optional[datetime],
         house_load_w: float = 0.0,
+        battery_avg_cost_sek_kwh: float = 0.0,
+        pv_production_ratio: float = 1.0,
     ) -> DayPlan:
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
@@ -117,33 +141,41 @@ class EnergyPlanner:
         batt_max_kwh = battery_capacity_kwh * self.battery_max_soc / 100.0
         batt_kwh     = battery_capacity_kwh * battery_soc_pct / 100.0
         _daily_avg_w = (predicted_daily_kwh / 24.0 * 1000.0) if predicted_daily_kwh > 0 else 0.0
-        hourly_load_kw = min(max(_daily_avg_w, house_load_w, 500.0), 1500.0) / 1000.0
+        hourly_load_kw = max(_daily_avg_w, house_load_w, 500.0) / 1000.0
 
-        # Exportgolv slot-för-slot: Σ max(0, huslast − solar_kw) från nu till solar takeover.
-        # Speglar controllerns beräkning – morgon/kvällsramper bidrar med reducerat behov.
+        # Golvformel (prognosreserv): behov_kwh täcker huslasten fram till solen
+        # tar över, räknat mot PESSIMISTISK (p10) solprognos – ett underskattat
+        # solvärde här gör att golvet blir för lågt och batteriet kan bli tomt.
+        # Osäkerhetspåslaget skalas av produktionskvoten (P3-2): slår prognosen
+        # fel (snö, nedsmutsning) höjs reserven, i värsta fall mot full
+        # nattautonomi via min()-klämningen mot batt_max_kwh. Ett hårt golv
+        # (10 % av kapaciteten) gäller alltid, oavsett hur liten reserven blir
+        # en solig sommardag.
         takeover = solar_takeover_dt if (solar_takeover_dt and solar_takeover_dt > now_a) else now_a + timedelta(hours=9)
         takeover_local = takeover.astimezone()
         _floor_slots = [s for s in (ps.slots or []) if s.end > now_a and s.start < takeover_local]
         if _floor_slots:
-            export_floor_kwh = min(
-                batt_max_kwh,
-                sum(
-                    max(0.0, hourly_load_kw * (s.end - s.start).total_seconds() / 3600.0 - s.solar_kwh)
-                    for s in _floor_slots
-                ) + 2.0,
-            )
+            behov_kwh = sum(
+                max(0.0, hourly_load_kw * (s.end - s.start).total_seconds() / 3600.0 - s.solar_kwh_p10)
+                for s in _floor_slots
+            ) + 2.0
         else:
-            export_floor_kwh = min(batt_max_kwh, hourly_load_kw * 9.0 + 2.0)
+            behov_kwh = hourly_load_kw * 9.0 + 2.0
+        reserv_kwh = behov_kwh * (1.0 + _uncertainty_markup(pv_production_ratio))
+        hard_floor_kwh = battery_capacity_kwh * _HARD_FLOOR_FRACTION
+        export_floor_kwh = min(batt_max_kwh, max(hard_floor_kwh, reserv_kwh))
         evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + export_floor_kwh / battery_capacity_kwh * 100.0)
         # Användbar energi ovan min_soc – energin under batt_min_kwh kan aldrig nås.
         exportable_kwh = max(0.0, batt_kwh - batt_min_kwh - export_floor_kwh)
 
         # Nettosol imorgon slot-för-slot – speglar controllerns nettosolkontroll.
         tomorrow_date = (now_a + timedelta(days=1)).date()
+        # Exportspärren jämförs mot p10 (pessimistisk), aldrig p50 – den avgör
+        # om vi vågar tömma batteriet ikväll i tillit till morgondagens sol.
         tomorrow_slots = [s for s in (ps.slots or []) if s.start.astimezone().date() == tomorrow_date]
         net_solar_tomorrow_kwh = (
             sum(
-                max(0.0, s.solar_kwh - hourly_load_kw * (s.end - s.start).total_seconds() / 3600.0)
+                max(0.0, s.solar_kwh_p10 - hourly_load_kw * (s.end - s.start).total_seconds() / 3600.0)
                 for s in tomorrow_slots
             ) if tomorrow_slots
             else max(0.0, solar_forecast_tomorrow_kwh - hourly_load_kw * 13.0)
@@ -159,6 +191,7 @@ class EnergyPlanner:
                 evening_target_soc_pct=evening_target_soc, export_floor_kwh=export_floor_kwh,
                 total_exportable_kwh=exportable_kwh, expected_revenue_sek=0.0,
                 solar_takeover_dt=solar_takeover_dt, hourly_load_kw=hourly_load_kw,
+                pv_production_ratio=pv_production_ratio,
                 notes="Inga prisslots tillgängliga",
             )
 
@@ -185,21 +218,23 @@ class EnergyPlanner:
                  else s.start.astimezone() < takeover_local)
         ]
 
-        # Exportprisjämförelse: sälj bara om säljpriset för dessa slots täcker
-        # kommande dyra mörka slots (sell ≥ 90 % av max nattköppris i golvperioden).
-        _plan_floor_slots = [s for s in future_slots if s.end > now_a and s.start < takeover_local]
-        _max_night_buy_plan = max(
-            (s.buy_sek for s in _plan_floor_slots if s.solar_kw < _DARK_SOLAR_KW),
-            default=0.0,
-        )
-        # Filtrera bort export-slots vars säljpris understiger kvällstopp-tröskeln
-        if _max_night_buy_plan > 0:
-            high_slots = [s for s in high_slots if s.sell_sek >= _max_night_buy_plan * 0.9]
+        # Marginalvärdesmodell (ersätter det gamla, aldrig-uppfyllbara köpris-filtret):
+        # exportable_kwh är redan energin OVANFÖR golvet – den ersätts gratis av
+        # morgondagens sol och har inget värde i sig självt utöver vad den kostade
+        # att lagra. Sälj bara om säljpriset täcker batteriets faktiska snittpris
+        # plus cykelkostnaden (slitage) – annars är det en förlustaffär.
+        _min_export_value = battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh
+        if _min_export_value > 0:
+            high_slots = [s for s in high_slots if s.sell_sek > _min_export_value]
 
         # Prisväktad dispatch av exporterbara kWh
         export_plan: dict[datetime, float] = {}
         price_sum = sum(s.sell_sek for s in high_slots)
-        can_export = exportable_kwh > 0.1 and net_solar_tomorrow_kwh >= export_floor_kwh
+        can_export = (
+            exportable_kwh > 0.1
+            and net_solar_tomorrow_kwh >= export_floor_kwh
+            and solar_forecast_tomorrow_kwh >= self.export_min_solar_tomorrow_kwh
+        )
         if can_export and price_sum > 0:
             for s in high_slots:
                 slot_h = (s.end - s.start).total_seconds() / 3600.0
@@ -316,7 +351,8 @@ class EnergyPlanner:
         morning_export = [s for s in planned if s.action == "export" and s.start.astimezone().date() > today_date]
         notes = (
             f"SOC {battery_soc_pct:.0f}% → {final_soc:.0f}% | "
-            f"golv {export_floor_kwh:.1f}kWh netsol_imorgon {net_solar_tomorrow_kwh:.1f}kWh | "
+            f"golv {export_floor_kwh:.1f}kWh netsol_imorgon {net_solar_tomorrow_kwh:.1f}kWh "
+            f"pv_kvot={pv_production_ratio:.2f} | "
             f"trösklar export≥{eff_threshold:.2f} nätladdning≤{cheap_threshold:.2f} | "
             f"morgonexport: {len(morning_export)} slots"
         )
@@ -330,6 +366,7 @@ class EnergyPlanner:
             expected_revenue_sek=expected_revenue,
             solar_takeover_dt=solar_takeover_dt,
             hourly_load_kw=hourly_load_kw,
+            pv_production_ratio=pv_production_ratio,
             slots=planned,
             notes=notes,
         )

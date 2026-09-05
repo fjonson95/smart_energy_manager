@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import UnitOfPower, UnitOfElectricCurrent
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, NO_CAR_SELECTED
 from .coordinator import SmartEnergyCoordinator
@@ -80,6 +81,7 @@ async def async_setup_entry(
         SmartEnergyPeakSolarKwSensor(coordinator, entry),
         SmartEnergyHoursToSolarPeakSensor(coordinator, entry),
         SmartEnergyWaitForSolarSensor(coordinator, entry),
+        PvProductionRatioSensor(coordinator, entry),
     ]
 
     # Gårdagsförbrukning om konfigurerad
@@ -575,6 +577,24 @@ class SmartEnergySolarNext4hSensor(_BaseEnergySensor):
         return round(d.get("solar_next_4h_kwh", 0.0), 2) if d else 0.0
 
 
+class PvProductionRatioSensor(_BaseEnergySensor):
+    """P3-2: rullande 3-dygns kvot faktisk/prognos solproduktion.
+
+    ~1.0 = normal produktion. Lågt värde (t.ex. <0.6) indikerar att
+    Solcast-prognosen slår fel – snötäckta eller nedsmutsade paneler.
+    Golvet i DayPlan skalas upp automatiskt när kvoten sjunker.
+    """
+    _attr_unique_id = "sem_pv_production_ratio"
+    _attr_translation_key = "pv_production_ratio"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:weather-snowy"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        return round(d.get("pv_production_ratio", 1.0), 2) if d else 1.0
+
+
 class SmartEnergySolarNext8hSensor(_BaseEnergySensor):
     """Förväntad solenergi kommande 8 timmar (kWh, median)."""
     _attr_unique_id = "sem_solar_next_8h_kwh"
@@ -700,7 +720,7 @@ class BatteryAccumulatedCostSensor(_BaseEnergySensor, RestoreEntity):
                 self._cost_sek = 0.0
 
     def _handle_coordinator_update(self) -> None:
-        now = datetime.now()
+        now = dt_util.now()
         state = self.coordinator.current_state
 
         if state is not None and self._last_update is not None and self._last_soc is not None:
@@ -896,6 +916,18 @@ class NordpoolPriceScheduleSensor(_BaseEnergySensor):
     _attr_state_class = None
     _attr_icon = "mdi:chart-line"
 
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        # P6-2: attributdicten byggdes tidigare om vid VARJE avläsning
+        # (2,57s/uppdatering) trots att price_schedule bara byter identitet
+        # när Nordpool/Solcast-data faktiskt ändras. Cacha på objektidentitet.
+        self._cached_ps = None
+        self._cached_attrs: dict[str, Any] = {
+            "prices_today": [], "prices_tomorrow": [],
+            "slot_count_today": 0, "slot_count_tomorrow": 0,
+            "total_slot_count": 0,
+        }
+
     @property
     def native_value(self) -> float | None:
         s = self.coordinator.current_state
@@ -907,14 +939,19 @@ class NordpoolPriceScheduleSensor(_BaseEnergySensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         d = self.coordinator.data
         ps = d.get("price_schedule") if d else None
+        if ps is self._cached_ps:
+            return self._cached_attrs
+
+        self._cached_ps = ps
         if not ps or not ps.slots:
-            return {
+            self._cached_attrs = {
                 "prices_today": [], "prices_tomorrow": [],
                 "slot_count_today": 0, "slot_count_tomorrow": 0,
                 "total_slot_count": 0,
             }
+            return self._cached_attrs
 
-        now = datetime.now().astimezone()
+        now = dt_util.now()
         midnight_tomorrow = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
 
         prices_today = []
@@ -933,13 +970,14 @@ class NordpoolPriceScheduleSensor(_BaseEnergySensor):
             else:
                 prices_tomorrow.append(entry)
 
-        return {
+        self._cached_attrs = {
             "prices_today":        prices_today,
             "prices_tomorrow":     prices_tomorrow,
             "slot_count_today":    len(prices_today),
             "slot_count_tomorrow": len(prices_tomorrow),
             "total_slot_count":    len(ps.slots),
         }
+        return self._cached_attrs
 
 
 # ── EnergyPlanner-sensorer ───────────────────────────────────────────────────
@@ -951,7 +989,7 @@ class _DayPlanBase(_BaseEnergySensor):
         plan = self.coordinator.day_plan
         if not plan:
             return None
-        return plan.slot_at(datetime.now().astimezone())
+        return plan.slot_at(dt_util.now())
 
 
 class DayPlanActionSensor(_DayPlanBase):
@@ -1011,22 +1049,38 @@ class DayPlanReasonSensor(_DayPlanBase):
     def extra_state_attributes(self) -> dict[str, Any]:
         plan = self.coordinator.day_plan
         s = self._current_slot()
-        if not plan or not s:
+        if not plan:
             return {}
         return {
-            "battery_soc_est_pct": s.battery_soc_est_pct,
+            "battery_soc_est_pct": s.battery_soc_est_pct if s else None,
             "export_floor_kwh": round(plan.export_floor_kwh, 2),
             "evening_target_soc_pct": round(plan.evening_target_soc_pct, 1),
+            "total_exportable_kwh": round(plan.total_exportable_kwh, 2),
+            "hourly_load_kw": round(plan.hourly_load_kw, 2),
+            "pv_production_ratio": round(plan.pv_production_ratio, 2),
+            "solar_takeover": plan.solar_takeover_dt.isoformat() if plan.solar_takeover_dt else None,
             "plan_generated_at": plan.generated_at.isoformat(),
+            # P6-2: begränsad till 24h – hela 28h-horisonten sprängde recorderns
+            # 16 kB-gräns för attribut och slutade sparas alls.
+            "slots": [
+                {
+                    "start": slot.start.isoformat(),
+                    "end": slot.end.isoformat(),
+                    "action": slot.action,
+                    "target_power_w": round(slot.target_power_w, 0),
+                    "battery_soc_est_pct": round(slot.battery_soc_est_pct, 1),
+                }
+                for slot in plan.slots
+                if slot.start < dt_util.now() + timedelta(hours=24)
+            ],
         }
 
 
 class PlanExecutorChargeSensor(_DayPlanBase):
-    """Skuggsetpoint: vad plan-executorn hade laddat med (W) om den styrde.
+    """Laddningsbörvärdet som coordinatorns plan-executor faktiskt satte.
 
-    solar_charge → cappat mot faktiskt solöverskott (inte Solcast-prognos).
-    grid_charge  → planens target_power_w direkt.
-    Övriga       → 0 W.
+    Läser bara resultatet från coordinator.last_decision – executorn (i
+    coordinator.py) är den enda platsen som räknar ut det faktiska värdet.
     """
 
     _attr_unique_id = "sem_plan_executor_charge"
@@ -1038,63 +1092,20 @@ class PlanExecutorChargeSensor(_DayPlanBase):
 
     @property
     def native_value(self) -> float:
-        s = self._current_slot()
-        if not s:
-            return 0.0
-        data = self.coordinator.data or {}
-        batt_max_w = float(data.get("battery_max_power_kw", 5.0)) * 1000.0
-        if s.action == "solar_charge":
-            surplus_w = float(data.get("solar_surplus_w", 0.0))
-            ev_w = float(data.get("ev_total_power_w", 0.0))
-            battery_surplus_w = max(0.0, surplus_w - ev_w)
-            # prefer_sell: controller exporterar sol istället för att ladda batteri
-            sell_price = float(data.get("sell_price", 0.0))
-            sell_min = float(data.get("sell_solar_min_price", 0.80))
-            batt_soc = float(data.get("battery_soc_pct", 100.0))
-            evening_target = float(data.get("evening_target_soc_pct", 30.0))
-            evening_fill = batt_soc < evening_target
-            prefer_sell = sell_price >= sell_min and not evening_fill
-            if prefer_sell:
-                return 0.0
-            return round(min(battery_surplus_w, batt_max_w), 0)
-        if s.action == "grid_charge":
-            return round(min(max(0.0, s.target_power_w), batt_max_w), 0)
-        return 0.0
+        d = self.coordinator.last_decision
+        return round(d.battery_charge_power_w, 0) if d else 0.0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         s = self._current_slot()
-        data = self.coordinator.data or {}
-        surplus_w = float(data.get("solar_surplus_w", 0.0))
-        ev_w = float(data.get("ev_total_power_w", 0.0))
-        battery_surplus_w = max(0.0, surplus_w - ev_w)
-        sell_price = float(data.get("sell_price", 0.0))
-        sell_min = float(data.get("sell_solar_min_price", 0.80))
-        batt_soc = float(data.get("battery_soc_pct", 100.0))
-        evening_target = float(data.get("evening_target_soc_pct", 30.0))
-        evening_fill = batt_soc < evening_target
-        prefer_sell = sell_price >= sell_min and not evening_fill
-        plan_w = round(max(0.0, s.target_power_w), 0) if s else 0.0
-        return {
-            "plan_power_w": plan_w,
-            "actual_surplus_w": round(surplus_w, 0),
-            "ev_total_power_w": round(ev_w, 0),
-            "battery_surplus_w": round(battery_surplus_w, 0),
-            "prefer_sell": prefer_sell,
-            "evening_fill": evening_fill,
-            "sell_price": round(sell_price, 3),
-            "sell_solar_min_price": round(sell_min, 3),
-            "capped": s is not None and s.action == "solar_charge" and not prefer_sell and battery_surplus_w < plan_w,
-            "action": s.action if s else "unknown",
-        }
+        return {"action": s.action if s else "unknown"}
 
 
 class PlanExecutorDischargeSensor(_DayPlanBase):
-    """Skuggsetpoint: vad plan-executorn hade laddat ur med (W) om den styrde.
+    """Urladdningsbörvärdet som coordinatorns plan-executor faktiskt satte.
 
-    export        → planens prisväktade dispatch-effekt (target_power_w abs).
-    idle/cover_load → husets underskott (house_load_w − solar_surplus_w) capped mot batt_max.
-    Övriga (solar_charge, grid_charge) → 0 W.
+    Läser bara resultatet från coordinator.last_decision – executorn (i
+    coordinator.py) är den enda platsen som räknar ut det faktiska värdet.
     """
 
     _attr_unique_id = "sem_plan_executor_discharge"
@@ -1106,37 +1117,10 @@ class PlanExecutorDischargeSensor(_DayPlanBase):
 
     @property
     def native_value(self) -> float:
-        s = self._current_slot()
-        data = self.coordinator.data or {}
-        batt_max_w = float(data.get("battery_max_power_kw", 5.0)) * 1000.0
-        battery_soc = float(data.get("battery_soc_pct", 100.0))
-        battery_min_soc = float(data.get("battery_min_soc", 20.0))
-        house_load_w = float(data.get("house_load_w", 0.0))
-        solar_w = float(data.get("solar_power_w", 0.0))
-        house_deficit_w = max(0.0, house_load_w - solar_w)
-        if not s or s.action in ("solar_charge", "grid_charge"):
-            return 0.0
-        if battery_soc <= battery_min_soc:
-            return 0.0
-        evening_target = float(data.get("evening_target_soc_pct", battery_min_soc))
-        if battery_soc <= evening_target:
-            return 0.0
-        if s.action == "export":
-            # Totalt urladdningsbehov: netto-export + husets underskott
-            return round(min(abs(s.target_power_w) + house_deficit_w, batt_max_w), 0)
-        # idle / cover_load: bara husets underskott
-        return round(min(house_deficit_w, batt_max_w), 0)
+        d = self.coordinator.last_decision
+        return round(d.battery_discharge_power_w, 0) if d else 0.0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         s = self._current_slot()
-        data = self.coordinator.data or {}
-        house_load_w = float(data.get("house_load_w", 0.0))
-        solar_w = float(data.get("solar_power_w", 0.0))
-        return {
-            "action": s.action if s else "unknown",
-            "net_export_w": round(abs(s.target_power_w), 0) if s else 0.0,
-            "house_deficit_w": round(max(0.0, house_load_w - solar_w), 0),
-            "house_load_w": round(house_load_w, 0),
-            "solar_power_w": round(solar_w, 0),
-        }
+        return {"action": s.action if s else "unknown"}

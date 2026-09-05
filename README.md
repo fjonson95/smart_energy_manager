@@ -1,10 +1,161 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.5.47-blue)
+![Version](https://img.shields.io/badge/version-0.7.1-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.7.1
+
+Stage 7 of the development roadmap, partial (P7-2 only; P7-1 — extracting continuous history via HA's statistics API — is not implemented).
+
+- **Extracted the plan-executor into a reusable `EnergyController.apply_plan_executor()` method** — it previously existed only inline inside `coordinator.py`'s async update loop, which meant nothing outside a live Home Assistant instance could exercise it. `coordinator.py` now just calls this method; behavior is unchanged, it's the same code moved to where both the live coordinator and offline tooling can call it.
+- **Fixed `testdata/backtest.py`, which had been silently broken since the Stage 2 refactor** — it called `EnergyController(export_sell_percentile=..., export_min_solar_tomorrow_kwh=...)`, both parameters removed months ago when export logic moved to `EnergyPlanner`; it crashed immediately. It also predated every fix in Stages 1–6: stale sensor entity IDs (`sungrow_sg12rt_active_generation`, `solcast_pv_forecast_forecast_today`), the pre-P1-4 config values (33 kWh battery, 0.07 sell markup, 20A phase limit), and the literal `"unknown"` sentinel for no-car-selected. All corrected, and the backtest now builds a real `DayPlan` via `EnergyPlanner` and runs it through the same `apply_plan_executor()` the live system uses, instead of only exercising the (largely superseded) `EnergyController.compute()` self-consumption path.
+- **Solar per price-slot is approximated from actual historical production** (no historical Solcast p10/p50 archive exists to replay) — a p50 proxy from the real reading, with a fixed haircut for p10, just enough to exercise the floor/export logic meaningfully.
+- **Honest scope note**: this is a "shadow mode" evaluator — at each historical hour it asks "what would SEM have decided right now", using the *real* historical battery SOC, not a simulated one following SEM's own prior decisions. P7-2's full ambition (a simplified battery model integrating decisions forward into its own SOC trajectory) and P7-1 (pulling continuous history from HA's statistics API instead of the small hand-curated `testdata/timdata/*.csv` samples) are both still open.
+
+## What's New in 0.7.0
+
+Stage 6 of the development roadmap — reliability hygiene. No behavior change to decisions, just to how often and how safely they're written and stored.
+
+- **Deadband on service calls** — the coordinator was calling `switch.turn_on`/`turn_off` and `number.set_value` unconditionally every 30s cycle even when nothing changed (roughly 2900 no-op switch calls/day against the EV charger and the hot-water switch). Writes are now skipped when the target is within 50 W of the entity's own live-read state (exact match for switches) — but never skipped for more than 5 minutes straight, preserving the self-healing heartbeat from the earlier crash-safety work. Comparisons read the entity's *live* HA state rather than a self-tracked cache, so an externally-changed value is still caught and corrected.
+- **Recorder attribute size** — `sem_day_plan_reason`'s `slots` attribute carried the full 28h plan horizon, big enough to exceed the recorder's 16 KB attribute limit and silently stop being stored. Capped to the next 24h.
+- **Blocking sensor update** — `sem_nordpool_price_schedule` rebuilt its entire `prices_today`/`prices_tomorrow` attribute lists on every single state read (measured at 2.57s), even though the underlying price schedule only changes when Nordpool/Solcast data actually updates. Now cached by schedule object identity and only rebuilt when it changes.
+- **Sentinel collision** — the "no car selected" placeholder was the literal string `"unknown"`, which collides with Home Assistant's own reserved state for missing data (`STATE_UNKNOWN`), making the car-selection `select` entities look like they had no value at all rather than an explicit choice. Changed to `"none"`, with a translated display label ("No car selected" / "Ingen bil vald").
+- **Timezone correctness** — every `datetime.now()` call (which uses the *container's* system timezone, not Home Assistant's configured one — a real source of subtle bugs when they differ) was replaced with `homeassistant.util.dt.now()`. `energy_controller.py` has no Home Assistant imports by design (it needs to stay usable standalone for the planned backtest simulator), so it now receives "now" from the coordinator via a new `EnergyState.now` field instead, falling back to plain `datetime.now()` only if unset.
+- **Legionella never marks a run as started until it's confirmed** — previously, deciding "time to start" immediately set the manager's internal "running" flag, before the `switch.turn_on` call was even attempted. If that call failed (device offline, network hiccup), the manager would believe a run was in progress that never physically happened, and wouldn't retry. It now only ever considers a run "running" once the boiler's switch is *observed* on — a stronger guarantee than a successful API call, and it comes with automatic retry for free: as long as the switch reads off, the same start decision fires again next cycle.
+- **Removed the old manual control helpers** the plan flagged (`Charge_uncharge`, `Max Charge`, `Ladda effekt batteri`, `In_Out_Charge`, `Stop urladdning pris negativt`, `VV På`, `VV_fran`, `vv_till`) from Home Assistant. All eight were confirmed inert first: seven were read-only template sensors nothing referenced, and the eighth (`VV På`, a template switch) had `turn_on`/`turn_off` actions containing only a `wait_template` with no actual service call, so toggling it never did anything. Deleted with the user's confirmation.
+
+## What's New in 0.6.7
+
+Stage 5 of the development roadmap, partial — legionella scheduling (the rest of Stage 5 needs a real winter day first; see below).
+
+- **Legionella now targets the actual best slot in its preferred window, not the first one crossing a fixed threshold** – `PriceSchedule` gained `is_best_opportunity_now()`: is the current slot's forecast solar ≥ 6 kW, or is its buy price within the cheapest third of today's slots in the configured window? `LegionellaManager.should_run_now()` uses it when a price schedule is available, falling back to the old absolute thresholds otherwise. The solar threshold moved from 3 kW to 6 kW — the old value was lower than what the electric heating elements themselves draw, so "starting on solar surplus" could mean starting on a surplus smaller than the load about to switch on.
+
+## What's New in 0.6.6
+
+- **Fix: forcing EV charging stopped the battery from capturing solar, exporting it instead** – reported live: with `switch.sem_force_ev_charge` on, `_force_charge_ev()` never touched `decision.battery_charge_power_w`, which defaults to 0 — since the coordinator writes that value to the battery's force-charge number every cycle, this actively commanded the battery to stop charging, so any solar surplus beyond the EV's draw went straight to export. It now charges the battery from whatever surplus remains after the forced EV load.
+- **Fix: the mirror-image bug in `_force_charge_battery()`** – forcing the battery to charge similarly left every `ChargerDecision` at its `enable=False` default, blocking EV charging entirely even with ample solar surplus left over after the battery's charge rate. It now allocates remaining surplus to a connected, selected car the same way normal auto mode does.
+
+## What's New in 0.6.5
+
+- **Fix: `sem_decision_reason` silently dropped EV/hot-water reasoning whenever a plan existed** – found while investigating why an EV charging decision wasn't visible in the reason text. The 0.6.1 plan-executor consolidation *replaced* `decision.reason` outright in all its branches instead of extending it, discarding `_auto_mode`'s own reason text (which names which charger got solar current, whether hot water started, etc.) even though the underlying EV/hot-water decisions were still being applied correctly — only the visible explanation was wrong. The executor now prepends its battery-specific reasoning to the original reason instead of overwriting it.
+
+## What's New in 0.6.4
+
+- **Fix: `idle`/`cover_load` plan slots never charged the battery, even with a large real solar surplus** – found live: the plan classified the current slot as `cover_load` (dark/self-consumption) based on its 15-minute-old forecast, but actual solar surplus was over 10 kW. The 0.6.1 plan-executor consolidation only charged the battery for `solar_charge`/`grid_charge` actions, so `cover_load`/`idle` slots sat at 0 W both ways instead of capturing the unplanned surplus — exporting it at a near-zero sell price instead. The executor now also charges from real surplus during `idle`/`cover_load` slots (respecting the same `prefer_sell` check as `solar_charge`), falling back to self-consumption discharge only when there's a real deficit instead of a surplus.
+
+## What's New in 0.6.3
+
+Stage 4 of the development roadmap — the negative-price absorption ladder (partial: steps 1, 2, 4).
+
+- **Fix: negative price at night with no solar was never exploited** – the negative-price block required `solar_w > 0`, so a negative spot price overnight (no sun) did nothing at all, even though charging the battery from the grid at a negative price is pure profit. Removed the solar requirement.
+- **Fix: the proactive-headroom block disabled everything for hours, not just battery charging** – when a negative price was expected within 2h, the old code returned early, silently blocking self-consumption discharge, EV charging, and hot water for the entire lead-in window. It now only caps the battery's charge ceiling (to hold headroom) and falls through into the normal decision logic instead of short-circuiting it.
+- **New: an explicit, sequential absorption ladder for negative prices** — battery (full power) → hot water → EV, each step activating only once the previous one is saturated, instead of splitting solar surplus proportionally across all of them. `sem_decision_reason` now names the active step (e.g. "Negativt pris steg 1: batteri full effekt").
+- **Not yet implemented**: heating setpoint uplift (belongs to Stage 5) and inverter curtailment (Stage 4's last rung). Curtailment specifically requires manually calibrating `number.sg_power_limitation_setting`'s response curve first — the plan is explicit that this can't be tuned blind. When every other absorption step is saturated and the battery still exports at a negative price, the reason string says so plainly instead of pretending it's handled.
+
+## What's New in 0.6.2
+
+Stage 3 of the development roadmap — forecast reserve and snow detector.
+
+- **Plan against pessimistic (p10) solar, not the median** – `PriceSlot` now carries `solar_kwh_p10` alongside the existing median-based `solar_kwh` (`price_scheduler.py`). The export floor calculation and the "is tomorrow's solar strong enough to export tonight" gate (`energy_planner.py`) now read p10 instead of the median — a forecast that's optimistic by chance no longer lets the battery run emptier than it should. Revenue estimates and the general SOC simulation still use the median, since being conservative there would just make the plan pessimistic about earnings, not less safe.
+- **New: production ratio sensor detects snow/soiling** (`sem_pv_production_ratio`) – a rolling 3-day ratio of actual solar production (new optional config: `actual_solar_daily_entity`) against that day's Solcast forecast, persisted across restarts. Normal days sit around 0.8–1.3; a ratio below ~0.6 (snow-covered or dirty panels the forecast doesn't know about) automatically scales the export floor up toward full night-autonomy and the export gate tightens, until production recovers. Exposed as its own sensor and as an attribute on `sem_day_plan_reason` so it's visible *why* the system got cautious.
+- **New floor formula**: `behov_kwh` (p10-based need until solar takeover) → `reserv_kwh` (scaled up by an uncertainty markup driven by the production ratio) → `golv_kwh = min(battery_max, max(hard_floor, reserv_kwh))`. The hard floor is fixed at 10% of battery capacity and is now always enforced regardless of how small the computed reserve is on a sunny day.
+
+## What's New in 0.6.1
+
+- **Consolidated the three parallel copies of battery decision logic** (`_auto_mode`'s self-consumption blocks, the coordinator's plan-mode override, and a shadow-calculation in `PlanExecutorCharge/DischargeSensor`) into a single plan-executor in `coordinator.py`. It now sets the battery charge/discharge setpoint for **every** plan slot action (`solar_charge`, `grid_charge`, `export`, `idle`/`cover_load`), not just the two it used to override — using real-time solar surplus and house deficit, not the plan's forecast numbers. The executor re-runs phase/export-limit clamping (`_apply_phase_limits`) after setting the new values, closing a gap where a plan-driven override could bypass the phase protection added in 0.6.0.
+- `sem_plan_executor_charge`/`sem_plan_executor_discharge` now simply report the coordinator's actual last decision instead of independently recomputing a shadow estimate — they're guaranteed to match `sem_battery_charge_power_setpoint`/`..._discharge_power_setpoint` by construction.
+- The plan-vs-actual deviation log now compares against the *final* post-executor decision and no longer needs the "soft match" heuristics that previously masked known planner gaps — a logged deviation is now a real one, with `sem_decision_reason` explaining which real-time limit it hit.
+
+## What's New in 0.6.0
+
+Stage 2 of the development roadmap — a controller with a correct value model.
+
+- **Fix: export never actually triggered** – the day-plan's export filter compared sell price against a "reference buy price" that included energy tax, so the 90% threshold could never be beaten by a sell price (`build_plan()` in `energy_planner.py`). Replaced with a marginal-value model: exportable energy (already isolated as "above the floor" by the existing calculation) is only dispatched to a slot if that slot's sell price exceeds the battery's actual average cost (`sem_battery_average_price`, previously computed but never read) plus a configurable cycle/wear cost. Also wired in `export_min_solar_tomorrow_kwh` as an actually-read gate — previously stored but never consulted, so proactive export could trigger even when tomorrow's forecast was too weak to refill the battery.
+- **New config: `eta_roundtrip` (default 0.87) and `cycle_cost_sek_kwh` (default 0.05 SEK/kWh)** in the Battery section — the round-trip efficiency and per-kWh wear cost now feed the export profitability check above.
+- **Fix: phase protection was import-only** – `_apply_phase_limits()` in `energy_controller.py` only ever checked `phase_current <= max_current`, so a phase running high on *export* (large battery discharge, e.g. during a plan-driven export slot) was never caught. Now checks both directions; an over-limit export reduces battery discharge power (the only controllable export source) instead of touching EV/heater loads, which can't cause export overcurrent. Added a 2 A margin (`max_current_effective`) to account for the control loop's 30 s cycle plus the inverter's own response lag.
+- **New: separate export power cap** (`max_export_w`, default 14000 W, configurable in the Grid section) — the inverter's AC export rating is a different constraint than per-phase current; battery discharge is now also clamped so `solar + discharge` never exceeds it.
+- **Removed winter mode entirely** – `_winter_mode()`, the `WinterModeSwitch`, the four `winter_*` number entities, and all associated config were deleted. The day-plan's percentile-based pricing (already season-agnostic, using each day's own price distribution) and the export/grid-charge dispatch already cover what winter mode was for; the `winter` operating mode option is gone from the select entity.
+
+## What's New in 0.5.63
+
+- **Fix: reloading the integration mid-legionella-run could trigger a spurious duplicate start** – `LegionellaManager`'s run-tracking (`running`, `run_started_at`, `temp_confirmed`) only lived in memory. An options-flow save (or any config entry reload) recreated the coordinator and reset this state; if the boiler's switch happened to read `unavailable` for even one cycle right after the reload (a routine ems-esp communication blip), the manager mistook that for "the boiler just turned itself off" and, on the next due-check, started a second run — even though the original was still physically running and never actually finished. Two fixes: (1) run-tracking now persists to the same storage as `last_run`, restored on `async_load()`, so a reload/restart no longer loses an in-progress run or its true start time; (2) the switch is now read as a tri-state (on/off/unavailable) — an `unavailable` reading holds the current run status instead of being treated as "off".
+
+## What's New in 0.5.62
+
+- **Fix: solar energy per price slot was roughly double** – `_match_solar_to_slots()` in `price_scheduler.py` always converted average solar kW to kWh using a hardcoded 0.5 h (assuming a 30-minute slot), but Nordpool price slots are 15 minutes. Now uses the price slot's actual duration.
+- **Fix: house-load floor overrode legitimate real-meter readings** – the yesterday's-average floor was applied unconditionally whenever solar was active, even when `house_load_entity` was providing a real, valid reading — clamping away genuine midday dips. The floor now only applies when the entity is missing/unavailable and the code falls back to the grid-balance formula (the actual source of the transition-glitch bug it was meant to guard against). Added a rolling median over the last 3–5 samples of the real sensor to smooth transient meter glitches instead.
+- **Removed the 1.5 kW cap on predicted hourly load** in both `energy_controller.py` (evening-fill target calculation) and `energy_planner.py` (day-plan load estimate) — the cap was silently under-predicting winter consumption for an all-electric house. The 0.5 kW floor remains.
+- **Fixed two number entities that silently stopped working in v0.5.60**: `ExportSellPercentileNumber` and `ExportMinSellPriceNumber` wrote to `EnergyController` attributes that were removed when export logic moved to `EnergyPlanner`. Repointed to `coordinator._energy_planner`.
+- **Removed `EvSocTargetNumber`** (global "EV SOC target" number entity) — it wrote to an `EnergyController.ev_soc_target` attribute that was never read anywhere; each car's own per-car SOC target (set in the charger configuration) is what actually governs charging.
+- **All `number.py` entities now inherit `RestoreEntity` and persist changes to `entry.options`** — a value changed via the UI previously lived only in memory and reset to the config-flow default on restart. Now it's written back to the config entry (survives restart/reload) with `RestoreEntity` as a fast-path restore on entity add.
+
+## What's New in 0.5.61
+
+- **Fix: crash in opportunistic grid charging** – `_auto_mode()` referenced `_export_floor_kwh` and `_battery_energy_kwh` without ever defining them in scope, causing a `NameError` whenever opportunistic charging conditions were met (low solar forecast, not in economic peak, no active export). The floor is now derived from the day plan (`state.plan_export_floor_kwh`, set by the coordinator from `DayPlan.export_floor_kwh`) with a fallback to `battery_min_soc` when no plan is available; the battery energy is derived from SOC × capacity. Also removed a duplicate/dead assignment of `_charge_target_kwh`.
+- **Safety: battery setpoints always zeroed on unload** – `async_unload_entry` now writes 0 to both the charge and discharge setpoint entities before unloading, so a config reload or HA restart never leaves the battery frozen mid-charge or mid-discharge.
+- **Safety: guaranteed zero-first write ordering** – battery setpoint writes now always zero whichever direction (charge/discharge) is inactive *before* writing the active direction's power, using a blocking service call for the zero. This prevents a brief window where the inverter could see both charge and discharge setpoints non-zero during a direction switch.
+- **New optional config: battery operating-mode watchdog** – added `battery_operating_mode_entity` (Battery section). When configured, SEM checks this `select` entity every cycle and raises a persistent notification + log warning if it isn't set to `manual`, since in that case all setpoints SEM writes have no effect on the inverter.
+
+## What's New in 0.5.60
+
+- **Refactor: removed duplicate export logic from EnergyController** – the controller previously contained ~230 lines of proactive-export and morning-export logic that duplicated what EnergyPlanner already decides. Since the coordinator's plan-executor already overrides the controller's battery setpoints for `export` and `grid_charge` slots, the controller's own export calculation was never actually applied. Removed it entirely. The controller now reads `state.plan_action` (set by the coordinator from the current plan slot) and uses it only as a guard flag — blocking self-consumption discharge and opportunistic grid charging during an active export slot. Export power targets continue to come exclusively from the planner via the coordinator's plan-executor.
+
+## What's New in 0.5.59
+
+- **Fix: day-plan incorrectly scheduled export at low sell prices** – the planner's "max night-buy" filter compared the sell price against `PriceSchedule.slot.buy_sek`, which is only the Nordpool spot component (~1.7 SEK/kWh) and lacks electricity tax and grid fees. The actual full buy price was ~3.18 SEK/kWh, so the 90 % threshold was 1.53 SEK/kWh — making the check almost always pass and allowing export slots to appear in the plan even when selling at 1.63 SEK/kWh is a losing trade vs future grid purchase at 3.18 SEK/kWh. Fix: the coordinator now passes the actual full buy price (`state.buy_price_sek_kwh`) into `build_plan()`. The filter now uses 3.18 × 0.90 = 2.86 SEK/kWh as the threshold, correctly blocking export slots when sell price is below this level.
+
+## What's New in 0.5.58
+
+- **Improvement: Energy plan card clarity** (`sem-energy-plan-card.js`) – three UI improvements to make the current state unambiguous: (1) The plan-time row now shows the current plan action, e.g. "Plan skapad 19:00 · Nu: Egenförb. · slots: 12", so you can instantly see what the system is doing without inspecting sensors. (2) A colored action label is drawn directly in the canvas at the "nu" marker, making it clear whether the system is exporting, doing self-consumption, charging, etc. (3) Fixed a display bug where the export phase card showed "19:00–19:00" (identical start and end) when only one export slot exists — it now shows just the start time in that edge case.
+
+## What's New in 0.5.57
+
+- **Fix: EV blocked when battery is nearly full and Sonnen throttles** – v0.5.56 pre-empted all solar surplus for the house battery regardless of whether Sonnen was actually absorbing it. When the battery is near full (~94 % SOC), Sonnen enters standby and accepts only a few watts, but the pre-empted power was still withheld from the EV — resulting in 2.7 kW going to the grid with no one charging. Fix: the pre-emption now only runs when the battery is actually absorbing more than 100 W (`state.battery_power_w > 100`). When Sonnen throttles (e.g. 7 W), no surplus is pre-empted and the EV receives the full solar surplus.
+
+## What's New in 0.5.56
+
+- **Fix: house battery priority over EV charging** – the EV surplus loop ran before the battery charging block, so with e.g. 2342 W solar surplus the EV consumed ~2300 W and left only 42 W for the battery (below the 100 W threshold). Result: house battery stayed uncharged while the car charged. Fix: before the EV loop, the battery's share is pre-empted from `remaining_surplus` (up to `battery_max_power_kw`). EV then only gets what remains after the house battery is served. After the EV loop the pre-empted amount is returned to `remaining_surplus` so the battery block picks it up. When solar surplus is large enough for both (e.g. 5 000 W), both charge simultaneously.
+
+## What's New in 0.5.55
+
+- **Fix: solar exported at low price instead of stored in battery** – `prefer_sell` triggered whenever `sell_price ≥ 0.80 SEK/kWh`, which caused the battery charging block to be skipped entirely — even when the sell price was mediocre (e.g. 0.86 SEK/kWh) and the cheapest future recharge price was much higher (e.g. 1.74 SEK/kWh). This is a losing trade: sell now for 0.86, buy back later for 1.74. Fix: `prefer_sell` now additionally requires that the sell price is at least 90 % of `best_charge_slot.buy_sek` — the cheapest upcoming grid-charge price. If selling is cheaper than what you'll pay to refill, store in the battery instead. Example: 0.86 < 1.74 × 0.90 = 1.57 → `prefer_sell = False` → battery charges ✓. High-price day: 3.50 ≥ 1.74 × 0.90 = 1.57 → `prefer_sell = True` → export ✓.
+
+## What's New in 0.5.54
+
+- **Fix: battery charged from grid due to feedback loop in surplus formula** – v0.5.53 introduced `_effective_surplus_w = _raw_export_w + _batt_charge_w`. When solar dropped and the grid switched from export to import, `_raw_export_w` fell to 0 but `_batt_charge_w` still reflected the previous setpoint (e.g. 767 W). Result: the formula kept returning 767 W, the battery continued charging, and the house drew 632 W from the grid to compensate. Fix: the correction is now applied **only when the grid is actually exporting** (`_raw_export_w > 0`). If the grid is importing, the formula is not used and `solar_surplus_w` falls back to the standard `solar − house_load` calculation, which correctly yields 0 W when solar no longer exceeds load.
+
+## What's New in 0.5.53
+
+- **Fix: solar surplus still exported when battery already charging** – v0.5.52 fixed the case where the battery was in standby (0 W) and real grid-export exceeded the calculated surplus. But if the battery was already charging (e.g. 559 W), the grid-export reading reflected only what remained *after* the battery had taken its share (e.g. 312 W), making the supplement helpless: `max(558, 312) = 558 W`. Root cause: the effective surplus formula must account for both: `real_surplus = grid_export_after_charging + battery_charge_power`. In the example: 312 + 559 = 871 W → setpoint raised to 871 W → export drops to near zero. Fix: `_effective_surplus_w = _raw_export_w + _batt_charge_w`.
+
+## What's New in 0.5.52
+
+- **Fix: solar surplus going to grid instead of battery** – when the house-load sensor includes L3 loads powered directly by solar (bypassing the Sonnen's metering), the calculated surplus `solar_w − house_load_w` underestimates what the battery can actually capture. Result: SEM sent a 0 W charge setpoint, Sonnen entered standby, and all real solar surplus (up to 480 W) flowed to the grid. Fix: the surplus calculation is supplemented with the actual net grid-export reading (`−(grid_L1 + grid_L2 + grid_L3) − battery_discharge`). If more electricity is actually leaving the house than the formula predicted, that real-export value is used as the effective surplus — ensuring the battery receives it instead of the grid.
+
+## What's New in 0.5.51
+
+- **Fix: opportunistic grid charging blocked on cloudy days** – the opportunistic charge block previously required `battery_charge_power_w == 0.0`, meaning any active solar-surplus charge (even 50 W trickle on an overcast day) prevented grid top-up entirely. On a day when the solar forecast is below 10 kWh, the battery could stay undercharged even during the cheapest price slots. Fix: the `== 0.0` guard is removed. The block now runs whenever today's **or** tomorrow's solar forecast is below `DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH` (10 kWh), and only overrides `battery_charge_power_w` if the calculated grid-charge rate is **higher** than the current solar-surplus rate (`max()` instead of assignment) — solar surplus always has priority; the grid only tops up to the target if solar alone is insufficient.
+
+## What's New in 0.5.50
+
+- **Fix: plan export pauses at export floor** – the plan executor's `export` case now checks actual battery kWh against `export_floor_kwh` before discharging. If the battery reaches or drops below the floor (+ 0.5 kWh safety margin), export is paused and the reason is logged as `Plan export PAUSAD`. This prevents the battery from being drained below the overnight reserve when the actual SOC differs from the plan's projected SOC at generation time.
+
+## What's New in 0.5.49
+
+- **Plan-mode activated**: DayPlan now drives actual Sonnen setpoints in `auto` mode (previously comparison/logging only). Coordinator overrides `battery_charge_power_w`/`battery_discharge_power_w` based on the current plan slot:
+  - `solar_charge` – left to controller (actual solar surplus handled best in real-time)
+  - `grid_charge` – charges battery at plan's target power; suppressed if `economic_peak` is active (buy price ≥ 1.2× cheapest future slot) and replaced by self-consumption discharge
+  - `export` – discharges plan's price-weighted export volume + house deficit
+  - `idle` / `cover_load` – covers house load from battery if SOC > evening target; otherwise 0 W
+- **Fix plan executor sensors**: `PlanExecutorChargeSensor` (grid_charge) and `PlanExecutorDischargeSensor` (grid_charge during economic_peak) now return correct values. Sensors mirror exactly what the coordinator actually executes.
+- `battery_max_power_kw` added to coordinator data dict so sensors read the configured max instead of the 5 kW default.
+
+## What's New in 0.5.48
+
+- **Fix: opportunistic charging blocked self-consumption discharge during economic peak** – each night when the battery fell below the export floor threshold (>0.5 kWh deficit) and the current hour happened to have a price below the percentile threshold, the opportunistic charging block triggered. It set `battery_charge_power_w > 0`, which caused the self-consumption discharge block to be skipped (the `decision.battery_charge_power_w == 0.0` condition failed). Result: discharge setpoint dropped to 0 for ~30 minutes (until the next hour with a higher price), grid covered the full house load, and the system also ran grid-to-battery charging in parallel. The cycle repeated every time a cheap price slot coincided with battery SOC below the floor. Fix: `_economic_peak` is now computed *before* the opportunistic charging block and added as a `not _economic_peak` guard. During economic peak (buy price ≥ cheapest future charge price × 1.2) it is more economical to discharge now and recharge cheaply later — opportunistic charging is counterproductive and is suppressed.
 
 ## What's New in 0.5.47
 

@@ -13,6 +13,7 @@
           "grid_current_l2_entity": "Nätström L2",
           "grid_current_l3_entity": "Nätström L3",
           "max_current_per_phase": "Max ström per fas (A)",
+          "max_export_w": "Växelriktarens max exporteffekt (W)",
           "grid_voltage": "Nätspänning (V)",
           "grid_fees_sek_kwh": "Nätavgift (SEK/kWh)",
           "energy_tax_sek_kwh": "Energiskatt (SEK/kWh)",
@@ -37,7 +38,8 @@
           "solar_power_l2_entity": "Soleffekt L2",
           "solar_power_l3_entity": "Soleffekt L3",
           "solcast_today_entity": "Solcast prognos idag (kWh)",
-          "solcast_tomorrow_entity": "Solcast prognos imorgon (kWh)"
+          "solcast_tomorrow_entity": "Solcast prognos imorgon (kWh)",
+          "actual_solar_daily_entity": "Faktisk solproduktion idag (kWh, nollställs vid midnatt) – för snö-/nedsmutsningsdetektion"
         }
       },
       "battery": {
@@ -48,6 +50,7 @@
           "battery_inverter_power_entity": "Batteri effekt (W)",
           "battery_inverter_charge_entity": "Laddningssetpunkt",
           "battery_inverter_discharge_entity": "Urladdningssetpunkt",
+          "battery_operating_mode_entity": "Batteriets driftläge (select) – varnar om den inte står på \"manual\"",
           "battery_capacity_kwh": "Batterikapacitet (kWh)",
           "battery_max_power_kw": "Max effekt (kW)",
           "battery_min_soc": "Min SOC (%)",
@@ -55,6 +58,8 @@
           "export_sell_percentile": "Proaktiv export: prispercentil (0.75 = topp 25%)",
           "export_min_solar_tomorrow_kwh": "Proaktiv export: min Solcast imorgon (kWh)",
           "export_min_sell_price_sek_kwh": "Proaktiv export: absolut minimipris (kr/kWh, 0 = inaktivt)",
+          "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
+          "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
           "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
         }
       },
@@ -144,6 +149,7 @@
           "grid_current_l2_entity": "Nätström L2",
           "grid_current_l3_entity": "Nätström L3",
           "max_current_per_phase": "Max ström per fas (A)",
+          "max_export_w": "Växelriktarens max exporteffekt (W)",
           "grid_voltage": "Nätspänning (V)",
           "grid_fees_sek_kwh": "Nätavgift (SEK/kWh)",
           "energy_tax_sek_kwh": "Energiskatt (SEK/kWh)",
@@ -168,7 +174,8 @@
           "solar_power_l2_entity": "Soleffekt L2",
           "solar_power_l3_entity": "Soleffekt L3",
           "solcast_today_entity": "Solcast prognos idag (kWh)",
-          "solcast_tomorrow_entity": "Solcast prognos imorgon (kWh)"
+          "solcast_tomorrow_entity": "Solcast prognos imorgon (kWh)",
+          "actual_solar_daily_entity": "Faktisk solproduktion idag (kWh, nollställs vid midnatt) – för snö-/nedsmutsningsdetektion"
         }
       },
       "battery_opts": {
@@ -179,6 +186,7 @@
           "battery_inverter_power_entity": "Batteri effekt (W)",
           "battery_inverter_charge_entity": "Laddningssetpunkt",
           "battery_inverter_discharge_entity": "Urladdningssetpunkt",
+          "battery_operating_mode_entity": "Batteriets driftläge (select) – varnar om den inte står på \"manual\"",
           "battery_capacity_kwh": "Batterikapacitet (kWh)",
           "battery_max_power_kw": "Max effekt (kW)",
           "battery_min_soc": "Min SOC (%)",
@@ -186,6 +194,8 @@
           "export_sell_percentile": "Proaktiv export: prispercentil (0.75 = topp 25%)",
           "export_min_solar_tomorrow_kwh": "Proaktiv export: min Solcast imorgon (kWh)",
           "export_min_sell_price_sek_kwh": "Proaktiv export: absolut minimipris (kr/kWh, 0 = inaktivt)",
+          "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
+          "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
           "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
         }
       },
@@ -335,6 +345,9 @@
       "solar_next_4h": {
         "name": "Solprognos 4h"
       },
+      "pv_production_ratio": {
+        "name": "Produktionskvot (3 dygn)"
+      },
       "solar_next_8h": {
         "name": "Solprognos 8h"
       },
@@ -383,17 +396,13 @@
         "name": "Tvångsladdning bil",
         "description": "Tvingar bilen att ladda oavsett solöverskott och pris. Stängs av automatiskt när EV SOC-målet nås."
       },
-      "winter_mode": {
-        "name": "Vinterläge",
-        "description": "Aktiverar vinterläge: batteriet laddas från nätet under billiga timmar och laddas ur under dyra timmar."
-      },
       "force_charge_battery": {
         "name": "Tvångsladdning batteri",
         "description": "Tvingar batteriet att ladda från nätet oavsett pris. Används manuellt för att snabbt fylla batteriet."
       },
       "opportunistic_charge": {
         "name": "Opportunistisk nätladdning",
-        "description": "Laddar batteriet från nätet om köppriset är under den billiga priströskeln, även utanför vinterläge."
+        "description": "Laddar batteriet från nätet om köppriset är under den billiga priströskeln."
       }
     },
     "number": {
@@ -404,26 +413,6 @@
       "battery_max_soc": {
         "name": "Batteri max SOC",
         "description": "Högsta tillåtna SOC för batteriet. Reduceras automatiskt inför kommande negativpristimmar för att ha rum att absorbera."
-      },
-      "ev_soc_target": {
-        "name": "EV SOC-mål",
-        "description": "Bilens mål-SOC i procent. Laddningen stoppas automatiskt när bilen når detta värde."
-      },
-      "winter_cheap_threshold": {
-        "name": "Vinter billig priströskel",
-        "description": "Köppris (SEK/kWh) under vilket batteri och bil laddas från nätet i vinterläge."
-      },
-      "winter_expensive_threshold": {
-        "name": "Vinter dyr priströskel",
-        "description": "Köppris (SEK/kWh) över vilket batteriet laddas ur för att täcka huslasten i vinterläge."
-      },
-      "winter_min_soc": {
-        "name": "Vinter min SOC",
-        "description": "Lägsta SOC batteriet får urladdas till i vinterläge. Skyddar mot att tömma batteriet under kalla nätter."
-      },
-      "winter_max_soc": {
-        "name": "Vinter max SOC",
-        "description": "Högsta SOC batteriet laddas till i vinterläge under billiga timmar."
       },
       "export_sell_percentile": {
         "name": "Proaktiv export prispercentil",
@@ -437,7 +426,13 @@
     "select": {
       "operating_mode": {
         "name": "Driftläge",
-        "description": "Välj driftläge: auto = solöverskottsstyrt, winter = billigast-timmar-laddning, force_charge_ev/battery = tvångsladdning, manual = inga automatiska beslut."
+        "description": "Välj driftläge: auto = solöverskottsstyrt (percentilbaserad billig-/dyr-timme ingår), force_charge_ev/battery = tvångsladdning, manual = inga automatiska beslut."
+      },
+      "active_car": {
+        "name": "Active Car",
+        "state": {
+          "none": "Ingen bil vald"
+        }
       }
     }
   },

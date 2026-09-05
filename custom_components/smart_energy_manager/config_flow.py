@@ -13,6 +13,7 @@ from homeassistant.helpers import selector
 from .const import (
     DOMAIN,
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_INVERTER_CHARGE, CONF_BATTERY_INVERTER_DISCHARGE,
+    CONF_BATTERY_OPERATING_MODE_ENTITY,
     CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
     CONF_SOLAR_INVERTER_TOTAL,
     CONF_SOLAR_INVERTER_POWER_L1, CONF_SOLAR_INVERTER_POWER_L2, CONF_SOLAR_INVERTER_POWER_L3,
@@ -23,11 +24,11 @@ from .const import (
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
     CONF_NORDPOOL_ENTITY, CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS, NORDPOOL_TYPE_OFFICIAL,
     CONF_NORDPOOL_AREA, DEFAULT_NORDPOOL_AREA,
-    CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW,
+    CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW, CONF_ACTUAL_SOLAR_DAILY_ENTITY,
     CONF_GRID_FEES, CONF_ENERGY_TAX, CONF_VAT_RATE, CONF_SELL_EXTRA_REVENUE,
-    CONF_MAX_CURRENT_PER_PHASE, CONF_GRID_VOLTAGE,
+    CONF_MAX_CURRENT_PER_PHASE, CONF_MAX_EXPORT_W, CONF_GRID_VOLTAGE,
     CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC,
-    DEFAULT_MAX_CURRENT, DEFAULT_GRID_VOLTAGE, DEFAULT_VAT_RATE,
+    DEFAULT_MAX_CURRENT, DEFAULT_MAX_EXPORT_W, DEFAULT_GRID_VOLTAGE, DEFAULT_VAT_RATE,
     DEFAULT_GRID_FEES, DEFAULT_ENERGY_TAX, DEFAULT_SELL_EXTRA_REVENUE,
     DEFAULT_BATTERY_MIN_SOC, DEFAULT_BATTERY_MAX_SOC,
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
@@ -44,18 +45,15 @@ from .const import (
     DEFAULT_LEGIONELLA_PREFERRED_HOUR_START, DEFAULT_LEGIONELLA_PREFERRED_HOUR_END,
     DEFAULT_LEGIONELLA_MAX_PRICE, DEFAULT_LEGIONELLA_DURATION_MINUTES,
     EV_PHASES_OPTIONS,
-    DEFAULT_WINTER_CHEAP_THRESHOLD, DEFAULT_WINTER_EXPENSIVE_THRESHOLD,
-    DEFAULT_WINTER_MIN_SOC, DEFAULT_WINTER_MAX_SOC,
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH,
-    CONF_WINTER_CHEAP_HOUR_THRESHOLD, CONF_WINTER_EXPENSIVE_HOUR_THRESHOLD,
-    CONF_WINTER_MIN_SOC, CONF_WINTER_MAX_SOC,
     CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH,
     DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH,
     CONF_BATTERY_POWER_INVERTED,
+    CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -102,6 +100,7 @@ def _grid_schema(d: dict) -> vol.Schema:
         vol.Optional(CONF_GRID_CURRENT_L2, default=_d(d, CONF_GRID_CURRENT_L2, "")): _opt_entity_selector(),
         vol.Optional(CONF_GRID_CURRENT_L3, default=_d(d, CONF_GRID_CURRENT_L3, "")): _opt_entity_selector(),
         vol.Optional(CONF_MAX_CURRENT_PER_PHASE, default=_d(d, CONF_MAX_CURRENT_PER_PHASE, DEFAULT_MAX_CURRENT)): vol.Coerce(float),
+        vol.Optional(CONF_MAX_EXPORT_W, default=_d(d, CONF_MAX_EXPORT_W, DEFAULT_MAX_EXPORT_W)): vol.Coerce(float),
         vol.Optional(CONF_GRID_VOLTAGE, default=_d(d, CONF_GRID_VOLTAGE, DEFAULT_GRID_VOLTAGE)): vol.Coerce(float),
         vol.Optional(CONF_GRID_FEES, default=_d(d, CONF_GRID_FEES, DEFAULT_GRID_FEES)): vol.Coerce(float),
         vol.Optional(CONF_ENERGY_TAX, default=_d(d, CONF_ENERGY_TAX, DEFAULT_ENERGY_TAX)): vol.Coerce(float),
@@ -136,6 +135,7 @@ def _solar_schema(d: dict) -> vol.Schema:
         vol.Optional(CONF_SOLAR_INVERTER_POWER_L3, default=_d(d, CONF_SOLAR_INVERTER_POWER_L3, "")): _opt_entity_selector(),
         vol.Optional(CONF_SOLCAST_TODAY, default=_d(d, CONF_SOLCAST_TODAY, "")): _opt_entity_selector(),
         vol.Optional(CONF_SOLCAST_TOMORROW, default=_d(d, CONF_SOLCAST_TOMORROW, "")): _opt_entity_selector(),
+        vol.Optional(CONF_ACTUAL_SOLAR_DAILY_ENTITY, default=_d(d, CONF_ACTUAL_SOLAR_DAILY_ENTITY, "")): _opt_entity_selector(),
     })
 
 
@@ -145,6 +145,7 @@ def _battery_schema(d: dict) -> vol.Schema:
         vol.Optional(CONF_BATTERY_INVERTER_POWER, default=_d(d, CONF_BATTERY_INVERTER_POWER, "")): _opt_entity_selector(),
         vol.Optional(CONF_BATTERY_INVERTER_CHARGE, default=_d(d, CONF_BATTERY_INVERTER_CHARGE, "")): _opt_entity_selector(),
         vol.Optional(CONF_BATTERY_INVERTER_DISCHARGE, default=_d(d, CONF_BATTERY_INVERTER_DISCHARGE, "")): _opt_entity_selector(),
+        vol.Optional(CONF_BATTERY_OPERATING_MODE_ENTITY, default=_d(d, CONF_BATTERY_OPERATING_MODE_ENTITY, "")): _opt_entity_selector(),
         vol.Optional(CONF_BATTERY_CAPACITY_KWH, default=_d(d, CONF_BATTERY_CAPACITY_KWH, 10.0)): vol.Coerce(float),
         vol.Optional(CONF_BATTERY_MAX_POWER_KW, default=_d(d, CONF_BATTERY_MAX_POWER_KW, 5.0)): vol.Coerce(float),
         vol.Optional(CONF_BATTERY_MIN_SOC, default=_d(d, CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)): vol.Coerce(float),
@@ -159,6 +160,12 @@ def _battery_schema(d: dict) -> vol.Schema:
             selector.NumberSelectorConfig(min=0.0, max=2.0, step=0.05, mode=selector.NumberSelectorMode.BOX)
         ),
         vol.Optional(CONF_BATTERY_POWER_INVERTED, default=_d(d, CONF_BATTERY_POWER_INVERTED, False)): selector.BooleanSelector(),
+        vol.Optional(CONF_ETA_ROUNDTRIP, default=_d(d, CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX)
+        ),
+        vol.Optional(CONF_CYCLE_COST_SEK_KWH, default=_d(d, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX)
+        ),
     })
 
 

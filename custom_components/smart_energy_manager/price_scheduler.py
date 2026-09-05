@@ -45,8 +45,9 @@ class PriceSlot:
     spot_sek: float          # SEK/kWh (konverterat från öre)
     buy_sek: float = 0.0     # Köppris inkl avgifter/skatt/moms
     sell_sek: float = 0.0    # Säljpris
-    solar_kw: float = 0.0    # Förväntad soleffekt under slotten (kW, median)
-    solar_kwh: float = 0.0   # Förväntad solenergi under slotten (kWh)
+    solar_kw: float = 0.0    # Förväntad soleffekt under slotten (kW, median/p50)
+    solar_kwh: float = 0.0   # Förväntad solenergi under slotten (kWh, median/p50) – intäktsuppskattningar
+    solar_kwh_p10: float = 0.0  # Pessimistisk solenergi (kWh, p10) – golv och exportspärr ska ALDRIG räkna på mer än detta
 
     @property
     def net_buy_sek(self) -> float:
@@ -122,6 +123,47 @@ class PriceSchedule:
 
     # Timmar tills soltoppen nås (0 om det är nu eller ingen prognos)
     hours_to_solar_peak: float = 0.0
+
+    def is_best_opportunity_now(
+        self,
+        now: datetime,
+        hour_start: int,
+        hour_end: int,
+        solar_threshold_kw: float = 6.0,
+        cheap_fraction: float = 1 / 3,
+    ) -> tuple[bool, str]:
+        """Är NU bland de billigaste `cheap_fraction` av dagens slots inom
+        [hour_start, hour_end), eller har verkligt solöverskott ≥ solar_threshold_kw?
+
+        Används för att schemalägga förutsägbara laster (legionella, extra
+        varmvatten) mot den bästa möjliga sloten i fönstret istället för ett
+        fast tröskelvärde – annars triggar det första ögonblicket som råkar
+        vara "billigt nog", inte det bästa tillfället som faktiskt fanns.
+        """
+        now_a = now if now.tzinfo else now.astimezone()
+        today = now_a.date()
+        window_slots = [
+            s for s in (self.slots or [])
+            if s.start.astimezone().date() == today
+            and hour_start <= s.start.astimezone().hour < hour_end
+        ]
+        if not window_slots:
+            return False, "inget prisschema för fönstret"
+
+        current_slot = next((s for s in window_slots if s.start <= now_a < s.end), None)
+        if current_slot is None:
+            return False, "utanför fönstret"
+
+        if current_slot.solar_kw >= solar_threshold_kw:
+            return True, f"sol {current_slot.solar_kw:.1f}kW ≥ {solar_threshold_kw:.0f}kW"
+
+        sorted_buys = sorted(s.buy_sek for s in window_slots)
+        idx = max(0, int(len(sorted_buys) * cheap_fraction) - 1)
+        cheap_threshold = sorted_buys[idx]
+        if current_slot.buy_sek <= cheap_threshold:
+            return True, f"billigaste tredjedelen ({current_slot.buy_sek:.2f} kr ≤ {cheap_threshold:.2f} kr)"
+
+        return False, f"varken billigt ({current_slot.buy_sek:.2f} kr) eller soligt ({current_slot.solar_kw:.1f}kW) nog"
 
 
 class PriceScheduler:
@@ -237,15 +279,23 @@ class PriceScheduler:
         for ps in price_slots:
             # Hitta solslottar som överlappar prisslotten
             total_kw = 0.0
+            total_kw10 = 0.0
             count = 0
             for ss in solar_slots:
                 ss_end = ss.start + timedelta(minutes=30)
                 if ss.start < ps.end and ss_end > ps.start:
                     total_kw += ss.kw_estimate
+                    total_kw10 += ss.kw_estimate10
                     count += 1
             if count:
                 ps.solar_kw = total_kw / count
-                ps.solar_kwh = ps.solar_kw * 0.5
+                # Prisslotens faktiska längd (Nordpool = kvart, inte antagen halvtimme
+                # som Solcast) – annars blir solar_kwh dubbelt för stor per slot.
+                slot_h = (ps.end - ps.start).total_seconds() / 3600.0
+                ps.solar_kwh = ps.solar_kw * slot_h
+                # p10 (pessimistisk) – används av golvet och exportspärren, aldrig
+                # för intäktsuppskattningar (se PriceSlot.solar_kwh_p10).
+                ps.solar_kwh_p10 = (total_kw10 / count) * slot_h
 
     def parse_nordpool_attributes(
         self,

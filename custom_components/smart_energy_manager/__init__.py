@@ -43,6 +43,12 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    coordinator: SmartEnergyCoordinator = hass.data[DOMAIN][entry.entry_id]
+    try:
+        await coordinator.async_zero_battery()
+    except Exception:
+        _LOGGER.exception("Kunde inte nollställa batteriet vid avlastning")
+
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
