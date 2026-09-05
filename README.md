@@ -1,10 +1,18 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.7.1-blue)
+![Version](https://img.shields.io/badge/version-0.7.2-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.7.2
+
+Stage 7 of the development roadmap, complete — both P7-1 (real historical extraction, done earlier but never given its own changelog entry) and P7-2 (the forward-simulating battery model).
+
+- **P7-1 — real history instead of hand-curated samples**: `testdata/backtest.py` can now load `testdata/history/`, a directory of CSVs pulled from Home Assistant's statistics API (hourly solar/house-load/outdoor-temp/battery-SOC, quarter-hour price — matching production's real slot length, not an assumed hour). Covers the ~10-day window where all five quantities overlap (the solar sensor is new since 2026-08-06, and raw quarter-hour price history is only retained ~10 days by the recorder) — see `testdata/history/Series info.txt` for exact ranges and how to regenerate/extend it.
+- **P7-2 — the simulator runs three passes per slot now, not one**: alongside the existing "shadow" pass (what SEM would decide, given the *real* historical SOC), the backtest now also runs (a) a **forward simulation** that feeds SEM's decisions back into its own running SOC via a simplified battery model (`_simulate_battery_soc`, round-trip efficiency split evenly across the charge/discharge legs) instead of reading next hour's SOC from the CSV, deriving grid import/export/cost from the energy balance since the real historical grid reading no longer applies once the SOC trajectory diverges from history; (b) a **no-battery/no-control reference** (grid = house load − solar only) to measure savings against, per the plan's acceptance criterion; and (c) a **model-fidelity replay** that feeds the *historically measured* battery power (not SEM's decisions) through the same energy-balance formula and compares the result against the real measured grid import/export — this is what actually tests whether the physics are trustworthy, since comparing SEM's new (different, hopefully better) decisions against history's old ones will always show a large gap by design.
+- **Honest result on the bundled `testdata/timdata/*.csv` samples**: the model-fidelity replay shows large errors on them, but that's a data-quality finding, not a simulator bug — those files were already documented as "small, sparse, manually-curated" (mostly one-hour gaps punctuated by a single multi-week gap), which the forward/replay integration can't sensibly bridge. Against the continuous `testdata/history/` data, the forward simulation reproduces the real end-of-period battery SOC to within 1 percentage point over a 10-day run — a sound sanity check, even though that source still can't run the fidelity replay itself (no historical grid-phase data extracted for it yet, see P7-1 above).
 
 ## What's New in 0.7.1
 

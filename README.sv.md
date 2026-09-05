@@ -1,8 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.7.1-blue)
+![Version](https://img.shields.io/badge/version-0.7.2-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.7.2
+
+Etapp 7 i utvecklingsplanen, klar – både P7-1 (riktig historikextraktion, gjord tidigare men aldrig dokumenterad i en egen changelog-post) och P7-2 (den framåtsimulerande batterimodellen).
+
+- **P7-1 – riktig historik istället för handplockade prov**: `testdata/backtest.py` kan nu läsa `testdata/history/`, en mapp med CSV:er hämtade från Home Assistants statistik-API (timupplöst sol/huslast/utomhustemp/batteri-SOC, kvartsupplöst pris – matchar produktionens riktiga slotlängd, inte en antagen timme). Täcker det ~10-dagarsfönster där alla fem storheter finns samtidigt (solsensorn är ny sedan 2026-08-06, och rå kvartsupplöst prishistorik sparas bara ~10 dygn av recordern) – se `testdata/history/Series info.txt` för exakta perioder och hur man återskapar/utökar den.
+- **P7-2 – simulatorn kör tre pass per slot nu, inte ett**: utöver det befintliga "skugg"-passet (vad SEM hade beslutat, givet det VERKLIGA historiska SOC:et) kör backtesten nu också (a) en **framåtsimulering** som matar SEM:s beslut tillbaka in i sin egen löpande SOC via en förenklad batterimodell (`_simulate_battery_soc`, tur-och-retur-verkningsgraden delad jämnt mellan laddnings-/urladdningsbenen) istället för att läsa nästa timmes SOC ur CSV:n, och härleder nätimport/-export/-kostnad ur energibalansen eftersom den verkliga historiska nätavläsningen inte längre gäller när SOC-banan avviker från historiken; (b) en **referens utan batteri/styrning** (nät = huslast − sol) att mäta besparingen mot, enligt planens acceptanskriterium; och (c) en **modelltrohets-återspelning** som matar den HISTORISKT UPPMÄTTA batterieffekten (inte SEM:s beslut) genom samma energibalansformel och jämför resultatet mot den verkligt uppmätta nätimporten/-exporten – det är den som faktiskt prövar om fysiken går att lita på, eftersom en jämförelse mellan SEM:s nya (annorlunda, förhoppningsvis bättre) beslut och historikens gamla alltid kommer visa en stor skillnad per design.
+- **Ärligt resultat på de medskickade `testdata/timdata/*.csv`-proven**: modelltrohets-återspelningen visar stora fel på dem, men det är ett datakvalitetsfynd, inte en simulatorbugg – de filerna var redan dokumenterade som "små, glesa, handplockade prov" (mestadels en-timmesluckor punkterade av en enda flerveckorslucka), vilket framåt-/återspelningsintegrationen inte rimligen kan överbrygga. Mot den sammanhängande `testdata/history/`-datan återskapar framåtsimuleringen den verkliga SOC:en vid periodens slut inom 1 procentenhet över en 10-dagarskörning – ett sunt rimlighetstest, även om den källan ännu inte kan köra trohets-återspelningen själv (ingen historisk nätfasdata extraherad för den ännu, se P7-1 ovan).
 
 ## Nyheter i 0.7.1
 

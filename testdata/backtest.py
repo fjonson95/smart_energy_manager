@@ -6,13 +6,27 @@ EnergyController.apply_plan_executor() (the exact same method coordinator.py
 calls in production, so this reflects real behavior, not just the standalone
 EnergyController.compute() heuristics).
 
-"Shadow mode", not a true forward simulation: battery_soc_pct at each hour
-comes from the REAL historical SOC in the CSV, not from a simulated
-trajectory following SEM's own decisions. It answers "what would SEM have
-decided at this historical moment", not "what would the SOC curve have
-looked like if SEM had been driving the whole time" (Etapp 7 / P7-2's full
-ambition — a simplified battery model integrating the decisions forward —
-is not implemented here).
+Every slot runs the pipeline TWICE:
+
+  - "Shadow" columns (unprefixed / actual_*): battery_soc_pct comes from the
+    REAL historical SOC in the data. Answers "what would SEM have decided at
+    this historical moment" — a sanity check of the decision logic, not a
+    cost estimate, since a real operator (or the old control system) may
+    have already deviated from what SEM would have chosen.
+  - "Simulated" columns (sim_*, P7-2): battery_soc_pct instead comes from a
+    running SOC that this script itself integrates forward from SEM's own
+    prior decisions (a simplified battery model — see _simulate_battery_soc).
+    Solar production and house load are NOT simulated (no weather/load model
+    exists) — they stay the real historical readings, matching P7-2's scope
+    of "a simplified battery model following the decisions", not a full
+    house simulation. Grid import/export/cost for this column are DERIVED
+    from the energy balance (house_load + battery_charge - battery_discharge
+    - solar), not measured, since a diverging SOC trajectory means the real
+    historical grid reading no longer applies.
+  - "Reference" columns (ref_*, P7-2): the same energy balance with the
+    battery held out entirely (grid = house_load - solar) — "what the house
+    would have cost with solar but no battery and no control", the baseline
+    the plan's acceptance criterion measures savings against.
 
 Solar per price-slot is a p50 proxy built from the ACTUAL historical solar
 reading at that time (no historical Solcast p10/p50 archive exists), with a
@@ -30,11 +44,13 @@ Two input formats, auto-detected from whether `input` is a file or a directory:
     real quarter-hour resolution — matching production, where price slots are
     genuinely 15 minutes, not an assumed hour). The hourly quantities are
     forward-filled onto the price series' quarter-hour grid. This format has
-    NO historical grid-phase readings, so the "actual" import/export/cost
-    accounting in the summary is unavailable for it (reported as such) — only
-    the decision/plan_action columns (what SEM would have chosen) are
-    meaningful. See testdata/history/Series info.txt for exactly what period
-    and quantities are available.
+    NO historical grid-phase readings, so the "shadow"/actual_* import/
+    export/cost accounting in the summary is unavailable for it (reported as
+    such) — the decision/plan_action columns AND the sim_*/ref_* P7-2 columns
+    remain meaningful regardless, since those are derived from the energy
+    balance rather than measured from grid phases. See
+    testdata/history/Series info.txt for exactly what period and quantities
+    are available.
 
 Usage (from repo root):
     python testdata/backtest.py testdata/timdata/htestdata1.csv [--out results.csv]
@@ -54,6 +70,7 @@ import os
 import csv
 import bisect
 import argparse
+import dataclasses
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -389,6 +406,32 @@ def build_state(row: dict[str, str], price_schedule: Optional[PriceSchedule], s:
     )
 
 
+def _simulate_battery_soc(
+    soc_pct: float,
+    charge_w: float,
+    discharge_w: float,
+    slot_h: float,
+    capacity_kwh: float,
+    eta_roundtrip: float,
+) -> float:
+    """P7-2 batterimodell: integrera SOC framåt utifrån SEM:s eget beslut i
+    denna slot, i stället för att läsa nästa slots SOC ur historiken.
+
+    eta_roundtrip är en tur-och-retur-verkningsgrad (ellagring ut / el in för
+    en full cykel). Utan uppmätt fördelning mellan laddnings- och
+    urladdningsförlust delas den lika mellan benen (sqrt) — en förenkling,
+    men den enda som inte kräver data vi inte har.
+    """
+    eta_leg = eta_roundtrip ** 0.5
+    energy_kwh = soc_pct / 100.0 * capacity_kwh
+    if charge_w > 0:
+        energy_kwh += charge_w / 1000.0 * slot_h * eta_leg
+    elif discharge_w > 0:
+        energy_kwh -= discharge_w / 1000.0 * slot_h / eta_leg
+    energy_kwh = max(0.0, min(capacity_kwh, energy_kwh))
+    return max(0.0, min(100.0, energy_kwh / capacity_kwh * 100.0))
+
+
 def run_backtest(
     data_path: str,
     out_path: str,
@@ -475,6 +518,31 @@ def run_backtest(
     n_charge_hours         = 0
     n_discharge_hours      = 0
 
+    # P7-2: framåtsimulerad batterimodell + referens utan batteri/styrning
+    sim_soc: Optional[float] = None
+    total_sim_import_kwh   = 0.0
+    total_sim_export_kwh   = 0.0
+    total_sim_cost_sek     = 0.0
+    total_sim_rev_sek      = 0.0
+    total_sim_charge_kwh   = 0.0
+    total_sim_discharge_kwh = 0.0
+    total_ref_import_kwh   = 0.0
+    total_ref_export_kwh   = 0.0
+    total_ref_cost_sek     = 0.0
+    total_ref_rev_sek      = 0.0
+
+    # P7-2 modellvalidering: spela upp historikens EGNA batteribeslut (inte
+    # SEM:s) genom samma modell. sim_* ovan använder SEM:s nya beslut och
+    # avviker därför från historiken AV DESIGN (det är hela poängen med att
+    # jämföra policyer) – den jämförelsen kan aldrig validera fysiken. Genom
+    # att i stället återspela vad som faktiskt hände kan man se om
+    # batterimodellen och energibalansformeln (grid = last + laddning -
+    # urladdning - sol) själva är rimliga, oberoende av vilken policy som
+    # körs. Endast meningsfullt när has_actual_power_data är sant.
+    replay_soc: Optional[float] = None
+    total_replay_import_kwh = 0.0
+    total_replay_export_kwh = 0.0
+
     fieldnames = [
         "timestamp", "spot_sek_kwh", "buy_sek_kwh", "sell_sek_kwh",
         "solar_w", "house_load_w", "battery_soc_pct", "battery_power_w",
@@ -483,6 +551,11 @@ def run_backtest(
         "decision_extra_hot_water", "reason",
         "actual_grid_import_kwh", "actual_grid_export_kwh",
         "actual_grid_cost_sek", "actual_export_rev_sek",
+        "sim_battery_soc_pct", "sim_bat_charge_w", "sim_bat_discharge_w",
+        "sim_grid_import_kwh", "sim_grid_export_kwh",
+        "sim_cost_sek", "sim_export_rev_sek",
+        "ref_grid_import_kwh", "ref_grid_export_kwh",
+        "ref_cost_sek", "ref_export_rev_sek",
     ]
 
     def _n(v) -> str:
@@ -542,6 +615,102 @@ def run_backtest(
             cost_sek   = import_kwh * state.buy_price_sek_kwh
             rev_sek    = export_kwh * state.sell_price_sek_kwh
 
+            # Modellvalidering: samma energibalans, men med historikens EGNA
+            # uppmätta batterieffekt i stället för SEM:s beslut – jämförs mot
+            # grid_kwh (uppmätt) ovan, inte mot sim_*.
+            if replay_soc is None:
+                replay_soc = state.battery_soc_pct
+            replay_charge_w    = max(0.0,  state.battery_power_w)
+            replay_discharge_w = max(0.0, -state.battery_power_w)
+            replay_grid_w = (state.house_load_w + replay_charge_w
+                              - replay_discharge_w - state.solar_power_w)
+            total_replay_import_kwh += max(0.0,  replay_grid_w / 1000.0 * slot_h)
+            total_replay_export_kwh += max(0.0, -replay_grid_w / 1000.0 * slot_h)
+            replay_soc = _simulate_battery_soc(
+                replay_soc, replay_charge_w, replay_discharge_w, slot_h,
+                s["battery_capacity_kwh"], s["eta_roundtrip"],
+            )
+
+            # ── P7-2: kör samma pipeline en gång till, men med en själv-
+            # integrerad SOC i stället för historikens verkliga SOC, så att
+            # SEM:s egna tidigare beslut faktiskt påverkar nästa slots
+            # startläge. Sol och huslast är fortfarande de verkliga
+            # historiska mätvärdena – ingen väder-/lastmodell finns.
+            if sim_soc is None:
+                sim_soc = state.battery_soc_pct  # startvillkor: verklig SOC vid periodens start
+
+            sim_state = dataclasses.replace(state, battery_soc_pct=sim_soc,
+                                             plan_action=None, plan_export_floor_kwh=None)
+            sim_day_plan = None
+            if ps and ps.slots:
+                try:
+                    sim_day_plan = planner.build_plan(
+                        now=ts,
+                        battery_soc_pct=sim_soc,
+                        battery_capacity_kwh=state.battery_capacity_kwh,
+                        battery_max_power_kw=state.battery_max_power_kw,
+                        ps=ps,
+                        predicted_daily_kwh=0.0,
+                        solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
+                        solar_takeover_dt=None,
+                        house_load_w=state.house_load_w,
+                        battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
+                    )
+                except Exception as _sim_plan_err:
+                    sys.stdout.buffer.write(f"Sim DayPlan-fel vid {ts}: {_sim_plan_err}\n".encode("utf-8"))
+            if sim_day_plan:
+                _sim_cs = sim_day_plan.slot_at(ts)
+                sim_state.plan_action = _sim_cs.action if _sim_cs else None
+                sim_state.plan_export_floor_kwh = sim_day_plan.export_floor_kwh
+
+            sim_decision = controller.compute(sim_state)
+            sim_solar_surplus_w = max(0.0, sim_state.solar_power_w - sim_state.house_load_w)
+            sim_decision = controller.apply_plan_executor(
+                sim_day_plan, "auto", sim_state, sim_decision, ts, sim_solar_surplus_w,
+            )
+
+            # Nätbalans DERIVERAD ur energibalansen (inte uppmätt) – den
+            # simulerade SOC-banan avviker normalt från historiken, så den
+            # verkliga fasavläsningen gäller inte längre för detta scenario.
+            sim_grid_w = (state.house_load_w
+                          + sim_decision.battery_charge_power_w
+                          - sim_decision.battery_discharge_power_w
+                          - state.solar_power_w)
+            sim_import_kwh = max(0.0,  sim_grid_w / 1000.0 * slot_h)
+            sim_export_kwh = max(0.0, -sim_grid_w / 1000.0 * slot_h)
+            sim_cost_sek   = sim_import_kwh * state.buy_price_sek_kwh
+            sim_rev_sek    = sim_export_kwh * state.sell_price_sek_kwh
+
+            new_sim_soc = _simulate_battery_soc(
+                sim_soc, sim_decision.battery_charge_power_w,
+                sim_decision.battery_discharge_power_w, slot_h,
+                s["battery_capacity_kwh"], s["eta_roundtrip"],
+            )
+
+            # Referens: samma energibalans helt utan batteri/styrning – vad
+            # huset hade kostat med bara sol och nät, ingen lagring.
+            ref_grid_w = state.house_load_w - state.solar_power_w
+            ref_import_kwh = max(0.0,  ref_grid_w / 1000.0 * slot_h)
+            ref_export_kwh = max(0.0, -ref_grid_w / 1000.0 * slot_h)
+            ref_cost_sek   = ref_import_kwh * state.buy_price_sek_kwh
+            ref_rev_sek    = ref_export_kwh * state.sell_price_sek_kwh
+
+            total_sim_import_kwh   += sim_import_kwh
+            total_sim_export_kwh   += sim_export_kwh
+            total_sim_cost_sek     += sim_cost_sek
+            total_sim_rev_sek      += sim_rev_sek
+            if sim_decision.battery_charge_power_w > 50:
+                total_sim_charge_kwh += sim_decision.battery_charge_power_w / 1000.0 * slot_h
+            elif sim_decision.battery_discharge_power_w > 50:
+                total_sim_discharge_kwh += sim_decision.battery_discharge_power_w / 1000.0 * slot_h
+            total_ref_import_kwh   += ref_import_kwh
+            total_ref_export_kwh   += ref_export_kwh
+            total_ref_cost_sek     += ref_cost_sek
+            total_ref_rev_sek      += ref_rev_sek
+
+            sim_soc_this_slot = sim_soc
+            sim_soc = new_sim_soc
+
             total_grid_import_kwh  += import_kwh
             total_grid_export_kwh  += export_kwh
             total_grid_cost_sek    += cost_sek
@@ -576,6 +745,17 @@ def run_backtest(
                 "actual_grid_export_kwh":  _n(round(export_kwh, 3)),
                 "actual_grid_cost_sek":    _n(round(cost_sek, 4)),
                 "actual_export_rev_sek":   _n(round(rev_sek, 4)),
+                "sim_battery_soc_pct":     _n(round(sim_soc_this_slot, 1)),
+                "sim_bat_charge_w":        _n(round(sim_decision.battery_charge_power_w, 0)),
+                "sim_bat_discharge_w":     _n(round(sim_decision.battery_discharge_power_w, 0)),
+                "sim_grid_import_kwh":     _n(round(sim_import_kwh, 3)),
+                "sim_grid_export_kwh":     _n(round(sim_export_kwh, 3)),
+                "sim_cost_sek":            _n(round(sim_cost_sek, 4)),
+                "sim_export_rev_sek":      _n(round(sim_rev_sek, 4)),
+                "ref_grid_import_kwh":     _n(round(ref_import_kwh, 3)),
+                "ref_grid_export_kwh":     _n(round(ref_export_kwh, 3)),
+                "ref_cost_sek":            _n(round(ref_cost_sek, 4)),
+                "ref_export_rev_sek":      _n(round(ref_rev_sek, 4)),
             })
 
     net_cost = total_grid_cost_sek - total_export_rev_sek
@@ -604,6 +784,61 @@ def run_backtest(
         "=================================================\n"
     )
     sys.stdout.buffer.write(summary.encode("utf-8"))
+
+    # ── P7-2: framåtsimulerad batterimodell vs referens utan batteri/styrning ──
+    n_days = max(1e-9, len(timestamps) * slot_h / 24.0)
+    sim_net_cost = total_sim_cost_sek - total_sim_rev_sek
+    ref_net_cost = total_ref_cost_sek - total_ref_rev_sek
+    savings_sek  = ref_net_cost - sim_net_cost
+    savings_pct  = (savings_sek / ref_net_cost * 100.0) if ref_net_cost > 0 else 0.0
+    full_cycles  = total_sim_discharge_kwh / s["battery_capacity_kwh"] if s["battery_capacity_kwh"] else 0.0
+    final_sim_soc = sim_soc if sim_soc is not None else float("nan")
+
+    validation_note = ""
+    if has_actual_power_data:
+        def _pct_err(model_v: float, actual_v: float) -> float:
+            return (model_v - actual_v) / actual_v * 100.0 if actual_v else float("nan")
+        imp_err = _pct_err(total_replay_import_kwh, total_grid_import_kwh)
+        exp_err = _pct_err(total_replay_export_kwh, total_grid_export_kwh)
+        soc_err = (replay_soc - state.battery_soc_pct) if replay_soc is not None else float("nan")
+        validation_note = (
+            "\n"
+            "  --- Modellvalidering: återspelar historikens EGNA beslut (P7-2 acceptanskrav) ---\n"
+            "  (Ovanstående sim_*/besparing använder SEM:s NYA beslut och ska\n"
+            "   avvika från historiken – det är poängen. Detta återspelar i\n"
+            "   stället den uppmätta batterieffekten för att pröva om själva\n"
+            "   modellen/energibalansen är trovärdig.)\n"
+            f"  Återspelad import  : {total_replay_import_kwh:8.1f} kWh  (verklig: {total_grid_import_kwh:.1f} kWh, {imp_err:+.1f}%)\n"
+            f"  Återspelad export  : {total_replay_export_kwh:8.1f} kWh  (verklig: {total_grid_export_kwh:.1f} kWh, {exp_err:+.1f}%)\n"
+            f"  Återspelad SOC vid slutet : {replay_soc:5.1f} %  (verklig: {state.battery_soc_pct:.1f} %, {soc_err:+.1f} pp)\n"
+        )
+    else:
+        validation_note = (
+            "\n"
+            "  Modellvalidering: INTE tillgänglig – denna källa saknar\n"
+            "  nätfas-/batteri-inout-data att spela upp och jämföra mot.\n"
+        )
+
+    sim_summary = (
+        "\n"
+        "=================================================\n"
+        "  P7-2: FRAMÅTSIMULERAD BATTERIMODELL\n"
+        "=================================================\n"
+        f"  Simulerad SOC vid periodens slut : {final_sim_soc:5.1f} %  (verklig SOC: {state.battery_soc_pct:.1f} %)\n"
+        f"  Simulerad fullcykler              : {full_cycles:6.2f}\n"
+        "\n"
+        f"  Simulerad nätimport/-export : {total_sim_import_kwh:8.1f} kWh / {total_sim_export_kwh:8.1f} kWh\n"
+        f"  Simulerad nettokostnad      : {sim_net_cost:8.2f} SEK  ({sim_net_cost / n_days:.2f} SEK/dygn)\n"
+        "\n"
+        f"  Referens utan batteri/styrning:\n"
+        f"    Nätimport/-export : {total_ref_import_kwh:8.1f} kWh / {total_ref_export_kwh:8.1f} kWh\n"
+        f"    Nettokostnad      : {ref_net_cost:8.2f} SEK  ({ref_net_cost / n_days:.2f} SEK/dygn)\n"
+        "\n"
+        f"  Besparing vs referens : {savings_sek:8.2f} SEK  ({savings_sek / n_days:.2f} SEK/dygn, {savings_pct:.1f}%)\n"
+        f"{validation_note}"
+        "=================================================\n"
+    )
+    sys.stdout.buffer.write(sim_summary.encode("utf-8"))
 
 
 def main():
