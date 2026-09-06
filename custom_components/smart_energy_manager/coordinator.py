@@ -1190,15 +1190,35 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         """Skriv batteriets börvärden – nolla alltid motsatt riktning FÖRST (blockerande)
         innan den aktiva riktningen sätts, så att Sonnen aldrig ser båda skilda från noll
         samtidigt vid ett riktningsbyte. P6-1-dödband hoppas bara över om `now` ges
-        (async_zero_battery vid unload måste alltid skriva på riktigt, ingen deadband)."""
+        (async_zero_battery vid unload måste alltid skriva på riktigt, ingen deadband).
+
+        Sonnens API-dokumentation antyder ETT delat internt börvärde (riktning+
+        magnitud) bakom "Forcera laddning"/"Forcera urladdning", inte två oberoende
+        register - senaste skrivningen vinner oavsett håll. Live-fall 2026-09-06:
+        P6-1s hjärtslag (skriv om oförändrat värde minst var 5:e minut) skrev
+        periodiskt om den INAKTIVA riktningens 0 mitt under en aktiv laddning/
+        urladdning, vilket kortvarigt nollställde det delade börvärdet tills
+        nästa cykel rättade till det - synligt som en enstaka nollpunkt i
+        battery_inout var ~5-10:e minut. Hjärtslaget skrivs därför bara på den
+        inaktiva riktningen när BÅDA ska vara 0 (verklig vila, inget aktivt håll
+        håller börvärdet färskt) - annars bara vid en faktisk rättning."""
         charge_entity    = self._config.get(CONF_BATTERY_INVERTER_CHARGE)
         discharge_entity = self._config.get(CONF_BATTERY_INVERTER_DISCHARGE)
 
-        async def _write(entity_id: Optional[str], value: float, blocking: bool) -> None:
+        async def _write(entity_id: Optional[str], value: float, blocking: bool, *, skip_heartbeat: bool = False) -> None:
             if not entity_id:
                 return
-            if now is not None and not self._should_write_number(entity_id, value, now):
-                return
+            if now is not None:
+                if skip_heartbeat:
+                    state = self.hass.states.get(entity_id)
+                    if state is not None:
+                        try:
+                            if abs(float(state.state) - value) <= _POWER_DEADBAND_W:
+                                return
+                        except (ValueError, TypeError):
+                            pass
+                elif not self._should_write_number(entity_id, value, now):
+                    return
             await self.hass.services.async_call(
                 "number", "set_value",
                 {"entity_id": entity_id, "value": round(value)},
@@ -1207,14 +1227,17 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             if now is not None:
                 self._last_write_times[entity_id] = now
 
-        if charge_w <= 0:
-            await _write(charge_entity, 0, blocking=True)
-        if discharge_w <= 0:
-            await _write(discharge_entity, 0, blocking=True)
         if charge_w > 0:
             await _write(charge_entity, charge_w, blocking=False)
-        if discharge_w > 0:
+            if discharge_w <= 0:
+                await _write(discharge_entity, 0, blocking=True, skip_heartbeat=True)
+        elif discharge_w > 0:
             await _write(discharge_entity, discharge_w, blocking=False)
+            if charge_w <= 0:
+                await _write(charge_entity, 0, blocking=True, skip_heartbeat=True)
+        else:
+            await _write(charge_entity, 0, blocking=True)
+            await _write(discharge_entity, 0, blocking=True)
 
     async def async_zero_battery(self) -> None:
         """Nolla båda batteribörvärdena. Anropas vid unload så att integrationen

@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.7.6-blue)
+![Version](https://img.shields.io/badge/version-0.7.7-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.7.6
+## Nyheter i 0.7.7
 
-- **Fixade att en kortvarig topp i huslasten tyst stängde av egenförbrukningsurladdningen i flera minuter.** `_auto_mode()`s projektion av kvällsmåls-SOC (`hourly_load_kw = max(_eff_daily_kwh / 24.0, house_load_w / 1000.0, 0.5)`) matade den MOMENTANA `house_load_w` rakt in i ett behovsestimat räknat i timmar framåt: en kokplatta, ugn eller dusch som gick i några minuter projicerades över hela mörkerperioden, vilket kortvarigt sköt kvällsmålets SOC över batteriets faktiska SOC. Det slår om `self_consume_ok` till `False` i `apply_plan_executor()`s cover_load-gren, som nollställer urladdningsbörvärdet helt istället för att bara underförsörja lasten – bekräftat mot verklig beslutslogg där "Plan cover_load egenförbrukning" föll till exakt 0W i takt med att huslasten hoppade till 1000-1900W, så länge den förhöjda lasten varade. Nytt fält `EnergyState.house_load_avg_w`, ett 15-minuters glidande medel som coordinatorn underhåller (`_get_house_load_avg_w()`), matar nu just den här projektionen istället – `house_load_w` självt är orört överallt annars (cover_load-dimensionering, EV-/fasskyddslogik), så realtidsreaktionen där påverkas inte.
+- **Fixade en periodisk enstaka-cykel-glitch i effekten under annars stabil laddning/urladdning.** Sonnens API-beskrivning ("the setpoint is kept until the battery receives a new charging or discharging value") läses som ETT delat internt börvärde (riktning + magnitud) bakom de separata "forcera laddning"/"forcera urladdning"-entiteterna, inte två oberoende register – senaste skrivningen vinner oavsett riktning. P6-1s hjärtslag (skriv om ett oförändrat värde minst var 5:e minut, för självläkning mot en tappad skrivning) skrev om den INAKTIVA riktningens 0 enligt det schemat även medan den andra riktningen aktivt drev ett riktigt värde – på ett delat börvärde nollställer det kortvarigt hela börvärdet tills nästa cykels skrivning hinner ikapp, synligt som en enstaka ~30 sekunders nollpunkt i `battery_inout` ungefär var 5:e till 10:e minut mitt i en annars ren, kontinuerligt stigande laddnings- eller urladdningsramp. `_write_battery_setpoints()` hjärtslagsskriver nu bara den inaktiva riktningens 0 när BÅDA riktningarna ska vara i vila (det fallet självläkningen faktiskt skyddar mot) – medan en riktning är aktiv rörs den andra bara vid en verklig rättning, aldrig enbart på hjärtslagets schema.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.7.5:s fix för manuellt läge).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.7.5:s fix för manuellt läge och v0.7.6:s fix för kvällsmålet).
 
 ## Systemöversikt
 
