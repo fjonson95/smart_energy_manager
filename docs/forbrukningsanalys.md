@@ -91,11 +91,12 @@ runt 27–28 jan, sen still). Nästan all förbrukning var kompressorn själv.
 kompressor, 0 kWh elpatron** (varken varmvatten- eller rumsvärme-räknaren
 rörde sig), trots -2°C till 0°C dämpad utetemp. Kompressorn räckte själv.
 
-**Öppen fråga:** vi har ännu inte hittat en period där elpatronen (rumsvärme
-ELLER varmvatten) faktiskt varit aktiv i någon betydande omfattning, för att
-se hur mycket den bidrar när den väl går igång.
+**Öppen fråga, delvis besvarad i avsnitt 7:** elpatronen visade sig vara
+aktiv betydligt oftare än den enda januari-observationen antydde (11 dygn
+på 5 veckor), men fortfarande i små doser (1–11 kWh/dygn) — se klassificeringen
+i avsnitt 7 för varmvatten- (desinfektion) resp. rumsvärme-fallen (kallras).
 
-## 3. EV-laddningsmönster — tre hittade tillfällen (februari)
+## 3. EV-laddningsmönster — 5 hittade tillfällen på 5 veckor
 
 Rå på/av-historik för laddare/switchar rensas efter ~10 dygn, men EV-laddarens
 EGEN effektsensor (`sensor.0xf4ce365d8573ed2f_total_active_power`) har
@@ -105,9 +106,12 @@ timmar med `mean > 0`.
 | Datum | Tid | Effekt | Natt? |
 |---|---|---|---|
 | 4 feb | 12:00–15:00 | 1,2–2,6 kW | Nej, dagtid |
-| 15→16 feb | 22:00–00:00 | 2,4–2,6 kW, avtar | Ja (kväll/natt) |
-| 21 feb | 00:00–02:00 | 2,56 → 0,45 kW | Ja |
+| 15→16 feb | 22:00–00:00 | 2,4–2,6 kW, avtar | Ja (kväll/natt) — sammanfaller med elpatron-dygnet 15 feb |
+| 20 feb | 19:00–20:00 | ~2,6 kW | Ja (tidig kväll) |
+| 20→21 feb | 00:00–02:00 | 2,56 → 0,45 kW | Ja (samma natt som avsnitt 4) |
 
+Fyra kalenderdygn med EV-laddning över 5 veckor (25 jan–28 feb), inget
+tydligt regelbundet mönster (varken veckodag eller temperaturberoende).
 EV-laddaren sitter på **fas 1** (bekräftat av användaren).
 
 ## 4. Komplett vinternatt med allt aktivt — 20/2→21/2
@@ -190,6 +194,81 @@ räknas INTE hit — den fyller på reserven, den är inget som måste täckas):
   totalt i värsta fall, men fas 1 (elpatron + EV + batteriandel) blir
   troligen bindande innan totalen gör det.
 
+## 7. Helårsbild (okt 2025–sep 2026) — elpatron-varmvatten följer solsäsongen, inte ett fast intervall
+
+**Rättelse av tidigare antagande i det här dokumentet.** Statistiken går längre
+tillbaka än vad vi trodde ("data ser ut att finnas efter slutet på januari"
+stämde inte) — `boiler_nrgconstotal`, `boiler_auxelecheatnrgconstotal`,
+`boiler_dhw_auxelecheatnrgcons` och `thermostat_dampedoutdoortemp` finns som
+permanent dygnsstatistik hela vägen från **2025-10-01**, 340 kompletta dygn.
+
+Med hela året synligt håller INTE "DHW-elpatron = periodisk desinfektion var
+4–5:e vecka" (den slutsatsen byggde på bara 2 händelser i ett 5-veckors
+fönster som råkade se jämnt fördelade ut). Verkligt mönster, dygn med
+`dhw_auxelecheatnrgcons`-rörelse:
+
+| Period | Dygn med elpatron-varmvatten | Mönster |
+|---|---|---|
+| okt–dec 2025 | 9 av ~90 dygn | var 1–3:e vecka, oregelbundet |
+| 24 dec → 27 jan | **0** | 34 dygns sammanhängande lucka |
+| feb–mars | stigande | var 3–10:e dygn |
+| jun–sep | 60+ av ~100 dygn | **nästan varje dygn**, 4–9 kWh |
+
+34-dagarsluckan i dec/jan motsäger ett strikt periodiskt schema. Kontrollerat
+mot koden: `DEFAULT_LEGIONELLA_INTERVAL_DAYS = 7` (`const.py:123`) med
+tvångskörning vid 1,5× intervallet (~10,5 dygn, `legionella.py:186`) — ett
+riktigt legionella-schema med den gaten borde inte kunna hoppa över 34 dygn
+oavsett pris/sol-läge.
+
+**Förklaringen (från användaren):** signalen är en sammanslagning av tre
+olika källor som alla värmer extra varmvatten och alla syns som samma
+`dhw_auxelecheatnrgcons`-rörelse i statistiken:
+1. Pannans egen inbyggda styrning (ems-esp-firmware, oberoende av SEM)
+2. Manuella körningar (t.ex. testkörningar)
+3. En Home Assistant-automation (troligen sol-överskott → extra varmvatten,
+   i linje med projektmål 2, "maximera egenförbrukning")
+
+Sökning i HA efter automationer/skript på "varmvatten" och "boiler" gav noll
+träffar (`ha_search`, fritext + config-body-sök) — automationen (om den
+fortfarande finns aktiv) använder sannolikt andra ord/entiteter i sin
+konfiguration, eller ligger helt i pannans egen firmware och syns aldrig som
+en HA-automation.
+
+**Konsekvens för avsnitt 2 ovan:** raden "elpatronen för varmvatten var i
+praktiken inaktiv" gällde bara för 18–31 januari — den perioden ligger mitt
+i den 34-dagars vinterluckan och är INTE representativ för året. Sommaren
+visar tvärtom nästan daglig aktivitet.
+
+**Öppen fråga, kräver mer än energiräknarna för att lösas:** (a) namnet på
+HA-automationen (om den finns) för att korsköra dess logbook/trigger-historik
+mot dessa dygn, eller (b) tidsstämplar för manuella körningar, för att kunna
+subtrahera dem och isolera den faktiska legionella-frekvensen.
+
+### Kompressor vs temperatur — hela året, mycket tydligare samband
+
+Kompressor-andelen (total minus elpatron) mot dämpad temp över hela perioden
+ger ett betydligt tydligare, i stort sett monotont samband än den smala
+vinterskivan (-0,2 till -9,9°C) som fanns tillgänglig tidigare:
+
+| Dämpad temp | Kompressor, ungefärligt intervall (kWh/dygn) |
+|---|---|
+| +20 till +25°C (jul) | 2–8 |
+| +10 till +20°C (maj, jun, sep) | 5–12 |
+| 0 till +10°C (okt, mars–apr) | 10–20 |
+| -5 till 0°C (nov–dec, feb–mar) | 20–45 |
+| -10 till -5°C (jan–feb, kallast uppmätt: -13,2°C) | 40–65 |
+
+Fortfarande inte perfekt linjärt — t.ex. gav 10/1 (-7,8°C) 76 kWh medan
+11/1 (-13,2°C, kallare) bara gav 63 kWh, och 12/1 (-9,8°C) föll till 40 kWh.
+Andra faktorer (vind, faktisk vattenförbrukning, ev. avfrostningscykler)
+påverkar uppenbarligen minst lika mycket som momentan temperatur för ett
+enskilt dygn — men riktningen och storleksordningen över säsongen är
+entydig, till skillnad från den tidigare smala januari–februari-skivan.
+
+Rådata: `full_year.csv` (scratchpad, ej incheckad — kan återskapas med
+`ha_get_history(source="statistics", period="day")` på de fyra sensorerna
+ovan från 2025-10-01 och framåt).
+
 ## Sensor-referens (alla använda i den här analysen)
 
 | Sensor | Typ | Användning |
@@ -217,10 +296,16 @@ satt — fungerar bara för de sensorer som faktiskt har det.
    `yesterday_consumption_kwh` till `build_plan()` istället för momentan
    `house_load_w`, (b) undersöka varför produktionskvotens historik verkar
    ha färre dygn än designen förutsätter.
-2. Hitta eller uppskatta en period där elpatronen (rumsvärme eller
-   varmvatten) faktiskt är aktiv, för att kvantifiera dess bidrag.
-3. Skala kompressorns förbrukning mot KALLARE temperaturer än de -0,2
-   till -4°C vi sett hittills (riktig vinter, -15°C+).
+2. **Delvis löst (avsnitt 7):** elpatron-varmvatten är INTE en periodisk
+   desinfektionscykel — det är en blandning av pannans egen firmware,
+   manuella körningar och en misstänkt HA-automation för sol-överskott.
+   Kvarstår: hitta automationens namn (om den finns) för att korsköra mot
+   logbook och isolera de tre källorna från varandra.
+3. **Löst med helårsdata (avsnitt 7):** kompressorns förbrukning mot temp
+   är nu kartlagd över hela intervallet +25°C till -13,2°C. Sambandet är
+   tydligt riktningsmässigt men inte perfekt linjärt dygn-för-dygn (vind,
+   vattenförbrukning, avfrostning stör) — inte värt mer tid utan fler
+   variabler (t.ex. vindstyrka) att korrelera mot.
 4. Bygga förbrukningsprognosen (piece 2 i den ursprungliga uppdelningen):
    sannolikt baserad på verklig COP (`nrgsupp*` / `nrgcons*`) mot dämpad
    utetemp, istället för dagens platta temperaturmodellskonstant.
