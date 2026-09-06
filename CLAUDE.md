@@ -149,7 +149,7 @@ Om bil är vald, laddning är beordrad men `charger_power < 50 W` i >5 minuter �
 
 När du gör en funktionell ändring i integrationen **måste** du alltid:
 
-1. **Uppdatera README.md och README.sv.md** – lägg till eller justera i rätt sektion. Bumpa versionsnumret och lägg till en "What's New in x.y.z"-punkt om ändringen är användarsyn­lig. Båda filerna ska hållas i synk (en på engelska, en på svenska).
+1. **Uppdatera changelogen** – lägg till en "What's New in x.y.z" / "Nyheter i x.y.z"-punkt överst i **CHANGELOG.md och CHANGELOG.sv.md** om ändringen är användarsynlig, och bumpa versionsnumret (badge i README.md/README.sv.md + `manifest.json`). README.md/README.sv.md visar bara den SENASTE posten (ersätt den befintliga, kopiera inte in historiken) och länkar vidare till CHANGELOG.md/CHANGELOG.sv.md för äldre versioner – lägg aldrig en changelog-post direkt i README utan att också skriva den till CHANGELOG. Alla fyra filerna ska hållas i synk parvis (en på engelska, en på svenska).
 
 2. **Uppdatera språkfiler** – om du lägger till eller byter namn på en konfigurationsnyckel, entitet, tjänst eller driftläge ska `translations/sv.json` och `translations/en.json` uppdateras med motsvarande text. Kontrollera att båda filerna har identiska nycklar.
 

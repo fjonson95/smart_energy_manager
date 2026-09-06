@@ -35,10 +35,17 @@ floor/export logic, not a stand-in for the real forecast.
 
 Two input formats, auto-detected from whether `input` is a file or a directory:
 
-  - A CSV file (testdata/timdata/*.csv): the old HA-logbook-export format,
-    hourly resolution, one row per {timestamp, entity_id, state}. The bundled
-    files are small, sparse, manually-curated samples (tens of hours) — good
-    for smoke-testing the pipeline, not for evaluating real savings.
+  - A CSV file: the old HA-logbook-export format, hourly resolution, one row
+    per {timestamp, entity_id, state} (see load_csv()). The three bundled
+    samples that used to live in testdata/timdata/ were removed — each
+    covered months on paper but was really ~50 hourly rows glued to a single
+    multi-week/multi-month gap, which the forward-simulation and
+    model-fidelity replay integrate straight through as if it were one real
+    hour. Confirmed empirically: SOC errors up to 63 percentage points and
+    import errors over +1800% on the old files, against -18%/+2pp on the
+    genuinely continuous testdata/history/ data below. The loader still
+    works for a real single-file sample — it just needs to actually be
+    hourly-continuous (or close to it) for the P7-2 columns to mean anything.
   - A directory (testdata/history/, from P7-1): one CSV per quantity
     (solar/house-load/outdoor-temp/battery-SOC at hourly resolution, price at
     real quarter-hour resolution — matching production, where price slots are
@@ -55,7 +62,7 @@ Two input formats, auto-detected from whether `input` is a file or a directory:
     are available.
 
 Usage (from repo root):
-    python testdata/backtest.py testdata/timdata/htestdata1.csv [--out results.csv]
+    python testdata/backtest.py path/to/hourly_sample.csv [--out results.csv]
     python testdata/backtest.py testdata/history [--out results.csv]
 
 Options:
@@ -875,9 +882,9 @@ def main():
     parser.add_argument(
         "input",
         help=(
-            "Antingen en CSV-fil (testdata/timdata/*.csv, timupplösning) eller en "
-            "mapp i P7-1-formatet (testdata/history/, kvartsupplösning – t.ex. "
-            "'testdata/history')."
+            "Antingen en CSV-fil i det gamla HA-logbook-formatet (timupplöst, "
+            "se load_csv()) eller en mapp i P7-1-formatet (testdata/history/, "
+            "kvartsupplösning – t.ex. 'testdata/history')."
         ),
     )
     parser.add_argument("--out",        default="backtest_result.csv")
