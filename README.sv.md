@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.7.4-blue)
+![Version](https://img.shields.io/badge/version-0.7.6-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.7.4
+## Nyheter i 0.7.6
 
-- **Tog bort de tre `testdata/timdata/htestdata*.csv`-proven** – att köra den nya P7-2-modelltrohets-återspelningen mot dem (som jämförelse mot resultaten från `testdata/history/`) bekräftade kvantitativt det deras docstring redan varnade för: varje fil sträcker sig över månader på papperet men är i praktiken ~50 timrader klistrade ihop med en enda flerveckors-till-flermånaderslucka, vilken framåtsimuleringen/återspelningen integrerar som om det vore en enda verklig timme. Uppmätta SOC-fel på upp till 63 procentenheter och importfel över +1800%, mot -18%/+2pp på den genuint sammanhängande `testdata/history/`-datan. Det gamla HA-logbook-CSV-formatet (`load_csv()`) stöds fortfarande för ett riktigt enfilsprov – det behöver bara faktiskt vara timvis sammanhängande för att P7-2-kolumnerna ska betyda något.
+- **Fixade att en kortvarig topp i huslasten tyst stängde av egenförbrukningsurladdningen i flera minuter.** `_auto_mode()`s projektion av kvällsmåls-SOC (`hourly_load_kw = max(_eff_daily_kwh / 24.0, house_load_w / 1000.0, 0.5)`) matade den MOMENTANA `house_load_w` rakt in i ett behovsestimat räknat i timmar framåt: en kokplatta, ugn eller dusch som gick i några minuter projicerades över hela mörkerperioden, vilket kortvarigt sköt kvällsmålets SOC över batteriets faktiska SOC. Det slår om `self_consume_ok` till `False` i `apply_plan_executor()`s cover_load-gren, som nollställer urladdningsbörvärdet helt istället för att bara underförsörja lasten – bekräftat mot verklig beslutslogg där "Plan cover_load egenförbrukning" föll till exakt 0W i takt med att huslasten hoppade till 1000-1900W, så länge den förhöjda lasten varade. Nytt fält `EnergyState.house_load_avg_w`, ett 15-minuters glidande medel som coordinatorn underhåller (`_get_house_load_avg_w()`), matar nu just den här projektionen istället – `house_load_w` självt är orört överallt annars (cover_load-dimensionering, EV-/fasskyddslogik), så realtidsreaktionen där påverkas inte.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner.
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.7.5:s fix för manuellt läge).
 
 ## Systemöversikt
 

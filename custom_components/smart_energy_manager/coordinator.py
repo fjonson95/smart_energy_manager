@@ -52,7 +52,7 @@ from .const import (
     CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH,
     DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
-    MODE_AUTO,
+    MODE_AUTO, MODE_MANUAL,
 )
 from .price_scheduler import PriceScheduler
 from .energy_controller import (
@@ -68,6 +68,16 @@ _LOGGER = logging.getLogger(__name__)
 # än HEARTBEAT_INTERVAL (självläkning om en skrivning tappas bort, P0-2).
 _HEARTBEAT_INTERVAL = timedelta(minutes=5)
 _POWER_DEADBAND_W = 50.0
+
+# Kvällsmålets huslast-term (_auto_mode) projicerar en momentan avläsning över
+# hela mörkerperioden (timmar) - ett par minuters kokplatta/dusch/ugn räknas
+# annars som "detta är den nya normala nattförbrukningen" och skjuter
+# kvällsmålets SOC över batteriets faktiska nivå, vilket stänger av
+# egenförbrukningsurladdningen tills toppen klingar av. Ett glidande medel
+# över EVENING_LOAD_AVG_WINDOW dämpar just den tillfälliga toppen utan att
+# göra huslasten trögare någon annanstans (cover_load m.fl. använder
+# fortfarande den snabba, ofiltrerade house_load_w).
+_EVENING_LOAD_AVG_WINDOW = timedelta(minutes=15)
 
 
 def _migrate_ev_cars_to_chargers(ev_cars: list[dict]) -> list[dict]:
@@ -148,6 +158,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # Rullande median (3-5 sampel) av house_load_entity – dämpar mätarglapp
         # när batteriet byter laddningsriktning.
         self._house_load_samples: list[float] = []
+
+        # Separat, längre glidande medel (se _EVENING_LOAD_AVG_WINDOW) – bara för
+        # kvällsmålets huslast-projektion i _auto_mode(), inte för house_load_w
+        # i övrigt.
+        self._house_load_long_samples: list[tuple[datetime, float]] = []
 
         # Rullande temperaturmedelvärde för förbrukningsprognos
         # Modellen är kalibrerad mot dygnsmedeltemperatur, inte ögonblicksvärde
@@ -545,6 +560,18 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         bat_discharge = max(0.0, -battery_power_w)
         return max(0.0, grid_total + solar_w - bat_discharge + bat_charge - ev_total_w), False
 
+    def _get_house_load_avg_w(self, house_load_w: float, now: datetime) -> float:
+        """Glidande medel av huslasten över _EVENING_LOAD_AVG_WINDOW – se
+        konstantens kommentar för varför kvällsmålet behöver ett trögare
+        underlag än den snabba house_load_w."""
+        self._house_load_long_samples.append((now, house_load_w))
+        cutoff = now - _EVENING_LOAD_AVG_WINDOW
+        self._house_load_long_samples = [
+            (ts, v) for ts, v in self._house_load_long_samples if ts >= cutoff
+        ]
+        values = [v for _, v in self._house_load_long_samples]
+        return statistics.fmean(values) if values else house_load_w
+
     # ── Bilval ────────────────────────────────────────────────────────
 
     def reset_battery_cost(self) -> None:
@@ -688,6 +715,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
             # Prisschema från Nordpool + Solcast-attributen
             now = dt_util.now()
+            house_load_avg_w = self._get_house_load_avg_w(house_load_w, now)
             nordpool_entity = c.get(CONF_NORDPOOL_ENTITY)
             nordpool_type = c.get(CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS)
             price_schedule = None
@@ -905,6 +933,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 grid_current_l3=self._get_state_float(c.get(CONF_GRID_CURRENT_L3)),
 
                 house_load_w=house_load_w,
+                house_load_avg_w=house_load_avg_w,
                 hot_water_temp_c=hot_water_temp,
                 extra_hot_water_max_temp=float(c.get(CONF_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_EXTRA_HOT_WATER_MAX_TEMP)),
                 extra_hot_water_min_temp=float(c.get(CONF_EXTRA_HOT_WATER_MIN_TEMP, DEFAULT_EXTRA_HOT_WATER_MIN_TEMP)),
@@ -1026,7 +1055,15 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 await self._notify_car_selection_needed(decision.chargers_needing_selection)
 
             await self._check_battery_operating_mode()
-            await self._execute_decision(state, decision, now)
+            # Manual: EnergyController.compute() returnerar en tom ControlDecision
+            # (alla fält på sitt default-värde: 0 W, enable=False) för att signalera
+            # "inga beslut fattas" - men _execute_decision() skriver blint det den
+            # får. Utan denna spärr skrevs den tomma decisionen till Sonnen/laddare/
+            # varmvatten varje cykel, vilket i praktiken nollställde/stängde av allt
+            # brukaren just då försökte styra manuellt - motsatsen till manual-lägets
+            # syfte (CLAUDE.md: "används när du vill styra ... manuellt").
+            if self.operating_mode != MODE_MANUAL:
+                await self._execute_decision(state, decision, now)
 
             return {
                 "state": state,

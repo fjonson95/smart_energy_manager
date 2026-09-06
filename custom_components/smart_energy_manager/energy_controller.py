@@ -174,6 +174,12 @@ class EnergyState:
     # Huslast
     house_load_w: float = 0.0
 
+    # Glidande medel (några minuter, satt av coordinatorn) av house_load_w –
+    # bara för kvällsmålets timmar-framåt-projektion i _auto_mode(), som annars
+    # tar en enstaka kokplatta/dusch och antar att den pågår hela natten.
+    # None (t.ex. i backtest) faller tillbaka på house_load_w.
+    house_load_avg_w: Optional[float] = None
+
     # Varmvattentemperatur (ackumulatortank)
     hot_water_temp_c: Optional[float] = None      # None om sensor ej konfigurerad
     extra_hot_water_max_temp: float = 70.0        # stoppa extra varmvatten över detta (°C)
@@ -541,7 +547,15 @@ class EnergyController:
         if _eff_daily_kwh > 0 and ps and ps.slots:
             # yesterday_consumption_kwh = nätuttag (underskattar total hushållslast på soldagar).
             # Klämma mot faktisk huslast och minimigolv precis som exportgolvets v0.5.27-fix.
-            hourly_load_kw = max(_eff_daily_kwh / 24.0, house_load_w / 1000.0, 0.5)
+            # Använder house_load_avg_w (glidande medel), inte den momentana house_load_w:
+            # den senare multipliceras med hela mörkerperioden (timmar) nedan, så en enstaka
+            # kokplatta/dusch på några minuter annars läses som "detta är natten igenom" och
+            # skjuter kvällsmålet över batteriets SOC, vilket stänger av egenförbrukningen
+            # helt tills toppen klingar av (upptäckt via ett verkligt fall 2026-09-06).
+            _load_for_projection_w = (
+                state.house_load_avg_w if state.house_load_avg_w is not None else house_load_w
+            )
+            hourly_load_kw = max(_eff_daily_kwh / 24.0, _load_for_projection_w / 1000.0, 0.5)
 
             # Hitta solar takeover IMORGON BITTI, inte idag.
             # Utan denna fix hittar loopen dagens solproduktion (om 8 min) → hours_dark = 8 min

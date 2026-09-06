@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.7.4-blue)
+![Version](https://img.shields.io/badge/version-0.7.6-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.7.4
+## What's New in 0.7.6
 
-- **Removed the three `testdata/timdata/htestdata*.csv` samples** — running the new P7-2 model-fidelity replay against them (as a comparison against `testdata/history/`'s results) confirmed what their docstring already warned about, quantitatively: each file spans months on paper but is really ~50 hourly rows glued to a single multi-week-to-multi-month gap, which the forward-simulation/replay integration treats as one real hour. Measured SOC errors up to 63 percentage points and import errors over +1800%, against -18%/+2pp on the genuinely continuous `testdata/history/` data. The old HA-logbook CSV format (`load_csv()`) is still supported for a real single-file sample — it just needs to actually be hourly-continuous for the P7-2 columns to mean anything.
+- **Fixed a transient house-load spike silently switching off self-consumption discharge for minutes at a time.** `_auto_mode()`'s evening-target-SOC projection (`hourly_load_kw = max(_eff_daily_kwh / 24.0, house_load_w / 1000.0, 0.5)`) fed the *instantaneous* `house_load_w` straight into an hours-ahead energy-need estimate: a kettle, oven, or shower running for a few minutes got projected across the entire dark period, briefly inflating the evening target SOC above the actual battery SOC. That flips `self_consume_ok` to `False` in `apply_plan_executor()`'s cover_load branch, which zeroes the discharge setpoint outright rather than just under-covering the load — confirmed against real decision-log data where "Plan cover_load egenförbrukning" dropped to exactly 0W in lockstep with a house-load jump to 1000-1900W, for as long as the elevated load lasted. New `EnergyState.house_load_avg_w`, a 15-minute rolling average maintained by the coordinator (`_get_house_load_avg_w()`), now feeds this specific projection instead — `house_load_w` itself is untouched everywhere else (cover_load sizing, EV/phase logic) so real-time response elsewhere is unaffected.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases.
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.7.5's manual-mode fix).
 
 ## System Overview
 
