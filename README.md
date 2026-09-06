@@ -1,10 +1,18 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.7.2-blue)
+![Version](https://img.shields.io/badge/version-0.7.3-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
+
+## What's New in 0.7.3
+
+Extends P7-1 with the grid-phase and battery-inout history P7-2's model-fidelity replay needs, since the original P7-1 extraction only pulled house-load/solar/outdoor-temp/battery-SOC/price.
+
+- **Extracted `sensor.elmatare_active_power_l1/l2/l3` and `sensor.sonnenbatterie_271100_state_battery_inout`** into `testdata/history/grid_l1_hourly.csv`, `grid_l2_hourly.csv`, `grid_l3_hourly.csv`, and `battery_inout_hourly.csv`, same window and format as the rest of `testdata/history/` (see `Series info.txt`). `_HISTORY_DIR_SERIES` and `has_actual_power_data` in `testdata/backtest.py` pick these up automatically when present — no other loader changes needed since `build_state()` already had `SENSOR_MAP` entries for both.
+- **The P7-2 model-fidelity replay actually runs now**: over the 10-day `testdata/history/` window it reproduces measured grid import within -17.7% and export within +17.6%, and the simulated end-of-period SOC within 2.3 percentage points of the real value — a real answer to the plan's acceptance criterion, not just an "unavailable" placeholder.
+- **Fixed a leak in the forward-simulation pass discovered while validating this**: `sim_state.battery_power_w` was being copied from the real historical reading via `dataclasses.replace(state, ...)`, but `EnergyController._apply_phase_limits()` reads that field as "current battery power" to compute a delta against the new decision. Once the simulated SOC trajectory diverges from history, that real reading is the wrong baseline — it now carries the *previous simulated slot's own* battery power instead, initialized from the real reading only for the very first slot.
 
 ## What's New in 0.7.2
 

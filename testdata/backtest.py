@@ -43,12 +43,14 @@ Two input formats, auto-detected from whether `input` is a file or a directory:
     (solar/house-load/outdoor-temp/battery-SOC at hourly resolution, price at
     real quarter-hour resolution — matching production, where price slots are
     genuinely 15 minutes, not an assumed hour). The hourly quantities are
-    forward-filled onto the price series' quarter-hour grid. This format has
-    NO historical grid-phase readings, so the "shadow"/actual_* import/
-    export/cost accounting in the summary is unavailable for it (reported as
-    such) — the decision/plan_action columns AND the sim_*/ref_* P7-2 columns
-    remain meaningful regardless, since those are derived from the energy
-    balance rather than measured from grid phases. See
+    forward-filled onto the price series' quarter-hour grid. Grid-phase
+    (grid_l1/l2/l3_hourly.csv) and battery-inout (battery_inout_hourly.csv)
+    history are optional additions (see _HISTORY_DIR_POWER_FILES) — present,
+    they make the "shadow"/actual_* import/export/cost accounting AND the
+    P7-2 model-fidelity replay meaningful for this source too; absent,
+    has_actual_power_data falls back to False and only the decision/
+    plan_action columns and the sim_*/ref_* P7-2 columns (always derived
+    from the energy balance, never measured) are meaningful. See
     testdata/history/Series info.txt for exactly what period and quantities
     are available.
 
@@ -195,7 +197,21 @@ _HISTORY_DIR_SERIES = {
     "house_load_hourly.csv":   "sensor.el_forbruk_power_power",
     "outdoor_temp_hourly.csv": "sensor.boiler_outdoortemp",
     "battery_soc_hourly.csv":  "sensor.sonnenbatterie_271100_state_battery_percentage_real",
+    # Grid-fas- och batteri-inout-historik (utökning av P7-1): valfria — om
+    # filerna saknas faller grid_power_l1/l2/l3 och battery_power_w tillbaka
+    # till EnergyState-defaulten 0, precis som innan denna utökning.
+    "grid_l1_hourly.csv":      "sensor.elmatare_active_power_l1",
+    "grid_l2_hourly.csv":      "sensor.elmatare_active_power_l2",
+    "grid_l3_hourly.csv":      "sensor.elmatare_active_power_l3",
+    "battery_inout_hourly.csv":"sensor.sonnenbatterie_271100_state_battery_inout",
 }
+
+# Filer vars närvaro avgör om "actual"/skugg-redovisningen och P7-2:s
+# modelltrohets-återspelning har något att jämföra mot för denna källa.
+_HISTORY_DIR_POWER_FILES = (
+    "grid_l1_hourly.csv", "grid_l2_hourly.csv", "grid_l3_hourly.csv",
+    "battery_inout_hourly.csv",
+)
 
 
 def _read_hourly_series(path: str) -> tuple[list[datetime], list[float]]:
@@ -464,14 +480,15 @@ def run_backtest(
     if is_history_dir:
         pivot = load_history_dir(data_path)
         slot_minutes = 15
-        # P7-1's testdata/history/ has no historical grid-phase or
-        # battery-inout readings (only house load, solar, outdoor temp,
-        # battery SOC and price were extracted) – grid_power_l1/l2/l3 and
-        # battery_power_w stay at their EnergyState default of 0, so the
-        # "actual" import/export/cost/charge/discharge accounting below is
-        # meaningless for this source. The decision/plan_action columns
-        # (what SEM would have chosen) are still fully meaningful.
-        has_actual_power_data = False
+        # Grid-fas-/batteri-inout-historik är en valfri utökning av P7-1
+        # (se _HISTORY_DIR_POWER_FILES) – utan den stannar grid_power_l1/l2/l3
+        # och battery_power_w på EnergyState-defaulten 0, och "actual"/
+        # skugg-redovisningen samt P7-2:s modelltrohets-återspelning blir
+        # meningslösa. Med den är de lika meningsfulla som för CSV-formatet.
+        has_actual_power_data = all(
+            os.path.exists(os.path.join(data_path, fname))
+            for fname in _HISTORY_DIR_POWER_FILES
+        )
     else:
         pivot = load_csv(data_path)
         slot_minutes = 60
@@ -520,6 +537,7 @@ def run_backtest(
 
     # P7-2: framåtsimulerad batterimodell + referens utan batteri/styrning
     sim_soc: Optional[float] = None
+    sim_prev_battery_power_w: Optional[float] = None
     total_sim_import_kwh   = 0.0
     total_sim_export_kwh   = 0.0
     total_sim_cost_sek     = 0.0
@@ -638,8 +656,17 @@ def run_backtest(
             # historiska mätvärdena – ingen väder-/lastmodell finns.
             if sim_soc is None:
                 sim_soc = state.battery_soc_pct  # startvillkor: verklig SOC vid periodens start
+            if sim_prev_battery_power_w is None:
+                sim_prev_battery_power_w = state.battery_power_w  # startvillkor: verklig effekt
 
+            # battery_power_w sätts till FÖREGÅENDE simulerade beslut, inte
+            # historikens verkliga effekt: _apply_phase_limits() läser den
+            # som "nuvarande batterieffekt" för att räkna ut en delta mot
+            # beslutet (rad ~980 i energy_controller.py). Läcker den verkliga
+            # historiska effekten in här blir den deltan inkonsekvent så fort
+            # den simulerade banan avviker från historiken.
             sim_state = dataclasses.replace(state, battery_soc_pct=sim_soc,
+                                             battery_power_w=sim_prev_battery_power_w,
                                              plan_action=None, plan_export_floor_kwh=None)
             sim_day_plan = None
             if ps and ps.slots:
@@ -710,6 +737,8 @@ def run_backtest(
 
             sim_soc_this_slot = sim_soc
             sim_soc = new_sim_soc
+            sim_prev_battery_power_w = (sim_decision.battery_charge_power_w
+                                         - sim_decision.battery_discharge_power_w)
 
             total_grid_import_kwh  += import_kwh
             total_grid_export_kwh  += export_kwh

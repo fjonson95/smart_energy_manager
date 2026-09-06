@@ -1,8 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.7.2-blue)
+![Version](https://img.shields.io/badge/version-0.7.3-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
+
+## Nyheter i 0.7.3
+
+Utökar P7-1 med den nätfas- och batteri-inout-historik som P7-2:s modelltrohets-återspelning behöver, eftersom den ursprungliga P7-1-extraktionen bara hämtade huslast/sol/utomhustemp/batteri-SOC/pris.
+
+- **Extraherade `sensor.elmatare_active_power_l1/l2/l3` och `sensor.sonnenbatterie_271100_state_battery_inout`** till `testdata/history/grid_l1_hourly.csv`, `grid_l2_hourly.csv`, `grid_l3_hourly.csv` och `battery_inout_hourly.csv`, samma fönster och format som resten av `testdata/history/` (se `Series info.txt`). `_HISTORY_DIR_SERIES` och `has_actual_power_data` i `testdata/backtest.py` plockar upp dem automatiskt när de finns – inga andra loader-ändringar behövdes eftersom `build_state()` redan hade `SENSOR_MAP`-poster för båda.
+- **P7-2:s modelltrohets-återspelning kör faktiskt nu**: över det 10 dagar långa `testdata/history/`-fönstret återskapar den uppmätt nätimport inom -17,7% och export inom +17,6%, och den simulerade SOC:en vid periodens slut inom 2,3 procentenheter av det verkliga värdet – ett riktigt svar på planens acceptanskriterium, inte bara en "inte tillgänglig"-platshållare.
+- **Fixade en läcka i framåtsimuleringen som upptäcktes under valideringen**: `sim_state.battery_power_w` kopierades från den verkliga historiska avläsningen via `dataclasses.replace(state, ...)`, men `EnergyController._apply_phase_limits()` läser det fältet som "nuvarande batterieffekt" för att räkna ut en delta mot det nya beslutet. Så fort den simulerade SOC-banan avviker från historiken är den verkliga avläsningen fel baslinje – den bär nu istället FÖREGÅENDE simulerade slots egen batterieffekt, initierad från den verkliga avläsningen bara för allra första sloten.
 
 ## Nyheter i 0.7.2
 

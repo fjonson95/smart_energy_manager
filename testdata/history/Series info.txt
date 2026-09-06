@@ -1,18 +1,24 @@
 P7-1 — extraherad historik, dokumenterat startdatum per serie
 ================================================================
 Genererad: 2026-09-05, via HA:s statistik-API (source=statistics, period=hour)
-för huslast/sol/utomhustemp/SOC, och source=history (kvartsupplösning) för pris.
+för huslast/sol/utomhustemp/SOC/nätfaser/batteri-inout, och source=history
+(kvartsupplösning) för pris. Nätfas- och batteri-inout-serierna tillkom
+2026-09-06 som en utökning av den ursprungliga P7-1-leveransen.
 
 VIKTIGT FYND: den fulla gemensamma perioden är bara ~10 dagar, inte de ~30
 dagar hourly-statistiken i sig räcker. Se "Begränsande faktorer" nedan.
 
-Fil                        Storhet              Upplösning   Start                      Slut                       Rader
---------------------------------------------------------------------------------------------------------------------------
-solar_hourly.csv            Solproduktion (W)    1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
-house_load_hourly.csv       Huslast (W)          1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
-outdoor_temp_hourly.csv     Utomhustemp (°C)     1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
-battery_soc_hourly.csv      Batteri-SOC (%)      1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      724
-price_quarterhour.csv       Spotpris (SEK/kWh)   15min        2026-08-26T04:15:00+02:00  2026-09-05T19:45:00+02:00 1001
+Fil                        Storhet                Upplösning   Start                      Slut                       Rader
+----------------------------------------------------------------------------------------------------------------------------
+solar_hourly.csv            Solproduktion (W)      1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
+house_load_hourly.csv       Huslast (W)            1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
+outdoor_temp_hourly.csv     Utomhustemp (°C)       1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      726
+battery_soc_hourly.csv      Batteri-SOC (%)        1h           2026-08-06T11:00:00Z       2026-09-05T16:00:00Z      724
+price_quarterhour.csv       Spotpris (SEK/kWh)     15min        2026-08-26T04:15:00+02:00  2026-09-05T19:45:00+02:00 1001
+grid_l1_hourly.csv          Nätfas L1 (kW)         1h           2026-08-06T11:00:00Z       2026-09-05T19:00:00Z      729
+grid_l2_hourly.csv          Nätfas L2 (kW)         1h           2026-08-06T11:00:00Z       2026-09-05T19:00:00Z      729
+grid_l3_hourly.csv          Nätfas L3 (kW)         1h           2026-08-06T11:00:00Z       2026-09-05T19:00:00Z      729
+battery_inout_hourly.csv    Batteri in/ut (W)      1h           2026-08-06T11:00:00Z       2026-09-05T19:00:00Z      727
 
 Källentiteter:
   solar_hourly.csv          sensor.sg_total_active_power
@@ -20,6 +26,11 @@ Källentiteter:
   outdoor_temp_hourly.csv   sensor.boiler_outdoortemp
   battery_soc_hourly.csv    sensor.sonnenbatterie_271100_state_battery_percentage_real
   price_quarterhour.csv     sensor.nordpool_kwh_se3_sek_3_10_0_2 (öre/kWh omvandlat till SEK/kWh)
+  grid_l1_hourly.csv        sensor.elmatare_active_power_l1
+  grid_l2_hourly.csv        sensor.elmatare_active_power_l2
+  grid_l3_hourly.csv        sensor.elmatare_active_power_l3
+  battery_inout_hourly.csv  sensor.sonnenbatterie_271100_state_battery_inout (positiv=laddning,
+                            negativ=urladdning — vänds i backtest.py:s SETTINGS["battery_power_inverted"])
 
 Kolumner (statistics-filerna): timestamp_utc, mean, min, max (HA:s timvisa aggregat).
 Kolumner (price_quarterhour.csv): timestamp (lokal tid, ISO), spot_sek_kwh.
@@ -28,13 +39,14 @@ Begränsande faktorer
 ---------------------
 - sensor.sg_total_active_power (soldata) har bara ~726 timmar historik totalt –
   sensorn är ny sedan ~2026-08-06. Det är DEN faktorn som satte hela fönstret
-  ovan; huslast/temp/SOC har flera års historik i statistik-API:t men hämtades
-  bara för samma fönster eftersom mer historik utan matchande soldata inte är
-  användbar för att mata planeraren (som behöver alla fyra samtidigt).
+  ovan; huslast/temp/SOC/nätfaser/batteri-inout har flera års historik i
+  statistik-API:t men hämtades bara för samma fönster eftersom mer historik
+  utan matchande soldata inte är användbar för att mata planeraren (som
+  behöver alla fyra ursprungliga storheter samtidigt).
 - Rå (kvartsupplöst) historik för prissensorn sparas bara ~10 dygn av recordern
   (purge_keep_days) – därav att price_quarterhour.csv bara täcker
-  2026-08-26 till 2026-09-05, kortare än de andra fyra filerna.
-- Den praktiskt användbara perioden där ALLA FEM storheter finns samtidigt är
+  2026-08-26 till 2026-09-05, kortare än de andra filerna.
+- Den praktiskt användbara perioden där ALLA storheter finns samtidigt är
   alltså bara 2026-08-26 till 2026-09-05 (~10 dygn), inte de fulla ~30 dagarna.
 
 Återskapa/utöka
@@ -48,10 +60,10 @@ Använd med backtest.py
 testdata/backtest.py läser den här mappen direkt:
   python testdata/backtest.py testdata/history --out results.csv
 
-OBS: den här mappen har INGEN historisk nätfaseffekt (grid_power_l1/l2/l3)
-eller batteri-inout-effekt – bara SOC, inte faktisk laddnings-/urladdningseffekt.
-"Verklig"-raderna i backtestens sammanfattning (nätimport/-export, kostnad,
-batteriladdning/-urladdning) är därför INTE tillgängliga för den här källan
-och redovisas som sådana. Kolumnerna som visar SEM:s BESLUT (plan_action,
-decision_bat_charge_w/discharge_w, reason) är fullt meningsfulla – de kräver
-bara pris, sol, huslast och SOC, som alla finns.
+Med grid_l1/l2/l3_hourly.csv och battery_inout_hourly.csv på plats (utökningen
+från 2026-09-06) är "verklig"-raderna i backtestens sammanfattning
+(nätimport/-export, kostnad, batteriladdning/-urladdning) meningsfulla för
+den här källan, och P7-2:s modelltrohets-återspelning (som validerar
+energibalansformeln mot verklig nätdata) kan köras. Saknas någon av de fyra
+filerna faller has_actual_power_data tillbaka till False, precis som innan
+utökningen.
