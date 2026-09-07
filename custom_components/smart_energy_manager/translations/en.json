@@ -39,7 +39,9 @@
           "solar_power_l3_entity": "Solar power L3",
           "solcast_today_entity": "Solcast forecast today (kWh)",
           "solcast_tomorrow_entity": "Solcast forecast tomorrow (kWh)",
-          "actual_solar_daily_entity": "Actual solar production today (kWh, resets at midnight) – for snow/soiling detection"
+          "actual_solar_daily_entity": "Actual solar production today (kWh, resets at midnight) – for snow/soiling detection",
+          "solar_curtailment_entity": "Inverter power limitation setting (%) – for negative-price curtailment (P4-2 step 5)",
+          "solar_inverter_rated_kw": "Inverter rated power (kW) – the limitation % is calibrated against this, not current production"
         }
       },
       "battery": {
@@ -175,7 +177,9 @@
           "solar_power_l3_entity": "Solar power L3",
           "solcast_today_entity": "Solcast forecast today (kWh)",
           "solcast_tomorrow_entity": "Solcast forecast tomorrow (kWh)",
-          "actual_solar_daily_entity": "Actual solar production today (kWh, resets at midnight) – for snow/soiling detection"
+          "actual_solar_daily_entity": "Actual solar production today (kWh, resets at midnight) – for snow/soiling detection",
+          "solar_curtailment_entity": "Inverter power limitation setting (%) – for negative-price curtailment (P4-2 step 5)",
+          "solar_inverter_rated_kw": "Inverter rated power (kW) – the limitation % is calibrated against this, not current production"
         }
       },
       "battery_opts": {

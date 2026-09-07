@@ -36,6 +36,10 @@ CONF_SOLAR_INVERTER_TOTAL = "solar_power_total_entity"
 CONF_SOLAR_INVERTER_POWER_L1 = "solar_power_l1_entity"
 CONF_SOLAR_INVERTER_POWER_L2 = "solar_power_l2_entity"
 CONF_SOLAR_INVERTER_POWER_L3 = "solar_power_l3_entity"
+# P4-2 steg 5: strypning vid negativt pris. Kalibrerad mot märkeffekt, se P4-1.
+CONF_SOLAR_CURTAILMENT_ENTITY = "solar_curtailment_entity"
+CONF_SOLAR_INVERTER_RATED_KW = "solar_inverter_rated_kw"
+DEFAULT_SOLAR_INVERTER_RATED_KW = 12.0
 
 # ── Batteri ───────────────────────────────────────────────────────────────────
 CONF_BATTERY_INVERTER_POWER = "battery_inverter_power_entity"

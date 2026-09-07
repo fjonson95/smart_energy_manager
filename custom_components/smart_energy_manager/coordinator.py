@@ -24,6 +24,7 @@ from .const import (
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
     CONF_SOLAR_INVERTER_TOTAL,
     CONF_SOLAR_INVERTER_POWER_L1, CONF_SOLAR_INVERTER_POWER_L2, CONF_SOLAR_INVERTER_POWER_L3,
+    CONF_SOLAR_CURTAILMENT_ENTITY, CONF_SOLAR_INVERTER_RATED_KW, DEFAULT_SOLAR_INVERTER_RATED_KW,
     CONF_EV_CHARGERS, CONF_EV_CARS,
     CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
     CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
@@ -909,6 +910,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 solar_power_l3=self._get_state_float(c.get(CONF_SOLAR_INVERTER_POWER_L3)),
                 solar_forecast_today_kwh=self._get_state_float(c.get(CONF_SOLCAST_TODAY)),
                 solar_forecast_tomorrow_kwh=self._get_state_float(c.get(CONF_SOLCAST_TOMORROW)),
+                # 0 om ingen strypningsentitet konfigurerad - stänger av P4-2 steg 5 helt
+                # (se _auto_mode: "if remaining_w > 100 and state.inverter_rated_kw > 0").
+                inverter_rated_kw=(
+                    float(c.get(CONF_SOLAR_INVERTER_RATED_KW, DEFAULT_SOLAR_INVERTER_RATED_KW))
+                    if c.get(CONF_SOLAR_CURTAILMENT_ENTITY) else 0.0
+                ),
 
                 battery_soc_pct=self._get_state_float(c.get(CONF_BATTERY_SOC), default=50.0),
                 battery_power_w=battery_pwr_w,
@@ -1301,6 +1308,19 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     {"entity_id": legionella_switch},
                     blocking=False,
                 )
+
+        # P4-2 steg 5: växelriktarstrypning vid negativt pris. decision.curtailment_pct
+        # står på 100 (ostrypt) i alla lägen utom när _auto_mode()s absorptionstrappa
+        # aktivt behöver den, så vanlig dödband/hjärtslag räcker - ingen risk att
+        # lämna strypningen aktiv efter att priset slutat vara negativt.
+        curtailment_entity = self._config.get(CONF_SOLAR_CURTAILMENT_ENTITY)
+        if curtailment_entity and self._should_write_number(curtailment_entity, decision.curtailment_pct, now):
+            await self.hass.services.async_call(
+                "number", "set_value",
+                {"entity_id": curtailment_entity, "value": round(decision.curtailment_pct)},
+                blocking=False,
+            )
+            self._last_write_times[curtailment_entity] = now
 
     def _apply_extra_hot_water_min_runtime(self, decision, now: datetime) -> None:
         """

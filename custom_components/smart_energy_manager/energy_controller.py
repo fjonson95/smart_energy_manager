@@ -249,6 +249,11 @@ class EnergyState:
     # nedan – håller den här filen fri från HA-beroenden för standalone/backtest-bruk.
     now: Optional[datetime] = None
 
+    # Solväxelriktarens märkeffekt (kW) – underlag för P4-2:s strypningssteg
+    # (P4-1-kalibrerat: number.sg_power_limitation_setting räknas mot denna,
+    # inte mot aktuell produktion). 0 = strypning ej konfigurerad/inaktiv.
+    inverter_rated_kw: float = 0.0
+
 
 @dataclass
 class ControlDecision:
@@ -257,6 +262,10 @@ class ControlDecision:
     battery_discharge_power_w: float = 0.0
     charger_decisions: list[ChargerDecision] = field(default_factory=list)
     extra_hot_water: bool = False
+    # Växelriktarens effektbegränsning i % av märkeffekt (P4-2 steg 5).
+    # 100 = ostrypt/normal drift. Skrivs bara om en strypningsentitet är
+    # konfigurerad (se coordinator._execute_decision).
+    curtailment_pct: float = 100.0
     reason: str = ""
     phase_loads: PhaseLoad = field(default_factory=PhaseLoad)
     # Laddare som behöver bilval (för notifieringar)
@@ -411,25 +420,41 @@ class EnergyController:
                 _charge_max_soc = effective_max_soc
                 decision.reason += f" | Håller {ps.recommended_headroom*100:.0f}% headroom"
 
-        # ── Negativt säljpris just nu: absorptionstrappan ──────────────
-        # Steg (i ordning, nästa steg bara om föregående är mättat):
+        # ── Negativt säljpris just nu: absorptionstrappan (P4-2) ────────
+        # Steg, KASKADVIS (varje steg äter av det som blir kvar efter
+        # föregående, inte ömsesidigt uteslutande – annars nås steg 2+
+        # aldrig så länge batteriet bara är under 100% SOC, vilket är nästan
+        # alltid, oavsett om batteriets maxeffekt räcker för hela överskottet):
+        # OBS: remaining_w räknas mot vad EV-steget BER om (MAX_EV_CURRENT), inte
+        # vad _apply_phase_limits() i slutändan faktiskt beviljar – i sällsynta fall
+        # med samtidig fasbegränsning kan strypningen därför bli något för snäll
+        # (kvarvarande export missas), men aldrig farlig: fasskyddet klämmer ändå
+        # till den verkliga effekten oavsett vad trappan trodde skulle absorberas.
         #   1. Batteri – full effekt (nät ELLER sol, oavsett – man får betalt för att äta)
         #   2. Varmvatten
-        #   3. Värme (etapp 5 – ej implementerat än)
+        #   3. Värme (etapp 5 – kräver P5-3:s börvärdesförskjutning, ej implementerat än)
         #   4. Bil
-        #   5. Strypning av växelriktaren (kräver P4-1:s manuella kalibrering – ej implementerat)
-        # Villkoret krävde tidigare solar_w > 0, vilket gjorde att ett negativt
-        # nattpris utan sol aldrig utnyttjades alls.
+        #   5. Strypning av växelriktaren (P4-1-kalibrerad: procent räknas mot
+        #      märkeffekt, ~30-50s svarstid)
         if negative_price:
+            remaining_w = max(0.0, solar_surplus_w)
+            steps: list[str] = []
+
             if battery_soc < self.battery_max_soc:
-                decision.battery_charge_power_w = state.battery_max_power_kw * 1000
-                decision.reason += " | Negativt pris steg 1: batteri full effekt"
-            elif self._can_start_extra_hot_water(state):
+                charge_w = state.battery_max_power_kw * 1000
+                decision.battery_charge_power_w = charge_w
+                remaining_w = max(0.0, remaining_w - charge_w)
+                steps.append(f"steg 1 batteri {charge_w:.0f}W")
+
+            if remaining_w > 100 and self._can_start_extra_hot_water(state):
                 decision.extra_hot_water = True
-                decision.reason += " | Negativt pris steg 2: varmvatten"
-            else:
-                _absorbed_ev = False
+                remaining_w = max(0.0, remaining_w - state.heat_pump_patron_power_kw * 1000)
+                steps.append("steg 2 varmvatten")
+
+            if remaining_w > 100:
                 for i, ch in enumerate(state.chargers):
+                    if remaining_w <= 100:
+                        break
                     if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
                         continue
                     car = ch.active_car
@@ -439,11 +464,24 @@ class EnergyController:
                         enable=True, current_a=MAX_EV_CURRENT,
                         reason="negativt pris – laddar bilen",
                     )
-                    _absorbed_ev = True
-                if _absorbed_ev:
-                    decision.reason += " | Negativt pris steg 4: bil"
-                else:
-                    decision.reason += " | Negativt pris – inget kvar att absorbera i (strypning ej implementerad)"
+                    car_phases = car.car_phases if car else 1
+                    remaining_w = max(0.0, remaining_w - self._charger_power(MAX_EV_CURRENT, car_phases))
+                    steps.append(f"steg 4 bil {ch.config.name}")
+
+            if remaining_w > 100 and state.inverter_rated_kw > 0:
+                # Klämmer växelriktarens produktion ner till exakt det som
+                # husets last + steg 1/2/4:s absorption faktiskt förbrukar –
+                # allt därutöver skulle bara exporterats till minuspris.
+                target_output_w = solar_w - remaining_w
+                target_pct = target_output_w / (state.inverter_rated_kw * 1000.0) * 100.0
+                decision.curtailment_pct = max(20.0, min(100.0, target_pct))
+                steps.append(f"steg 5 strypning {decision.curtailment_pct:.0f}%")
+            elif remaining_w > 100:
+                steps.append("inget kvar att absorbera i (strypning ej konfigurerad)")
+
+            decision.reason += (
+                " | Negativt pris: " + ", ".join(steps) if steps else " | Negativt pris: inget att göra"
+            )
 
             self._check_car_selection(state, decision)
             return self._apply_phase_limits(state, decision)
@@ -877,6 +915,15 @@ class EnergyController:
         börvärdet, så att en backtest faktiskt speglar produktionsbeteendet.
         """
         if not day_plan or operating_mode != MODE_AUTO:
+            return decision
+
+        if state.sell_price_sek_kwh < NEGATIVE_PRICE_THRESHOLD:
+            # P4-2: negativt-pris-trappan i _auto_mode() har redan satt det
+            # fullständiga beslutet (batteri/varmvatten/bil/strypning i
+            # kaskad). Dagsplanen känner inte till negativa priser alls (den
+            # planerar mot percentiler av dagens EGNA priser) - utan den här
+            # spärren skrev raderna nedan blint över trappans beslut med
+            # planens vanliga cover_load/export-logik varje cykel.
             return decision
 
         now_slot = day_plan.slot_at(now)

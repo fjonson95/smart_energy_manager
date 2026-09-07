@@ -1,16 +1,20 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.7.7-blue)
+![Version](https://img.shields.io/badge/version-0.8.0-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.7.7
+## What's New in 0.8.0
 
-- **Fixed a periodic single-cycle power glitch during otherwise-stable charging/discharging.** Sonnen's API description ("the setpoint is kept until the battery receives a new charging or discharging value") reads as ONE shared internal setpoint (direction + magnitude) behind the separate "force charge"/"force discharge" number entities, not two independent registers — the latest write wins regardless of which direction issued it. P6-1's heartbeat (re-send an unchanged value at least every 5 minutes, for self-healing against a dropped write) was rewriting the *inactive* direction's 0 on that schedule even while the other direction was actively driving a real value — on a shared setpoint, that briefly zeroes it until the next cycle's write catches up, visible as a single ~30s near-zero blip in `battery_inout` roughly every 5-10 minutes during an otherwise clean, continuously-rising charge or discharge ramp. `_write_battery_setpoints()` now only heartbeat-rewrites the inactive direction's 0 when *both* directions are meant to be idle (the case the self-healing actually protects); while one direction is active, the other is only touched for a genuine correction, never on the heartbeat schedule alone.
+Stage 4 of the development roadmap, complete — the negative-price absorption ladder (P4-2), building on P4-1's live calibration of the inverter's curtailment response.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.7.5's manual-mode fix and v0.7.6's evening-target fix).
+- **The absorption ladder now cascades instead of being mutually exclusive.** Previously, step 1 (charge the battery at full power) blocked every later step (hot water, EV, curtailment) as long as the battery wasn't literally at 100% SOC — true almost always — so a solar peak exceeding the battery's max charge rate had nowhere else to go but the grid at a negative price. Each step now absorbs what it can and passes the *remainder* to the next: battery → hot water → EV → curtailment, tracked as a running `remaining_w`.
+- **New step 5: proportional inverter curtailment**, using P4-1's live-measured finding that `number.sg_power_limitation_setting` is calibrated against the inverter's *rated* capacity, not current production. When steps 1-4 are saturated and solar would still be exported at a negative price, the setpoint is computed directly (`target_output_w / rated_kw × 100`, clamped to 20-100%) so inverter output drops to exactly local consumption — no export, no unnecessary throttling. Two new optional config fields: inverter curtailment entity and rated power (kW).
+- **Fixed a bug that made the entire ladder dead code whenever a day-plan existed** (i.e., almost always): `apply_plan_executor()`, the sole write path for battery setpoints, unconditionally overwrote whatever `_auto_mode()`'s negative-price logic had just decided with the day-plan's ordinary cover_load/export logic — which has no concept of negative prices at all. It now returns immediately, untouched, whenever the sell price is negative.
+
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.7.5's manual-mode fix, v0.7.6's evening-target fix, and v0.7.7's shared-setpoint fix).
 
 ## System Overview
 
