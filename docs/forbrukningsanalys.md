@@ -264,10 +264,102 @@ Andra faktorer (vind, faktisk vattenförbrukning, ev. avfrostningscykler)
 påverkar uppenbarligen minst lika mycket som momentan temperatur för ett
 enskilt dygn — men riktningen och storleksordningen över säsongen är
 entydig, till skillnad från den tidigare smala januari–februari-skivan.
+Vind som möjlig delförklaring undersöks nedan.
 
 Rådata: `full_year.csv` (scratchpad, ej incheckad — kan återskapas med
 `ha_get_history(source="statistics", period="day")` på de fyra sensorerna
 ovan från 2025-10-01 och framåt).
+
+### Vind som förklaringsvariabel — lovande men inte en ren regel
+
+Det finns faktiskt vindsensorer med permanent dygnsstatistik:
+`sensor.unknown_70_ee_50_84_24_fc_regn_vindhastighet` (medelvind, statistik
+från ~2025-12-03) och `..._vindbya_styrka` (byvind, statistik från
+~2025-12-21). `..._vindriktning` (vindriktning) saknar `state_class` helt —
+ingen statistik alls där.
+
+Februari (samma "heat-only"-elpatrondygn som i huvudtabellen ovan) mot vind:
+
+| Datum | Temp | Boiler | AuxD | Vind (medel) | Byvind (medel) | Byvind (max) | Elpatron? |
+|---|---|---|---|---|---|---|---|
+| 1–6 feb | -3,1 till -5,9°C | 38–48 | 0 | 1,3–1,8 | 3,3–4,7 | 6,9–10,0 | Nej |
+| 8 feb | -5,0°C | 61 | 9 | 1,03 | 2,56 | 5,3 | Ja |
+| 9 feb | -7,3°C (kallare!) | 42 | 0 | 0,47 | 1,08 | 2,5 | **Nej** |
+| 14 feb | -9,9°C | 59 | 11 | **0,55** | **1,18** | 2,5 | Ja |
+| 18 feb | -7,6°C | 59 | 4 | **0,41** | **1,01** | 2,5 | Ja |
+| 19 feb | -8,4°C | 54 | 5 | **0,44** | **0,98** | 1,9 | Ja |
+
+Flera av de STÖRSTA elpatron-dygnen (14, 18, 19 feb) inträffar vid ovanligt
+**låg** vind (medel 0,4–0,55 m/s, bland de lugnaste dygnen hela månaden) —
+motsatsen till "mer vind → mer värmeförlust → mer elpatron". Det stämmer
+istället med ett känt beteende hos luft/vatten-värmepumpar: **kallt + fuktigt
++ vindstilla ger mest rimfrost på utedelens kylare**, vilket kräver fler/
+längre avfrostningscykler — och många system slår till elpatronen som
+tillfälligt stöd under avfrostning.
+
+**Men det är ingen ren regel** — 9 februari är nästan lika vindstilla
+(0,47 m/s) och kallare än 8:e (-7,3 vs -5,0°C), men fick INGEN elpatron alls,
+medan 8:e (varmare, lite mer vind) fick 9 kWh. Vind förklarar alltså inte
+allt själv heller.
+
+**Rättelse:** `binary_sensor.ceed_defrost` är BILENS (Kia Ceed) vindrute-/
+klimatavfrostning — helt orelaterat till huset/värmepumpen. Fel spår, hittat
+via namnmatchning utan att kontrollera vad det faktiskt är.
+
+**Rätt spår, verifierat:** helpern "Avfrostningsfunktion aktiv" är en
+`template`-`binary_sensor` med källkoden
+`{{ 'defrost' in states('sensor.boiler_hpactivity') | lower }}` —
+`sensor.boiler_hpactivity` är pannans (ems-esp) egen aktivitetsstatus-sensor
+(textvärden). Det HÄR är den riktiga avfrostningssignalen.
+
+**Men samma retentionsproblem som `ceed_defrost`:** `sensor.boiler_hpactivity`
+saknar `state_class` (det är en textsensor, inte numerisk — kan inte få
+permanent dygnsstatistik ens i teorin). Kontrollerat direkt: en förfrågan om
+60 dygns historik gav bara data från de senaste ~10 dygnen tillbaka (`off`,
+`heating`, `hot water`, `pool`, `unavailable` — inget `defrost` denna period,
+väntat i milt väder). **Går alltså inte att kontrollera mot förra vinterns
+dygn i efterhand**, av samma skäl som `ceed_defrost`.
+
+**Rätt åtgärd framåt (inte `state_class` — det gäller bara numeriska
+sensorer):** antingen (a) förlänga recorder-retention specifikt för
+`sensor.boiler_hpactivity` (`purge_keep_days`/`include` i recorder-config),
+eller (b) bygga en numerisk räknare (t.ex. "avfrostningsminuter idag",
+`total_increasing`) som KAN få permanent statistik, och som SEM eller en
+HA-automation matar från just detta tillstånd. Utan endera går hypotesen
+bara att verifiera live, dygn för dygn, framöver.
+
+### Luftfuktighet testad också — motbevisar den enkla versionen av hypotesen
+
+`sensor.utomhus_humidity` finns med permanent dygnsstatistik (verifierat,
+data från åtminstone dec 2025). Lade till den i februari-tabellen för att se
+om fukt + vind + temp tillsammans förklarar elpatron-dygnen bättre:
+
+**9 feb vs 18 feb är ett nästan perfekt naturligt kontrollpar:**
+
+| Datum | Temp | Vind (medel) | Luftfuktighet | Elpatron |
+|---|---|---|---|---|
+| 9 feb | -7,3°C | 0,47 m/s | 82,1% | **0 kWh** |
+| 18 feb | -7,6°C | 0,41 m/s | 74,0% | **4 kWh** |
+
+Nästan identisk temp, nästan identisk (ovanligt låg) vind — och 9:e var
+t.o.m. FUKTIGARE än 18:e. Om "kallt + fuktigt + vindstillt → rimfrost →
+avfrostning → elpatron" stämde borde 9:e ha varit MINST lika benäget att
+utlösa elpatron som 18:e. Det blev tvärtom.
+
+**Slutsats:** den enkla vädermodellen (temp+vind+fukt vid dygnsupplösning)
+förklarar INTE vilka dygn som får elpatron. Antingen (a) är det något annat
+som styr — vattenförbrukning, tidigare dygns islagerhistorik på kylflänsen,
+en helt orelaterad orsak (manuell körning, automation) — eller (b) dygnsmedel
+är fel upplösning: enskilda kalla/fuktiga/vindstilla TIMMAR kan ha funnits
+även 9:e feb utan att synas i dygnsmedlet. Går inte att skilja åt utan den
+riktiga `sensor.boiler_hpactivity`-signalen i högre tidsupplösning, vilket
+som sagt inte finns kvar i historiken för februari.
+
+Övriga sensorer kollade men inte hittade: solinstrålning/irradians (finns
+inte som egen sensor, bara Solcast-prognoser), snösensor (finns inte —
+snö-på-panelerna-effekten går bara att se indirekt via bortfall i faktisk
+solproduktion mot Solcast-prognos). Nederbördssensor finns
+(`..._nederbord_i_dag`, permanent statistik) men inte testad ännu.
 
 ## Sensor-referens (alla använda i den här analysen)
 
@@ -283,6 +375,12 @@ ovan från 2025-10-01 och framåt).
 | `sensor.boiler_nrgconstotal` m.fl. (se avsnitt 2) | total_increasing, kWh | Pannans energiuppdelning |
 | `sensor.smart_energy_manager_yesterday_consumption_excl_ev` | — | Gårdagens faktiska förbrukning, exkl. EV — finns men används INTE i `build_plan()` idag |
 | `sensor.smart_energy_manager_produktionskvot_3_dygn` | measurement | P3-2 produktionskvot, se `_update_pv_production_ratio()` i coordinator.py |
+| `sensor.unknown_70_ee_50_84_24_fc_regn_vindhastighet` | measurement, m/s | Medelvind — permanent statistik från ~2025-12-03 |
+| `sensor.unknown_70_ee_50_84_24_fc_regn_vindbya_styrka` | measurement, m/s | Byvind — permanent statistik från ~2025-12-21 |
+| `sensor.unknown_70_ee_50_84_24_fc_regn_vindriktning` | measurement, ° | Vindriktning — INGEN `state_class`, ingen statistik alls |
+| `sensor.boiler_hpactivity` | text/enum | Pannans aktivitetsstatus (`off`/`heating`/`hot water`/`pool`/`defrost` m.fl.) — källa för helpern "Avfrostningsfunktion aktiv"; ~10 dygns retention, ingen `state_class` möjlig (textsensor) |
+| `sensor.utomhus_humidity` | measurement, % | Utomhus luftfuktighet — permanent statistik, testad mot elpatron-dygn (avsnitt 7), motbevisade den enkla väderhypotesen |
+| `sensor.unknown_70_ee_50_84_24_fc_unknown_05_00_00_0c_b4_54_nederbord_i_dag` | total (dygnsvis), mm | Nederbörd idag — permanent statistik, inte testad ännu |
 
 **Begränsning att komma ihåg:** rå state-historik (switchar, EV-status)
 rensas efter ~10 dygn. Allt bortom det måste rekonstrueras via
@@ -301,11 +399,20 @@ satt — fungerar bara för de sensorer som faktiskt har det.
    manuella körningar och en misstänkt HA-automation för sol-överskott.
    Kvarstår: hitta automationens namn (om den finns) för att korsköra mot
    logbook och isolera de tre källorna från varandra.
-3. **Löst med helårsdata (avsnitt 7):** kompressorns förbrukning mot temp
-   är nu kartlagd över hela intervallet +25°C till -13,2°C. Sambandet är
-   tydligt riktningsmässigt men inte perfekt linjärt dygn-för-dygn (vind,
-   vattenförbrukning, avfrostning stör) — inte värt mer tid utan fler
-   variabler (t.ex. vindstyrka) att korrelera mot.
+3. **Delvis löst, hypotesen om väder→avfrostning MOTBEVISAD på dygnsnivå
+   (avsnitt 7):** kompressorns förbrukning mot temp är kartlagd över +25°C
+   till -13,2°C — riktningen är tydlig men inte perfekt linjärt dygn-för-dygn.
+   Testade vind OCH luftfuktighet (båda finns som permanent dygnsstatistik)
+   som möjlig förklaring till vilka kalla dygn som får elpatron-aktivitet —
+   9 feb och 18 feb är ett nästan identiskt par (samma temp, samma låga
+   vind, 9:e t.o.m. fuktigare) men med helt olika utfall (0 resp. 4 kWh
+   elpatron). Dygnsupplösning räcker alltså inte. Den riktiga
+   avfrostningssignalen är hittad (`sensor.boiler_hpactivity` via helpern
+   "Avfrostningsfunktion aktiv") men saknar långsiktig historik (textsensor,
+   ~10 dygns retention, ingen `state_class` möjlig). Kräver antingen längre
+   recorder-retention för just den sensorn, eller en ny numerisk räknare
+   ("avfrostningsminuter/dygn") — annars går det bara att verifiera live,
+   dygn för dygn, framöver.
 4. Bygga förbrukningsprognosen (piece 2 i den ursprungliga uppdelningen):
    sannolikt baserad på verklig COP (`nrgsupp*` / `nrgcons*`) mot dämpad
    utetemp, istället för dagens platta temperaturmodellskonstant.
