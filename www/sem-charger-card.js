@@ -6,7 +6,7 @@
  *   type: custom:sem-charger-card
  *   name: Garage
  *   connected_sensor: sensor.sem_charger_garage_connected      # "connected" / other = disconnected
- *   active_car_sensor: select.sem_charger_garage_active_car    # "unknown" = no car selected
+ *   active_car_sensor: select.sem_charger_garage_active_car    # "none" = no car selected
  *   power_sensor: sensor.sem_charger_garage_power              # W or kW
  *   power_unit: W        # W (default) or kW
  *   battery_soc_sensor: sensor.my_battery_soc                  # optional – SOC in % (0-100)
@@ -202,11 +202,14 @@ class SemChargerCard extends HTMLElement {
       ? CONNECTED_STATES.has((connState.state || "").toLowerCase())
       : false;
 
-    const activeCar = carState ? carState.state : "unknown";
-    const carSelected = activeCar && activeCar.toLowerCase() !== "unknown";
+    // Sentinel för "ingen bil vald" är "none" (NO_CAR_SELECTED i const.py) –
+    // INTE "unknown", som krockar med Home Assistants eget reserverade
+    // tillstånd för saknad data.
+    const activeCar = carState ? carState.state : "none";
+    const carSelected = activeCar && activeCar.toLowerCase() !== "none";
 
     const carOptions = (carState && carState.attributes && carState.attributes.options)
-      ? carState.attributes.options.filter(o => o.toLowerCase() !== "unknown")
+      ? carState.attributes.options.filter(o => o.toLowerCase() !== "none")
       : [];
 
     let powerW = 0;
