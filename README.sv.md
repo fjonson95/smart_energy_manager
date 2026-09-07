@@ -1,19 +1,17 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.9.1-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.0
+## Nyheter i 0.9.1
 
-Säsongsmedveten laddning/urladdning – inget nytt manuellt läge, `auto` beter sig nu rätt både sommar och vinter av sig självt, efter en djupdykning i förbrukningsanalysen (`docs/forbrukningsanalys.md`) som startade med ett orimligt högt exportgolv en solig dag.
+- **`export_floor_kwh` är nu klämt till max 85% av det användbara SOC-spannet** (`battery_max_soc − battery_min_soc`), inte bara mot total kapacitet. På ett verkligt högförbrukningsdygn blev reservformeln (mörka fönstrets last × upp till +300% osäkerhetspåslag) STÖRRE än hela det användbara spannet, vilket klämde kvällsmålet mot `battery_max_soc` och lät batteriet stå stilla genom en hel kvällsprisptopp istället för att ladda ur. En helårsanalys av förbrukningen (`docs/forbrukningsanalys.md` avsnitt 8) visade att detta inte går att lösa med en bättre natt-specifik lasttakt ensam – natt och dag är nästan identiska på de höst-/vinterdygn med hög förbrukning som utlöser felet, och skiljer sig bara på sommaren, då golvet sällan är ett problem. Den nya spärren är ett säsongsoberoende skyddsnät som garanterar att minst 15% av spannet alltid går att nå.
+- **Reservberäkningen använder nu ett 7-dygns rullande förbrukningssnitt, som räknar bort sol-styrd extra varmvatten.** Triggerdygnet ovan låg själv ~20% över det verkliga 17-dagarssnittet – en enskild ovanligt hög dag blåste upp golvet på egen hand. Extra varmvatten (absorptionstrappans sol-/negativpris-styrda opportunistiska steg) netto:as bort eftersom den aldrig kör samtidigt som rumsvärme och kommer från solöverskott som inte säger något om nattens behov; legionella-desinficeringen (var 7:e dag) lämnas medvetet kvar, eftersom ett 7-dygnsfönster representerar dess verkliga återkommande kostnad korrekt på egen hand.
+- **Fixade att P3-2 (produktionskvoten) tyst ignorerade genuina nollproduktionsdygn** (t.ex. snötäckta paneler) – de behandlades likadant som en sensor som aldrig svarat, så ett verkligt flerdagarsavbrott sänkte aldrig kvoten eller höjde golvets osäkerhetsmarginal.
+- **Ny interimslösning: prisstyrd golvavlämpning ("Option B")**: låter batteriet ladda ur under reserven mot hard_floor när nätets köppris överstiger batteriets egen lagrade kostnad och solprognosen är tillräckligt pålitlig. Uttryckligen en första version – se `docs/forbrukningsanalys.md` för kända begränsningar och den säkrare variant som fortfarande utvärderas.
 
-- **Fixade att `export_floor_kwh` – den verkliga reserven som blockerar urladdning/export – aldrig räknade på verklig förbrukning.** `EnergyPlanner.build_plan()` byggde sin timlast-uppskattning på `predicted_daily_kwh` eller momentan `house_load_w`, aldrig `yesterday_consumption_kwh` eller det 15-minuters glidande medlet `house_load_avg_w` som `_auto_mode()` använt sedan v0.7.6. `build_plan()` tar nu samma blandning, vilket täpper till luckan som gav ett golv på 29,3 kWh (av 30,7 kWh kapacitet) en solig septemberdag som borde haft nästan inget.
-- **Omkalibrerade den temperaturbaserade förbrukningsmodellen mot ett helt års data.** Gradday-faktorn underskattade vinterförbrukningen med mer än hälften (förutspådde ~29 kWh vid -7,8°C mot uppmätta 63 kWh) – omräknad ger nu `heat_factor_kwh_dd=2,39` (var 1,275). Nytt valfritt konfigfält `damped_outdoor_temp_entity` använder en redan utjämnad temperatursensor direkt när den finns.
-- **EV-laddning har nu en reservmarginal och kan laddas under billiga timmar** – båda delarna saknades helt i planeraren tidigare.
-- **Exportdispatchen koncentrerar sig nu på det bästa prisfönstret** istället för att smeta ut sig proportionellt över alla kvalificerande slots (t.ex. kvällens topp mot morgondagens morgontopp).
-
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.8.0:s absorptionstrappa vid negativt pris, v0.7.6:s fix för kvällsmålet och v0.7.7:s fix för det delade börvärdet).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.0:s säsongsmedvetna laddning/urladdning, v0.8.0:s absorptionstrappa vid negativt pris, v0.7.6:s fix för kvällsmålet och v0.7.7:s fix för det delade börvärdet).
 
 ## Systemöversikt
 

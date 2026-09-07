@@ -25,6 +25,18 @@ _LOGGER = logging.getLogger(__name__)
 _DARK_SOLAR_KW   = 2.0   # Soleffekt under detta → "mörk" slot
 _PLAN_HORIZON_H  = 28    # Timmar framåt att planera
 _HARD_FLOOR_FRACTION = 0.10  # Hårt golv: andel av batterikapaciteten som aldrig underskrids
+_FLOOR_SAFETY_CAP_FRACTION = 0.85  # Skyddsspärr: golvet äter aldrig mer än denna andel av användbart SOC-spann
+
+# --- Interimslösning ("Option B", docs/forbrukningsanalys.md) -------------
+# Prisspärren nedan är MEDVETET en enkel första version, inte den slutgiltiga
+# lösningen. Den öppnar golvet rakt av mot hard_floor_kwh varje gång villkoret
+# slår till, utan gräns för hur mycket av marginalen som spenderas – testat
+# mot ett "0 sol imorgon"-scenario visade att den kan tömma batteriet till
+# hard_floor timmar innan nästa kvällstopp om solprognosen slår fel. Två
+# säkrare varianter (dynamisk percentiltröskel; smalare relaxation) är
+# skisserade men inte implementerade. Håll koll på det här avsnittet när den
+# riktiga lösningen bestäms.
+_PRICE_GATE_PV_CONFIDENCE = 0.8  # Bara aktiv när pv_production_ratio (P3-2) är minst detta
 
 
 def _uncertainty_markup(pv_production_ratio: float) -> float:
@@ -136,6 +148,7 @@ class EnergyPlanner:
         yesterday_consumption_kwh: Optional[float] = None,
         house_load_avg_w: Optional[float] = None,
         ev_reserve_margin_kwh: float = 0.0,
+        rolling_consumption_kwh: Optional[float] = None,
     ) -> DayPlan:
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
@@ -145,11 +158,19 @@ class EnergyPlanner:
         batt_kwh     = battery_capacity_kwh * battery_soc_pct / 100.0
         # Samma mönster som _auto_mode() (v0.7.6): predicted_daily_kwh
         # (temperaturmodell) täcker bara uppvärmning/varmvatten, inte den
-        # generella hushållsbaslasten – ta max mot gårdagens FAKTISKA
-        # förbrukning. Projektionen använder house_load_avg_w (glidande
-        # medel) om den finns, annars momentan house_load_w – en enstaka
-        # kokplatta/dusch ska inte läsas som "hela natten".
-        _eff_daily_kwh = max(predicted_daily_kwh, yesterday_consumption_kwh or 0.0)
+        # generella hushållsbaslasten – ta max mot verklig förbrukning.
+        # Föredrar det 7-dygns rullande snittet (netto exkl. extra
+        # varmvatten-energi, se coordinator._get_rolling_consumption_kwh())
+        # framför en enda dags gårdagssiffra – en enstaka ovanligt hög dag
+        # (elpatron, EV, varmvatten) ska inte ensam blåsa upp golvet för hela
+        # natten (docs/forbrukningsanalys.md avsnitt 8: gårdagens 28,76 kWh
+        # låg ~20% över 17-dagarssnittet och drev golvet mot taket på egen
+        # hand). Faller tillbaka till gårdagen ensam tills 7 dygn hunnit
+        # rulla över sedan funktionen driftsattes. Projektionen använder
+        # house_load_avg_w (glidande medel) om den finns, annars momentan
+        # house_load_w – en enstaka kokplatta/dusch ska inte läsas som
+        # "hela natten".
+        _eff_daily_kwh = max(predicted_daily_kwh, rolling_consumption_kwh or yesterday_consumption_kwh or 0.0)
         _load_for_projection_w = house_load_avg_w if house_load_avg_w is not None else house_load_w
         hourly_load_kw = max(_eff_daily_kwh / 24.0, _load_for_projection_w / 1000.0, 0.5)
 
@@ -178,7 +199,14 @@ class EnergyPlanner:
         behov_kwh += max(0.0, ev_reserve_margin_kwh)
         reserv_kwh = behov_kwh * (1.0 + _uncertainty_markup(pv_production_ratio))
         hard_floor_kwh = battery_capacity_kwh * _HARD_FLOOR_FRACTION
-        export_floor_kwh = min(batt_max_kwh, max(hard_floor_kwh, reserv_kwh))
+        # Skyddsspärr: golvet får aldrig äta mer än _FLOOR_SAFETY_CAP_FRACTION av
+        # spannet mellan min_soc och max_soc. Utan den kan reserv_kwh (dygnssnitt
+        # ×mörkt fönster, ×upp till 300% osäkerhetspåslag) bli STÖRRE än hela det
+        # användbara spannet på ett högförbrukningsdygn – evening_target_soc
+        # klämmer då mot max_soc och blockerar både export och vanlig
+        # självkonsumtion (se docs/forbrukningsanalys.md avsnitt 8).
+        floor_safety_cap_kwh = (batt_max_kwh - batt_min_kwh) * _FLOOR_SAFETY_CAP_FRACTION
+        export_floor_kwh = min(batt_max_kwh, floor_safety_cap_kwh, max(hard_floor_kwh, reserv_kwh))
         evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + export_floor_kwh / battery_capacity_kwh * 100.0)
         # Användbar energi ovan min_soc – energin under batt_min_kwh kan aldrig nås.
         exportable_kwh = max(0.0, batt_kwh - batt_min_kwh - export_floor_kwh)
@@ -379,13 +407,29 @@ class EnergyPlanner:
                 )
                 _eff_floor = max(0.0, export_floor_kwh - 0.8 * _next_2h_solar_kwh)
                 avail_kwh = max(0.0, batt_kwh - batt_min_kwh - _eff_floor)
+                # Interimslösning ("Option B", se konstant-kommentaren ovan): vid
+                # golvet men köppriset överstiger vad energin i batteriet redan
+                # kostat (+ cykelkostnad) – och prognosen är tillräckligt säker
+                # (pv_kvot) – öppna ner mot hard_floor istället för att köpa nät
+                # som är dyrare än batteriets egen sparade energi.
+                price_gate_used = False
+                if avail_kwh <= 0.01 and deficit_kwh > 0.01 and pv_production_ratio >= _PRICE_GATE_PV_CONFIDENCE:
+                    price_threshold = battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh
+                    if slot.buy_sek > price_threshold:
+                        avail_kwh_gated = max(0.0, batt_kwh - batt_min_kwh - hard_floor_kwh)
+                        if avail_kwh_gated > 0.01:
+                            avail_kwh = avail_kwh_gated
+                            price_gate_used = True
                 if avail_kwh > 0.01 and deficit_kwh > 0.01:
                     dis_kwh = min(deficit_kwh, avail_kwh, battery_max_power_kw * slot_h)
                     batt_kwh -= dis_kwh
                     power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
                     action = "cover_load"
                     solar_note = f" (sol {_next_2h_solar_kwh:.1f}kWh/2h)" if _next_2h_solar_kwh > 0.1 else ""
-                    reason = f"mörk: självkonsumtion {-power_w:.0f}W batteri kvar {batt_kwh:.1f}kWh{solar_note}"
+                    if price_gate_used:
+                        reason = f"mörk: prisspärr under golvet {-power_w:.0f}W (köp {slot.buy_sek:.2f} > batteri {battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh:.2f}) batteri kvar {batt_kwh:.1f}kWh"
+                    else:
+                        reason = f"mörk: självkonsumtion {-power_w:.0f}W batteri kvar {batt_kwh:.1f}kWh{solar_note}"
                 else:
                     reason = f"mörk idle: batteri vid golvet, nät täcker → sälj={slot.sell_sek:.2f}"
 

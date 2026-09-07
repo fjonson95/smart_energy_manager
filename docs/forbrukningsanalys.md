@@ -361,6 +361,315 @@ snö-på-panelerna-effekten går bara att se indirekt via bortfall i faktisk
 solproduktion mot Solcast-prognos). Nederbördssensor finns
 (`..._nederbord_i_dag`, permanent statistik) men inte testad ännu.
 
+## 8. v0.9.0 live-testad — exportgolvets `can_export`-spärr verkar strukturellt svår att öppna på högförbrukningsdygn
+
+Efter att golvformeln (avsnitt "Bakgrund" ovan) fixades och committades som
+v0.9.0 (säsongsmedveten laddning/urladdning — se `docs/`-historiken/CHANGELOG)
+testades den nya koden mot riktig live-data från HA (2026-09-07 kväll,
+batteri 94% SOC, gårdagens förbrukning 28,76 kWh, morgondagens Nordpool-
+priser redan publicerade med en kvällstopp på 152 öre — högre än dagens
+egen kvällstopp). Planen gav `export=0 slots` trots det attraktiva priset.
+
+**Orsak, verifierad med exakta (icke avrundade) mellanvärden:**
+
+```
+hourly_load_kw = 1,1983 kW   (från gårdagens 28,76 kWh — v0.9.0-fixen i drift)
+golv (pv_kvot 0,86)          = 24,82 kWh
+net_solar_tomorrow_kwh (p10) = 1,86 kWh
+```
+
+(Första körningen visade felaktigt `net_solar=0,0` — mitt eget testunderlag
+saknade `pv_estimate10` i den syntetiska Solcast-JSON:en, vilket
+`price_scheduler.py:230` tolkar som 0 rakt av. Rättat och omkört ovan.)
+
+Testade vad som krävs för att stänga gapet (1,9 mot 24,8 kWh):
+
+| Scenario | Resultat |
+|---|---|
+| pv_kvot höjs till ≥0,90 (minsta möjliga påslag) | golv → 21,1 kWh — fortfarande långt över 1,9 |
+| Imorgondagens sol antas helt säker (p10=p50=19,57 kWh) | net_solar → 8,18 kWh — fortfarande under bästa golvet |
+| Båda samtidigt (bästa tänkbara fall) | 8,18 mot 21,1 kWh — gapet krymper men stänger inte |
+
+**Strukturell insikt (inte en ny bugg — `can_export`-villkoret i
+`energy_planner.py` är orört den här sessionen):** `net_solar_tomorrow_kwh`
+mäter dagens sol-ÖVERSKOTT (sol minus last, per kvart, bara positiva bidrag)
+— i sig en liten siffra eftersom huslasten äter upp det mesta av dagens sol
+innan något blir "netto". `export_floor_kwh` mäter hela NATTENS
+reservbehov (15,5 timmar i det testade fallet) — stor nästan per
+definition. Att kräva att det förra fullt ut ska täcka det senare är en
+mycket sträng spärr. På ett dygn med förbrukning i den här
+storleksordningen (28,76 kWh) verkar spärren strukturellt sett aldrig
+kunna öppnas, oavsett hur attraktivt priset är eller hur mycket sol som
+väntas — inte ens en garanterat solig dag räcker matematiskt i det här
+exemplet.
+
+**Öppen fråga, kräver ett medvetet beslut (inte gjort i den här
+sessionen):** är den här strängheten avsiktlig (hellre för försiktig än
+att riskera ett tomt batteri inför en dag med osäker sol), eller borde
+`can_export`-villkoret jämföra mot en bråkdel av golvet istället för hela
+golvet? Bör även testas mot fler verkliga dygn (lägre gårdagsförbrukning,
+högre pv_kvot) för att se om gapet är lika stort generellt eller mest
+akut på högförbrukningsdygn som det testade.
+
+### Allvarligare upptäckt: golvet blockerar ÄVEN självkonsumtion, inte bara export
+
+Körde ut hela 24h-planen (113 kvartar) för samma testfall och hittade något
+värre än att export-spärren är sträng: **batteriet gör ingenting alls,
+inte ens vanlig självkonsumtion, genom hela morgondagens kvällstopp.**
+
+Planen 09-08 17:30–22:30+: `idle`, SOC fast på 98,1%, medan säljpriset
+stiger till 1,58 kr/kWh vid 20:15 — batteriet står stilla bredvid ett
+huspris på fullt spotpris. Detta trots att batteriet är nästan fullt.
+
+**Orsak, spårad exakt:**
+```
+export_floor_kwh          = 24,4 kWh
+användbart spann (20%→99% SOC) = 24,25 kWh   (0,79 × 30,69 kWh)
+```
+Golvet är STÖRRE än hela det spann batteriet får röra sig inom. Det gör
+att `evening_target_soc_pct = min(99, 20 + golv/kapacitet×100)` klämmer
+mot taket (99%) — kvällsmålet blir alltså identiskt med maxgränsen.
+Samma golv-värde driver även den riktiga styrlogikens
+`apply_plan_executor()`-check `self_consume_ok = battery_soc_pct >
+evening_target` — som därmed aldrig kan bli sant, eftersom batteriet inte
+kan gå över 99%. Golvet blockerar alltså både export OCH vanlig
+självkonsumtion samtidigt, på exakt samma sätt, av exakt samma siffra.
+
+**Rotorsak till varför golvet blir så stort:** `hourly_load_kw` (1,1983
+kW, från gårdagens 28,76 kWh/24h) är ett DYGNSSNITT som appliceras platt
+över hela det 15,5 timmar långa mörka fönstret. Men huset har en tydlig
+dygnsrytm (avsnitt 1: sommarens nattbaslast var ~830 W, klart under
+dygnssnittet) — dagtidsförbrukning (matlagning, apparater, ev. sol-styrd
+last) drar upp dygnssnittet men förbrukas inte alls under natten. Att
+använda dygnssnittet som natt-takt överskattar alltså natt-behovet
+systematiskt, särskilt på långa mörka fönster och särskilt på dygn med
+hög dagtidsförbrukning.
+
+**Vad vi kan göra åt det — inte implementerat, väntar på beslut:**
+
+1. **(Sannolikt störst effekt) Använd en natt-specifik lasttakt istället
+   för dygnssnittet i golvformeln.** T.ex. en konfigurerbar
+   natt-baslast (~830 W sommartid enligt avsnitt 1) eller en kvot mot
+   dygnssnittet (natt ≈ 70% av dygnssnitt, grovt uppskattat), istället för
+   att anta samma takt dygnet runt. Löser sannolikt merparten av
+   problemet utan att röra osäkerhetspåslaget eller `can_export`-villkoret.
+2. **Skyddsspärr:** klamra `export_floor_kwh` så den aldrig äter mer än
+   t.ex. 85–90% av det användbara SOC-spannet (max_soc − min_soc),
+   oavsett vad formeln annars räknar fram — garanterar alltid lite
+   utrymme för självkonsumtion/export, som ett skyddsnät snarare än en fix
+   på rotorsaken.
+3. Kombinera 1+2 — natt-specifik takt som huvudfix, skyddsspärren som
+   bälte-och-hängslen mot framtida extremfall.
+
+Ingen av dessa är implementerad. Kräver användarens beslut om prioritet
+och exakt utformning innan kod skrivs.
+
+**Uppdatering: implementerad (v0.9.1), se nästa avsnitt för underlaget och
+"Reviderad rekommendation" nedan för vad som faktiskt byggdes.**
+
+### Natt-vs-dag grävt vidare — helårsdata visar att remedy 1 INTE räddar det observerade fallet
+
+Innan ett beslut togs grävdes remedy 1 ("natt ≈ 70% av dygnssnittet")
+vidare med riktig timstatistik (`sensor.el_forbruk_power_power`,
+`source=statistics`, `period=hour`) för tre hela månader som representerar
+olika säsonger: oktober 2025 (mellansäsong), januari 2026 (djupvinter) och
+juli 2026 (sommar). Kvot = nattmedel (22–06 lokal tid) / 24h-medel,
+snittat över alla kompletta dygn i respektive månad:
+
+| Månad | Nattmedel | 24h-medel | Kvot natt/24h |
+|---|---|---|---|
+| Oktober 2025 (31 dygn) | 1167 W | 1229 W | **0,952** |
+| Januari 2026 (31 dygn) | 2417 W | 2427 W | **0,994** |
+| Juli 2026 (31 dygn) | 803 W | 1118 W | **0,726** |
+
+**Det här var inte väntat:** natten är bara tydligt lägre än dygnssnittet
+på **sommaren**. I januari är natt och dygn praktiskt taget identiska
+(kvot 0,994) — kompressorn/elpatronen håller samma takt dygnet runt när
+det är kallt, så det finns knappt någon "nattrabatt" att hämta. Oktober
+ligger däremellan men fortfarande nära 1,0 (0,952). Bara sommarens avsnitt
+1-siffra (~830 W natt mot ett betydligt högre dygnssnitt, kvot ≈0,73) är
+den verkliga avvikelsen — inte normen.
+
+**Konsekvens för det faktiska buggfallet (2026-09-07, `yesterday_consumption_kwh
+= 28,76 kWh`):** ett dygn med så hög förbrukning är redan uppvärmningssäsong
+till sin karaktär, inte en sommardag — dess natt/dygn-kvot ligger sannolikt
+nära oktober- eller januarisiffran (~0,95–0,99), inte sommarens 0,73. Om
+remedy 1 hade implementerats med en generell kvot skulle den bara sänkt
+`hourly_load_kw` från 1198 W till ungefär **1141–1191 W** (räknat med
+oktober- respektive januarikvoten) — en marginal på 1–5 %. Golvet (24,4 kWh)
+låg **0,15 kWh över** det användbara spannet (24,25 kWh); en 1–5 %-sänkning
+av natt-takten hade krympt golvet med uppskattningsvis 0,2–1,2 kWh (natt-
+delen är bara en del av `behov_kwh`, och hela summan multipliceras
+dessutom med osäkerhetspåslaget `_uncertainty_markup(pv_kvot)`, upp till
++300 % vid lågt `pv_production_ratio`). Det är i bästa fall precis i
+underkant av vad som krävdes — och långt ifrån den marginal som behövs för
+att inte råka i samma läge igen på ett ännu sämre dygn.
+
+**Slutsats — remedy 1 ensam räddar INTE det rapporterade fallet.** Den ger
+en verklig, mätbar förbättring men bara på sommardygn, vilket är precis
+de dygn där golvet redan är litet och sällan är problemet. Det faktiska
+felfallet inträffar på hög-förbrukningsdygn (höst/vinterkaraktär) där
+natt ≈ dygn — där ger remedy 1 nästan ingenting, och det är
+osäkerhetspåslaget (upp till 300 %) som dominerar golvets storlek, inte
+dygnssnitt-approximationen.
+
+**Reviderad rekommendation:** implementera remedy 2 (skyddsspärr,
+`export_floor_kwh` klämd till t.ex. 85–90 % av användbart SOC-spann) som
+den **primära, nödvändiga** fixen — den är säsongsoberoende och garanterar
+alltid utrymme för självkonsumtion oavsett vad formeln räknar fram. Remedy 1
+(natt-specifik takt) är fortfarande värd att lägga till som en sekundär
+förbättring för att göra sommargolvet mer träffsäkert, men ska INTE
+betraktas som lösningen på den här buggen — bara som en extra finjustering
+som råkar sakna effekt just på det dygn som avslöjade problemet.
+
+**Implementerat (v0.9.1):** `_FLOOR_SAFETY_CAP_FRACTION = 0.85` i
+`energy_planner.py`, klämmer `export_floor_kwh` mot
+`(batt_max_kwh − batt_min_kwh) × 0.85`. Verifierat mot exakt samma
+live-rekonstruerade scenario som avslöjade buggen (09-07, 94% SOC,
+`yesterday_consumption_kwh=28,76`): golvet föll från 24,4 → 20,6 kWh,
+kvällsmålet från 99% (klämt mot taket) → 87%, och 24h-planen visar nu
+verklig `cover_load`-urladdning genom hela kvällens och morgondagens
+prisrörelser istället för `idle`. Remedy 1 (natt-specifik takt) inte
+implementerad — bedömd som en framtida sekundär förbättring, inte en del
+av den här fixen.
+
+### Tillägg: 7-dygns rullande snitt istället för enda-dags gårdag (v0.9.1)
+
+Uppföljande fråga från användaren ("varför är golvet fortfarande stort om
+det ändå ska räcka 24h?") ledde till en kontroll av om gårdagens 28,76 kWh
+var representativ. Verklig dygnsstatistik (`sensor.el_forbruk_power_power`,
+20 aug–5 sep, 17 kompletta dygn) gav ett snitt på **1002 W (24,06 kWh/dygn)**
+— gårdagen låg alltså ~20% över det normala, inte en ren engångshändelse
+men tillräckligt för att ensam driva golvet mot taket (se tabell nedan).
+
+Användaren bad om ett 7-dygns rullande snitt istället för `yesterday_consumption_kwh`,
+med ett tillägg: **extra varmvatten som körs på solöverskott ska INTE räknas
+med** (det är utöver normal förbrukning, drivet av dagens sol och säger
+inget om nattens behov), medan **legionella-desinficeringen (var 7:e dag)
+ska räknas med som vanligt** (verklig återkommande last, redan korrekt
+representerad av att ett 7-dygnsfönster fångar exakt en cykel).
+
+Verifierat mot verklig konfiguration: `heat_pump_extra_hot_water_entity`
+(`switch.thermostat_dhw_chargethermostat_dhw_charge`, absorptionstrappans
+steg 2) och `legionella_switch_entity` (`switch.boiler_dhw_disinfecting`)
+är två helt separata switchar — går alltså att särskilja. Switch-historik
+(9 dygn) visade extra varmvatten aktivt 5 av 9 dagar (11–80 min/dag),
+legionella en gång (5 sep, ~60–90 min, matchar 7-dagarscykeln). Användaren
+bekräftade att extra varmvatten körs UTAN samtidig rumsvärme — all effekt
+på `heat_pump_power_entity` (`sensor.ivt_total_active_power`) under de
+fönstren kan alltså tillskrivas varmvattnet fullt ut, ingen uppdelning
+behövs.
+
+**Effekt (samma testscenario):**
+
+| Indata | `hourly_load` | Golv utan spärr | Golv med 85%-spärr |
+|---|---|---|---|
+| Gårdagen ensam (28,76 kWh) | 1198 W | 23,27 kWh (96%) | 20,61 kWh (87%) |
+| 7-dagars rullande snitt (25,00 kWh) | 1042 W | **20,36 kWh (86%)** | 20,36 kWh (oförändrat — spärren behövs inte) |
+
+Med det rullande snittet hamnar golvet redan UNDER 85%-spärrens tröskel —
+spärren blir ett rent skyddsnät för dagar då även flerdagarssnittet slår
+fel, istället för den enda saken som räddar dagen.
+
+**Implementerat (v0.9.1):**
+- `EnergyState.rolling_consumption_kwh` — nytt fält.
+- `coordinator.py`: ny lagringsfil `{DOMAIN}_daily_consumption` (samma
+  mönster som `_pv_ratio_store`), håller de 7 senaste dygnens
+  `{date, total_kwh, extra_hw_kwh, net_kwh}`. Ackumulerar extra
+  varmvatten-energi löpande (`heat_pump_power_w × dt` medan switchen är
+  på, 30 min tak per pollning mot omstartshopp), nollställer och rullar in
+  gårdagens nettosiffra vid dygnsskifte (samma "ny dag detekterad"-mönster
+  som `_temp_sample_date`/`_pv_ratio_date`).
+- `energy_planner.py::build_plan()`: ny parameter `rolling_consumption_kwh`,
+  prioriteras i `_eff_daily_kwh = max(predicted_daily_kwh, rolling_consumption_kwh
+  or yesterday_consumption_kwh or 0.0)` — faller tillbaka till gårdagen
+  ensam tills 7 dygns historik hunnit byggas upp efter driftsättning.
+- Verifierat direkt mot `build_plan()`: samma scenario med
+  `rolling_consumption_kwh=25.0` istället för bara `yesterday_consumption_kwh=28.76`
+  ger golv 20,02 kWh (85%) — bekräftar att prioriteringen fungerar och att
+  spärren (v0.9.1, tidigare i det här avsnittet) och det rullande snittet
+  kompletterar varandra som tänkt.
+
+### Prisstyrd golvavlämpning ("Option B") + P3-2-buggen — natt-fönstret grävt klart (v0.9.1)
+
+Uppföljande diskussion: användaren observerade att natt-fönstret (22:15–04:30,
+köppris ~1,27–1,33 kr) fortfarande visas som "idle: batteri vid golvet, nät
+täcker" trots att batteriets egen lagrade energi (snittkostnad 0,74 kr/kWh
++ 0,05 kr cykelkostnad = 0,79 kr) är billigare än nätpriset — en rimlig
+invändning: varför köpa dyrare el när billigare redan finns i batteriet?
+
+**Tre varianter testade mot samma scenario, innan kod skrevs:**
+
+1. **Naiv prisspärr ("Option B"):** öppna golvet mot `hard_floor_kwh`
+   närhelst `köppris > batterikostnad + cykelkostnad`. Eftersom nätavgift
+   + skatt + moms lägger ett golv på ~1,2–1,3 kr/kWh även vid nära-noll
+   spotpris, är villkoret **i praktiken alltid sant** — testet visade att
+   batteriet skulle laddas ur hela natten och landa på 52,5% SOC redan kl
+   08:15, långt under det tänkta 85%-målet.
+2. **Variant A (relativ, 75:e percentilen av kvällens/nattens egna
+   priser):** självjusterande, öppnar bara morgonrampen (07:15–08:15).
+   Robust mot både batterikostnads-reset (`reset_battery_cost`-tjänsten)
+   och en generell prisnivåförskjutning (testat genom att skifta hela
+   dygnets pris med en konstant offset) — tröskeln flyttar sig med.
+3. **Variant C (fast marginal, batterikostnad+cykel+0,60 kr):** samma
+   ungefärliga effekt som A i det ORIGINALA scenariot, men **bevisat
+   sårbar**: en `reset_battery_cost` (nollställer batterikostnaden) sänker
+   tröskeln till 0,65 kr och återskapar den naiva dränering-buggen; en
+   generell prisnivåhöjning (testat: natt-lägsta 0,20 kr istället för
+   verkliga ~0,03 kr) gör samma sak eftersom marginalen är ett fast tal,
+   inte relativt till dygnets egna priser.
+
+**"0 sol imorgon"-konsekvensanalys (naiv B):** vid batteriet 52,5% kl 08:15
+och verkligt noll sol hela vägen skulle batteriet nå `min_soc` kl **17:49**
+— cirka 2 timmar INNAN nästa kvällspeak (20:00, 3,13 kr/kWh). Den nuvarande
+lösningen (utan prisspärr) räcker till 02:44 nästa natt med bred marginal.
+En garanterad liten besparing (~2 kr/natt) mot en verklig risk att missa
+exakt det golvet ska skydda mot.
+
+**Men: är "0 sol imorgon" ett realistiskt värsta fall?** Kontrollerat mot
+riktig produktionsdata (`sensor.sg_daily_pv_generation`, tillgänglig från
+5 aug 2026 — statistik saknas helt före det datumet, sannolikt en
+omstart/nyinstallation av Sungrow-integrationen). Inom de 33 dygn som
+finns: **inget nolldygn**, sämst 15,1 kWh (27 aug). Användaren delade även
+skärmdumpar från växelriktarens egen app (Sungrow iSolarCloud) för
+dec 2025–mars 2026: december och februari hade enstaka dagar under 1 kWh,
+men **januari visade en sammanhängande period på ~2 veckor (ca 2–15 jan)
+med i det närmaste nollproduktion** — sannolikt snötäckta paneler. Mars
+hade inga nolldagar alls (6–72 kWh/dygn).
+
+**Slutsats:** en isolerad engångs-nolldag är inte realistisk (bekräftar
+användarens ursprungliga poäng), men en **flera dagar lång
+nollproduktionsperiod** förekommer uppenbarligen verkligen (januari 2026).
+Det är ett svårare scenario än det ursprungliga "0 sol imorgon"-testet,
+eftersom golvet bara planerar fram till NÄSTA förväntade soltakeover — det
+har ingen logik för "vad händer om solen uteblir i två veckor."
+
+**P3-2-bugg hittad under den här grävningen:** `_update_pv_production_ratio()`
+(coordinator.py) committade bara ett dygn till kvot-historiken om
+`_pv_last_actual_reading > 0` — men `_get_state_float()` returnerar `0.0`
+BÅDE när sensorn är otillgänglig OCH när den korrekt läser av en genuin
+nolla. Ett riktigt nollproduktionsdygn (som januaris snöperiod) skulle
+alltså ha hoppats över HELT från historiken, inte räknats som en dålig
+kvot — mekanismen som ska upptäcka precis det scenariot var blind för det.
+Verifierat med en fristående repro: kvoten frös på 0,88 (från soliga dagar
+innan snön) genom hela den simulerade snöperioden med den gamla koden,
+föll korrekt till 0,00 med fixen.
+
+**Implementerat (v0.9.1):**
+- **P3-2-fixen:** ny `self._pv_last_actual_available`-flagga (state-nivå,
+  skild från det numeriska värdet) avgör om ett dygn ska committas till
+  `_pv_ratio_history` — en genuin nolla räknas nu in korrekt.
+- **Option B (naiv variant), som uttrycklig INTERIMSLÖSNING:** implementerad
+  i `build_plan()`s mörka-slot-logik (`_PRICE_GATE_PV_CONFIDENCE = 0.8`),
+  markerad i koden med en kommentar om dess kända svaghet. Användaren bad
+  uttryckligen om att lägga till B "medan vi funderar på hur den riktiga
+  lösningen ska se ut" — Variant A (självjusterande percentil) är fortfarande
+  den bedömt säkrare lösningen men INTE implementerad än.
+- **Kvarstår, inget beslutat:** (a) byta ut naiva B mot Variant A eller en
+  annan säkrare variant, (b) hur golvet ska hantera en flerdagars
+  nollproduktionsperiod (inte bara "till nästa dag") — inget av detta är
+  löst, bara identifierat.
+
 ## Sensor-referens (alla använda i den här analysen)
 
 | Sensor | Typ | Användning |
@@ -389,11 +698,17 @@ satt — fungerar bara för de sensorer som faktiskt har det.
 
 ## Öppna spår
 
-1. **Ingen kodändring gjord än** för golvformeln — väntar på att vi är
-   klara med underlaget. Kandidater: (a) skicka in verklig nattlast/
-   `yesterday_consumption_kwh` till `build_plan()` istället för momentan
-   `house_load_w`, (b) undersöka varför produktionskvotens historik verkar
-   ha färre dygn än designen förutsätter.
+1. **Löst och driftsatt (v0.9.0):** golvformeln skickar nu in
+   `yesterday_consumption_kwh`/`house_load_avg_w` till `build_plan()`
+   istället för momentan `house_load_w` (samma mönster som v0.7.6-fixen i
+   `_auto_mode()`). Committat i två separata commits (P4-2 v0.8.0 följt av
+   säsongsmedveten v0.9.0 — de låg oavsiktligt blandade i samma
+   arbetskopia och delades upp hunk-för-hunk). **Löst (v0.9.1, avsnitt
+   "Prisstyrd golvavlämpning" ovan):** anledningen till att
+   produktionskvotens historik hade färre dygn än designen förutsatte var
+   en verklig bugg — `_update_pv_production_ratio()` hoppade över varje
+   genuint nollproduktionsdygn istället för att räkna in det, eftersom den
+   inte kunde skilja "sensor otillgänglig" från "verklig nolla". Fixat.
 2. **Delvis löst (avsnitt 7):** elpatron-varmvatten är INTE en periodisk
    desinfektionscykel — det är en blandning av pannans egen firmware,
    manuella körningar och en misstänkt HA-automation för sol-överskott.
@@ -413,11 +728,47 @@ satt — fungerar bara för de sensorer som faktiskt har det.
    recorder-retention för just den sensorn, eller en ny numerisk räknare
    ("avfrostningsminuter/dygn") — annars går det bara att verifiera live,
    dygn för dygn, framöver.
-4. Bygga förbrukningsprognosen (piece 2 i den ursprungliga uppdelningen):
-   sannolikt baserad på verklig COP (`nrgsupp*` / `nrgcons*`) mot dämpad
-   utetemp, istället för dagens platta temperaturmodellskonstant.
-5. Ta ställning till om fas 1:s EV/batteri-konkurrens ska in i
-   planeringslogiken (t.ex. varna eller prioritera), eller lämnas som är.
+4. **Delvis löst (v0.9.0):** temperaturmodellen är omkalibrerad mot
+   helårsdatan (avsnitt 7) och stödjer nu `damped_outdoor_temp_entity`.
+   Kvarstår: en riktig COP-baserad modell (`nrgsupp*` / `nrgcons*`) mot
+   dämpad utetemp — nuvarande modell är fortfarande en enkel gradday-
+   formel, bara med bättre kalibrerade konstanter.
+5. **Delvis adresserat (v0.9.0):** EV är nu med i planeringslogiken —
+   reservmarginal i golvet (`ev_reserve_margin_kwh`) och billigast-timmar-
+   laddning i `_auto_mode()`. Kvarstår: fas 1:s EV/batteri-konkurrens
+   (avsnitt 5/6 ovan) hanteras fortfarande bara reaktivt av
+   `_apply_phase_limits()`, inte proaktivt i planeringen.
 6. P4-2 (absorptionstrappan, negativt pris) och P7-1/P7-2 (backtest) är
    avslutade och pushade (v0.7.5–v0.8.0) — separat spår, inte del av den
    här förbrukningsutredningen.
+7. **Nytt, allvarligare än först trott, och grävt klart (avsnitt 8):**
+   golvet (`export_floor_kwh`) kan bli STÖRRE än hela det användbara
+   SOC-spannet (max_soc−min_soc), vilket klämmer `evening_target_soc_pct`
+   mot taket och blockerar BÅDE export OCH vanlig självkonsumtion —
+   batteriet kan stå stilla genom en hel pristopp trots att det är nästan
+   fullt. Helårsdata (okt/jan/jul, natt-vs-dygn-kvot) visade att den
+   ursprungligen mest lovande fixen (natt-specifik lasttakt) bara hjälper
+   på **sommardygn** (kvot 0,73) — på hög-förbrukningsdygn av
+   höst/vinterkaraktär (det faktiska buggfallet, kvot ~0,95–0,99) är natt
+   ≈ dygn, så den fixen ensam hade INTE räddat det rapporterade fallet.
+   **Löst (v0.9.1):** skyddsspärren implementerad — `export_floor_kwh`
+   klämt till max 85% av användbart SOC-spann (`_FLOOR_SAFETY_CAP_FRACTION`
+   i `energy_planner.py`). Verifierat mot buggfallets exakta scenario:
+   golv 24,4→20,6 kWh, kvällsmål 99%→87%, batteriet gör nu verklig
+   urladdning genom kvällens prispeak istället för att stå still.
+   Kvarstår: natt-specifik lasttakt (sekundär förbättring för sommarens
+   träffsäkerhet) — inte implementerad, inte prioriterad ännu.
+8. **Nytt (v0.9.1, avsnitt "Prisstyrd golvavlämpning"):** golvet är en ren
+   energitröskel — den väger aldrig köppris mot batteriets egen sparade
+   kostnad. En naiv prisspärr ("Option B") är implementerad som uttrycklig
+   INTERIMSLÖSNING på användarens begäran, med en känd svaghet (kan tömma
+   nästan hela reserven på en natt om solprognosen slår fel — se avsnittet
+   för "0 sol imorgon"-analysen). En säkrare självjusterande variant
+   (percentiltröskel mot dygnets egna priser, döpt "Variant A" i analysen)
+   är skisserad och testad men INTE implementerad. Under samma grävning
+   hittades och fixades en verklig P3-2-bugg (se punkt 1 ovan) som gjorde
+   att produktionskvoten aldrig upptäckte genuina nollproduktionsdygn.
+   Kvarstår: (a) byt ut Option B mot Variant A eller bättre, (b) hantera
+   flerdagars nollproduktionsperioder (bekräftat förekommer, ~2 veckor i
+   januari 2026 enligt växelriktarens egen historik) — golvet planerar
+   idag bara fram till nästa förväntade soltakeover, inte längre perioder.

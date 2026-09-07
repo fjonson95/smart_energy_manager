@@ -209,9 +209,28 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._pv_ratio_date: str = ""
         self._pv_today_forecast_kwh: Optional[float] = None
         self._pv_last_actual_reading: float = 0.0
+        # Skild från _pv_last_actual_reading > 0: en genuin nolldag (snötäckta
+        # paneler) och "sensorn har aldrig svarat" ger BÅDA 0.0 via
+        # _get_state_float() – utan den här flaggan hoppas en verklig
+        # nollproduktionsdag över helt istället för att räknas som kvot 0,
+        # vilket gjorde P3-2 blind under precis det scenario den ska upptäcka.
+        self._pv_last_actual_available: bool = False
 
         # P6-1: senaste skrivningstidpunkt per entitet, för dödband + heartbeat.
         self._last_write_times: dict[str, datetime] = {}
+
+        # 7-dygns rullande snitt av dygnsförbrukning, netto exkl. extra
+        # varmvatten-energi (sol-/negativpris-styrd, steg 2 i absorptionstrappan).
+        # Extra varmvatten kör bara pannans kompressor för DHW, inte samtidig
+        # rumsvärme, så all effekt på heat_pump_power_entity under den tiden
+        # räknas mot varmvattnet. Legionella-desinficering (var 7:e dag) räknas
+        # INTE bort – ett 7-dygnsfönster fångar den perioden naturligt, den är
+        # verklig återkommande last (se docs/forbrukningsanalys.md avsnitt 8).
+        self._daily_consumption_store = Store(hass, 1, f"{DOMAIN}_daily_consumption")
+        self._daily_consumption_history: list[dict] = []  # senaste 7 dygn: [{date, total_kwh, extra_hw_kwh, net_kwh}]
+        self._daily_consumption_date: str = ""
+        self._extra_hw_energy_today_kwh: float = 0.0
+        self._extra_hw_last_update: Optional[datetime] = None
 
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
@@ -235,6 +254,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         await self._legionella.async_load()
         await self._load_takeover_store()
         await self._load_pv_ratio_store()
+        await self._load_daily_consumption_store()
         await super().async_config_entry_first_refresh()
 
     async def _load_pv_ratio_store(self) -> None:
@@ -263,17 +283,23 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         if not actual_entity:
             return 1.0
 
+        _actual_state = self.hass.states.get(actual_entity)
+        current_actual_available = _actual_state is not None and _actual_state.state not in ("unavailable", "unknown")
         current_actual = self._get_state_float(actual_entity)
         today_str = now.strftime("%Y-%m-%d")
 
         if today_str != self._pv_ratio_date:
             # Nytt dygn – gårdagens slutvärde är det SENAST SAMPLADE (från
             # föregående cykel), eftersom current_actual redan kan ha
-            # nollställts för det nya dygnet av källsensorn.
+            # nollställts för det nya dygnet av källsensorn. Villkoret kollar
+            # _pv_last_actual_available (ett verkligt state fanns), INTE
+            # _pv_last_actual_reading > 0 – en genuin nolldag (snötäckta
+            # paneler) ska räknas in som kvot 0, inte hoppas över på samma
+            # sätt som en sensor som aldrig svarat.
             if (
                 self._pv_ratio_date
                 and self._pv_today_forecast_kwh is not None
-                and self._pv_last_actual_reading > 0
+                and self._pv_last_actual_available
             ):
                 self._pv_ratio_history.append({
                     "date": self._pv_ratio_date,
@@ -294,12 +320,32 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             self.hass.async_create_task(self._save_pv_ratio_store())
 
         self._pv_last_actual_reading = current_actual
+        self._pv_last_actual_available = current_actual_available
 
         if not self._pv_ratio_history:
             return 1.0
         total_actual = sum(h["actual_kwh"] for h in self._pv_ratio_history)
         total_forecast = sum(h["forecast_kwh"] for h in self._pv_ratio_history)
         return total_actual / total_forecast if total_forecast > 0 else 1.0
+
+    async def _load_daily_consumption_store(self) -> None:
+        data = await self._daily_consumption_store.async_load()
+        if isinstance(data, dict):
+            self._daily_consumption_history = data.get("history", [])
+            self._daily_consumption_date = data.get("date", "")
+            self._extra_hw_energy_today_kwh = float(data.get("extra_hw_kwh_in_progress", 0.0))
+
+    async def _save_daily_consumption_store(self) -> None:
+        await self._daily_consumption_store.async_save({
+            "history": self._daily_consumption_history,
+            "date": self._daily_consumption_date,
+            "extra_hw_kwh_in_progress": self._extra_hw_energy_today_kwh,
+        })
+
+    def _get_rolling_consumption_kwh(self) -> Optional[float]:
+        """7-dygns (eller färre, tills historiken byggts upp) rullande snitt."""
+        vals = [d["net_kwh"] for d in self._daily_consumption_history if "net_kwh" in d]
+        return sum(vals) / len(vals) if vals else None
 
     async def _load_takeover_store(self) -> None:
         data = await self._takeover_store.async_load()
@@ -905,6 +951,39 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     extra = float(c.get(CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH))
                     predicted_daily_kwh += extra
 
+            # 7-dygns rullande dygnsförbrukning, netto exkl. extra varmvatten-energi.
+            # Extra varmvatten kör bara pannans DHW-läge (ingen samtidig rumsvärme,
+            # bekräftat) så all heat_pump_power_w under "på"-perioder räknas mot den.
+            heat_pump_power_w_val = self._get_state_float(c.get(CONF_HEAT_PUMP_POWER))
+            extra_hot_water_on_val = self._get_state_bool(c.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER))
+            today_str = now.strftime("%Y-%m-%d")
+            if today_str != self._daily_consumption_date:
+                if self._daily_consumption_date and yesterday_kwh is not None:
+                    net_kwh = max(0.0, yesterday_kwh - self._extra_hw_energy_today_kwh)
+                    self._daily_consumption_history.append({
+                        "date": self._daily_consumption_date,
+                        "total_kwh": round(yesterday_kwh, 3),
+                        "extra_hw_kwh": round(self._extra_hw_energy_today_kwh, 3),
+                        "net_kwh": round(net_kwh, 3),
+                    })
+                    self._daily_consumption_history = self._daily_consumption_history[-7:]
+                    self.hass.async_create_task(self._save_daily_consumption_store())
+                    _LOGGER.info(
+                        "Dygnsförbrukning %s: totalt %.1f kWh, extra varmvatten %.1f kWh, netto %.1f kWh",
+                        self._daily_consumption_date, yesterday_kwh, self._extra_hw_energy_today_kwh, net_kwh,
+                    )
+                self._extra_hw_energy_today_kwh = 0.0
+                self._daily_consumption_date = today_str
+                self._extra_hw_last_update = now
+
+            if self._extra_hw_last_update is not None:
+                _dt_h = (now - self._extra_hw_last_update).total_seconds() / 3600.0
+                # Övre gräns (30 min) skyddar mot felaktiga hopp efter en omstart
+                # eller ett långt pollningsglapp.
+                if extra_hot_water_on_val and 0.0 < _dt_h < 0.5:
+                    self._extra_hw_energy_today_kwh += heat_pump_power_w_val / 1000.0 * _dt_h
+            self._extra_hw_last_update = now
+
             # Legionella – läs switch (tri-state: unavailable ska INTE tolkas som av,
             # annars misstolkas ett kort kommunikationsglapp mot ems-esp som att
             # pannan avslutat körningen) och temp
@@ -938,9 +1017,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
                 chargers=chargers,
 
-                heat_pump_power_w=self._get_state_float(c.get(CONF_HEAT_PUMP_POWER)),
+                heat_pump_power_w=heat_pump_power_w_val,
                 heat_pump_phase=c.get(CONF_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PHASE),
-                extra_hot_water_on=self._get_state_bool(c.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)),
+                extra_hot_water_on=extra_hot_water_on_val,
                 heat_pump_patron_phases=c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES),
                 heat_pump_patron_power_kw=float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
 
@@ -967,6 +1046,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 now=now,
                 price_schedule=price_schedule,
                 yesterday_consumption_kwh=yesterday_kwh,
+                rolling_consumption_kwh=self._get_rolling_consumption_kwh(),
                 outdoor_temp_c=outdoor_temp,
                 avg_temp_yesterday_c=self._yesterday_avg_temp,
                 disinfecting_active=disinfecting_active,
@@ -1025,6 +1105,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             yesterday_consumption_kwh=state.yesterday_consumption_kwh,
                             house_load_avg_w=state.house_load_avg_w,
                             ev_reserve_margin_kwh=ev_reserve_margin_kwh,
+                            rolling_consumption_kwh=state.rolling_consumption_kwh,
                         )
                         self._last_plan_ps_sig = ps_sig
                         _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)

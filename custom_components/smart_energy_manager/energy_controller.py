@@ -207,6 +207,11 @@ class EnergyState:
     # Gårdagens förbrukning exkl. EV-laddning (kWh)
     yesterday_consumption_kwh: Optional[float] = None
 
+    # 7-dygns rullande snitt av dygnsförbrukning, netto exkl. extra
+    # varmvatten-energi (sol-/negativpris-styrd, se coordinator._get_rolling_consumption_kwh()).
+    # None tills minst en dag hunnit rulla över sedan uppdateringen driftsattes.
+    rolling_consumption_kwh: Optional[float] = None
+
     # Utomhustemperatur (°C) – aktuell mätning
     outdoor_temp_c: Optional[float] = None
 

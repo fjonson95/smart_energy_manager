@@ -1,21 +1,19 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.9.1-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.0
+## What's New in 0.9.1
 
-Season-aware charge/discharge handling — no new manual mode, `auto` itself now behaves correctly winter and summer, following a consumption-analysis deep dive (`docs/forbrukningsanalys.md`) that started from an oversized export floor on a sunny day.
+- **`export_floor_kwh` is now capped at 85% of the usable SOC range** (`battery_max_soc − battery_min_soc`), not just against total capacity. On a real high-consumption day the reserve formula (dark-window load × up to +300% forecast-uncertainty markup) came out *larger* than the entire usable range, pinning the evening target at `battery_max_soc` and leaving the battery idle through an entire evening price peak instead of discharging. A full-year consumption analysis (`docs/forbrukningsanalys.md` §8) showed this can't be fixed by a better night-specific load rate alone — night and day consumption are nearly identical on the autumn/winter high-consumption days that trigger it, and only diverge in summer, when the floor is rarely a problem. The new cap is a season-agnostic safety net guaranteeing at least 15% of the usable range always stays reachable.
+- **The reserve calculation now uses a 7-day rolling consumption average, excluding solar-driven extra hot water.** The trigger day above was itself ~20% above the real 17-day average — a single unusually-high day was inflating the floor on its own. Extra hot water (the absorption ladder's solar/negative-price opportunistic step) is netted out since it never runs concurrently with space heating and comes from solar surplus that says nothing about nighttime need; the legionella disinfection cycle (every 7 days) is deliberately left in, since a 7-day window represents its real recurring cost correctly on its own.
+- **Fixed P3-2 (production-ratio tracking) silently ignoring genuine zero-production days** (e.g. snow-covered panels) — it treated them the same as a sensor that never reported, so a real multi-day outage never lowered the ratio or raised the floor's uncertainty margin.
+- **New interim price-gated floor relaxation ("Option B")**: lets the battery discharge below the reserve toward the hard floor when grid buy price exceeds the battery's own stored cost and the solar forecast is trusted enough. Explicitly a first pass — see `docs/forbrukningsanalys.md` for its known limitations and the safer variant still under evaluation.
 
-- **Fixed `export_floor_kwh` — the actual reserve that blocks discharge/export — never using real consumption.** `EnergyPlanner.build_plan()` built its hourly-load estimate from `predicted_daily_kwh` or the instantaneous `house_load_w`, never `yesterday_consumption_kwh` or the 15-minute rolling `house_load_avg_w` that `_auto_mode()` has used since v0.7.6 specifically to stop a single spike from projecting as "all night." `build_plan()` now takes the same blend, closing the gap that produced a 29.3 kWh floor (of 30.7 kWh capacity) on a sunny September day that should have had almost none.
-- **Recalibrated the temperature-based consumption model against a full year of data.** The heating-degree-day factor was underestimating cold-weather consumption by more than half (predicting ~29 kWh at -7.8°C against a measured 63 kWh) — refit now gives `heat_factor_kwh_dd=2.39` (was 1.275). New optional `damped_outdoor_temp_entity` config field uses an already-smoothed temperature sensor directly when available.
-- **EV charging now has a reserve margin and can charge at cheap hours** — both previously absent from the planner entirely.
-- **Export dispatch now concentrates on the single best price window** instead of smearing proportionally across every qualifying slot (e.g. tonight's peak vs. tomorrow morning's).
-
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.8.0's negative-price absorption ladder, v0.7.6's evening-target fix, and v0.7.7's shared-setpoint fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.0's season-aware charge/discharge handling, v0.8.0's negative-price absorption ladder, v0.7.6's evening-target fix, and v0.7.7's shared-setpoint fix).
 
 ## System Overview
 
