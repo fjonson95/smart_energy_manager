@@ -44,16 +44,18 @@ from .const import (
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     CHARGER_CONNECTED_STATES, NO_CAR_SELECTED,
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
-    CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_OUTDOOR_TEMP_ENTITY, CONF_DAMPED_OUTDOOR_TEMP_ENTITY,
     CONF_HEAT_BALANCE_TEMP, CONF_HEAT_FACTOR_KWH_DD, CONF_BASE_DHW_KWH,
     CONF_DISINFECTING_EXTRA_KWH,
     DEFAULT_HEAT_BALANCE_TEMP, DEFAULT_HEAT_FACTOR_KWH_DD, DEFAULT_BASE_DHW_KWH,
     DEFAULT_DISINFECTING_EXTRA_KWH,
+    CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH,
     CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, CONF_BATTERY_POWER_INVERTED,
     CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH,
     DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
     MODE_AUTO, MODE_MANUAL,
+    DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH,
 )
 from .price_scheduler import PriceScheduler
 from .energy_controller import (
@@ -851,32 +853,44 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 solar_takeover_dt = sun_rising + timedelta(hours=3)
                 _LOGGER.debug("solar_takeover_dt: fallback soluppgång+3h → %s", solar_takeover_dt)
 
-            # Utomhustemperatur och förbrukningsprognos
-            outdoor_temp: Optional[float] = None
-            temp_entity = c.get(CONF_OUTDOOR_TEMP_ENTITY)
-            if temp_entity:
-                val = self._get_state_float(temp_entity)
-                if val != 0.0 or self.hass.states.get(temp_entity) is not None:
-                    outdoor_temp = val
+            # Utomhustemperatur och förbrukningsprognos.
+            # Dämpad (utjämnad) utetemp är en bättre proxy för värmebehov än
+            # ett eget dygnsmedel av momentana avläsningar (se
+            # docs/forbrukningsanalys.md) – används direkt om konfigurerad,
+            # annars faller vi tillbaka på det gamla rullande-medel-beteendet.
+            damped_temp_entity = c.get(CONF_DAMPED_OUTDOOR_TEMP_ENTITY)
+            temp_for_model: Optional[float] = None
+            if damped_temp_entity:
+                val = self._get_state_float(damped_temp_entity)
+                if val != 0.0 or self.hass.states.get(damped_temp_entity) is not None:
+                    temp_for_model = val
 
-            # Bygg upp rullande dygnsmedeltemperatur.
-            # Modellen är kalibrerad mot dygnsmedeltemp, inte ögonblicksvärde.
-            if outdoor_temp is not None:
-                today_str = now.strftime("%Y-%m-%d")
-                if today_str != self._temp_sample_date:
-                    # Nytt dygn – lås in gårdagens medelvärde och nollställ
-                    if self._temp_samples:
-                        self._yesterday_avg_temp = sum(self._temp_samples) / len(self._temp_samples)
-                        _LOGGER.debug(
-                            "Temperaturmedel för %s: %.1f °C (%d mätningar)",
-                            self._temp_sample_date, self._yesterday_avg_temp, len(self._temp_samples),
-                        )
-                    self._temp_samples = []
-                    self._temp_sample_date = today_str
-                self._temp_samples.append(outdoor_temp)
+            if temp_for_model is None:
+                outdoor_temp: Optional[float] = None
+                temp_entity = c.get(CONF_OUTDOOR_TEMP_ENTITY)
+                if temp_entity:
+                    val = self._get_state_float(temp_entity)
+                    if val != 0.0 or self.hass.states.get(temp_entity) is not None:
+                        outdoor_temp = val
 
-            # Välj temperaturindata: gårdagens medel om tillgängligt, annars aktuell
-            temp_for_model = self._yesterday_avg_temp if self._yesterday_avg_temp is not None else outdoor_temp
+                # Bygg upp rullande dygnsmedeltemperatur.
+                # Modellen är kalibrerad mot dygnsmedeltemp, inte ögonblicksvärde.
+                if outdoor_temp is not None:
+                    today_str = now.strftime("%Y-%m-%d")
+                    if today_str != self._temp_sample_date:
+                        # Nytt dygn – lås in gårdagens medelvärde och nollställ
+                        if self._temp_samples:
+                            self._yesterday_avg_temp = sum(self._temp_samples) / len(self._temp_samples)
+                            _LOGGER.debug(
+                                "Temperaturmedel för %s: %.1f °C (%d mätningar)",
+                                self._temp_sample_date, self._yesterday_avg_temp, len(self._temp_samples),
+                            )
+                        self._temp_samples = []
+                        self._temp_sample_date = today_str
+                    self._temp_samples.append(outdoor_temp)
+
+                # Välj temperaturindata: gårdagens medel om tillgängligt, annars aktuell
+                temp_for_model = self._yesterday_avg_temp if self._yesterday_avg_temp is not None else outdoor_temp
 
             # Desinficering/legionella pågår? – återanvänd samma switch som legionella-fliken
             disinfecting_active = self._get_state_bool(c.get(CONF_LEGIONELLA_SWITCH))
@@ -977,6 +991,25 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 plan_expired = self._day_plan is None or now >= self._day_plan.valid_until
                 if plan_expired or ps_sig != self._last_plan_ps_sig:
                     try:
+                        # EV-marginal: flat buffert om NÅGON laddare har en vald
+                        # bil under sitt SOC-mål och sol inte räcker idag/imorgon
+                        # (lågsol/vinterscenario – annars sköts laddningen av
+                        # solöverskottet, ingen extra reserv behövs).
+                        _low_solar_today_ev = (
+                            state.solar_forecast_today_kwh > 0
+                            and state.solar_forecast_today_kwh < DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH
+                        )
+                        _low_solar_tomorrow_ev = state.solar_forecast_tomorrow_kwh < DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH
+                        _ev_needs_charge = any(
+                            ch.connected and ch.active_car_name != NO_CAR_SELECTED
+                            and (ch.soc_pct is None or ch.soc_pct < ch.soc_target)
+                            for ch in state.chargers
+                        )
+                        ev_reserve_margin_kwh = (
+                            float(c.get(CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH))
+                            if _ev_needs_charge and (_low_solar_today_ev or _low_solar_tomorrow_ev)
+                            else 0.0
+                        )
                         self._day_plan = self._energy_planner.build_plan(
                             now=now,
                             battery_soc_pct=state.battery_soc_pct,
@@ -989,6 +1022,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             house_load_w=state.house_load_w,
                             battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
                             pv_production_ratio=pv_production_ratio,
+                            yesterday_consumption_kwh=state.yesterday_consumption_kwh,
+                            house_load_avg_w=state.house_load_avg_w,
+                            ev_reserve_margin_kwh=ev_reserve_margin_kwh,
                         )
                         self._last_plan_ps_sig = ps_sig
                         _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)

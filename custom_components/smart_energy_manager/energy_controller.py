@@ -789,6 +789,35 @@ class EnergyController:
                                 f" sol {_trigger}"
                             )
 
+        # EV billigast-timmar-laddning: vintern har ofta för lite sol för att
+        # sol-loopen ovan (som bara laddar bilen från solöverskott) någonsin
+        # aktiverar den. Speglar CLAUDE.md:s vinter-mål ("billigast-timmar-
+        # laddning av batteri OCH bil") utan ett separat driftläge – körs
+        # alltid i auto när sol är låg och priset just nu är billigt. Måttlig
+        # ström (inte MAX_EV_CURRENT): batteriet har fortfarande prioritet
+        # (CLAUDE.md prioritet #2), och fasskyddet (_apply_phase_limits)
+        # klämmer till om fas 1 (EV + batteri + elpatron) blir för belastad.
+        if not export_active and not _economic_peak and (_low_solar_today or _low_solar_tomorrow) and ps and ps.slots:
+            _ev_sorted_prices = sorted(s.buy_sek for s in ps.slots if s.end > now_aware)
+            if _ev_sorted_prices:
+                _ev_threshold_idx = max(0, int(len(_ev_sorted_prices) * DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE) - 1)
+                _ev_price_threshold = _ev_sorted_prices[_ev_threshold_idx]
+                if buy_price <= _ev_price_threshold:
+                    _ev_cheap_current = max(MIN_EV_CURRENT, MAX_EV_CURRENT // 2)
+                    for i, ch in enumerate(state.chargers):
+                        if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
+                            continue
+                        if decision.charger_decisions[i].enable:
+                            continue  # redan laddar (sol-loopen ovan)
+                        car = ch.active_car
+                        if car and ch.soc_pct is not None and ch.soc_pct >= car.ev_soc_target:
+                            continue
+                        decision.charger_decisions[i] = ChargerDecision(
+                            enable=True, current_a=_ev_cheap_current,
+                            reason=f"billig timme {buy_price:.2f} kr/kWh (≤{_ev_price_threshold:.2f})",
+                        )
+                        decision.reason += f" | {ch.config.name} {_ev_cheap_current:.0f}A billig timme"
+
         # Självkonsumtion: täck huslast med batteri när sol inte räcker.
         # Lagrat sol-el är alltid bättre än nätimport oavsett aktuellt pris.
         # Två sätt att sänka evening_target-tröskeln:

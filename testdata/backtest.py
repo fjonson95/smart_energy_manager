@@ -615,6 +615,8 @@ def run_backtest(
                         solar_takeover_dt=None,
                         house_load_w=state.house_load_w,
                         battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
+                        yesterday_consumption_kwh=state.yesterday_consumption_kwh,
+                        house_load_avg_w=state.house_load_avg_w,
                     )
                 except Exception as _plan_err:
                     sys.stdout.buffer.write(f"DayPlan-fel vid {ts}: {_plan_err}\n".encode("utf-8"))
@@ -689,6 +691,8 @@ def run_backtest(
                         solar_takeover_dt=None,
                         house_load_w=state.house_load_w,
                         battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
+                        yesterday_consumption_kwh=state.yesterday_consumption_kwh,
+                        house_load_avg_w=state.house_load_avg_w,
                     )
                 except Exception as _sim_plan_err:
                     sys.stdout.buffer.write(f"Sim DayPlan-fel vid {ts}: {_sim_plan_err}\n".encode("utf-8"))

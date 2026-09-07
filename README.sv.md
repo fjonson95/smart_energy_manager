@@ -1,18 +1,19 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.8.0-blue)
+![Version](https://img.shields.io/badge/version-0.9.0-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.8.0
+## Nyheter i 0.9.0
 
-Etapp 4 i utvecklingsplanen, klar – absorptionstrappan vid negativt pris (P4-2), byggd på P4-1:s live-kalibrering av växelriktarens strypningsrespons.
+Säsongsmedveten laddning/urladdning – inget nytt manuellt läge, `auto` beter sig nu rätt både sommar och vinter av sig självt, efter en djupdykning i förbrukningsanalysen (`docs/forbrukningsanalys.md`) som startade med ett orimligt högt exportgolv en solig dag.
 
-- **Absorptionstrappan är nu kaskadvis istället för ömsesidigt uteslutande.** Tidigare blockerade steg 1 (ladda batteriet med full effekt) alla senare steg (varmvatten, bil, strypning) så länge batteriet inte var precis vid 100% SOC – nästan alltid sant – så en soltopp som översteg batteriets maxeffekt hade ingenstans att ta vägen förutom nätet till minuspris. Varje steg absorberar nu det den kan och skickar RESTEN vidare till nästa: batteri → varmvatten → bil → strypning, spårat som ett löpande `remaining_w`.
-- **Nytt steg 5: proportionell växelriktarstrypning**, med P4-1:s live-uppmätta fynd att `number.sg_power_limitation_setting` kalibreras mot växelriktarens MÄRKEFFEKT, inte aktuell produktion. När steg 1-4 är mättade och sol ändå skulle exporteras till minuspris räknas börvärdet direkt fram (`måleffekt / märkeffekt × 100`, begränsat till 20-100%) så att produktionen sjunker till exakt lokal förbrukning – ingen export, ingen onödig strypning. Två nya valfria konfigurationsfält: strypningsentitet och märkeffekt (kW).
-- **Fixade en bugg som gjorde hela trappan till död kod så fort en dagsplan fanns** (dvs nästan alltid): `apply_plan_executor()`, det enda skrivstället för batteriets börvärden, skrev ovillkorligt över vad `_auto_mode()`s negativt-pris-logik precis beslutat med planens vanliga cover_load-/exportlogik – som inte känner till negativa priser alls. Den returnerar nu direkt, orörd, så fort säljpriset är negativt.
+- **Fixade att `export_floor_kwh` – den verkliga reserven som blockerar urladdning/export – aldrig räknade på verklig förbrukning.** `EnergyPlanner.build_plan()` byggde sin timlast-uppskattning på `predicted_daily_kwh` eller momentan `house_load_w`, aldrig `yesterday_consumption_kwh` eller det 15-minuters glidande medlet `house_load_avg_w` som `_auto_mode()` använt sedan v0.7.6. `build_plan()` tar nu samma blandning, vilket täpper till luckan som gav ett golv på 29,3 kWh (av 30,7 kWh kapacitet) en solig septemberdag som borde haft nästan inget.
+- **Omkalibrerade den temperaturbaserade förbrukningsmodellen mot ett helt års data.** Gradday-faktorn underskattade vinterförbrukningen med mer än hälften (förutspådde ~29 kWh vid -7,8°C mot uppmätta 63 kWh) – omräknad ger nu `heat_factor_kwh_dd=2,39` (var 1,275). Nytt valfritt konfigfält `damped_outdoor_temp_entity` använder en redan utjämnad temperatursensor direkt när den finns.
+- **EV-laddning har nu en reservmarginal och kan laddas under billiga timmar** – båda delarna saknades helt i planeraren tidigare.
+- **Exportdispatchen koncentrerar sig nu på det bästa prisfönstret** istället för att smeta ut sig proportionellt över alla kvalificerande slots (t.ex. kvällens topp mot morgondagens morgontopp).
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.7.5:s fix för manuellt läge, v0.7.6:s fix för kvällsmålet och v0.7.7:s fix för det delade börvärdet).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.8.0:s absorptionstrappa vid negativt pris, v0.7.6:s fix för kvällsmålet och v0.7.7:s fix för det delade börvärdet).
 
 ## Systemöversikt
 

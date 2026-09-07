@@ -174,18 +174,32 @@ DEFAULT_LEGIONELLA_TARGET_TEMP = 65.0     # °C – bekräfta legionella klar n�
 # ── Prisplanering ─────────────────────────────────────────────────────────────
 CONF_YESTERDAY_CONSUMPTION_ENTITY = "yesterday_consumption_entity"
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"
+# Dämpad (utjämnad) utetemp – bättre proxy för värmebehov än momentan avläsning.
+# Valfri: om satt, ersätter den momentana temp_for_model-uppbyggnaden helt.
+CONF_DAMPED_OUTDOOR_TEMP_ENTITY = "damped_outdoor_temp_entity"
 
 # ── Förbrukningsprognos ───────────────────────────────────────────────────────
 # Modell: predicted_kwh = base_dhw + k_heat * max(0, T_balance - temp)
-# Kalibrerade mot IVT-historik nov 2025–jul 2026.
+# Kalibrerade mot helårsstatistik okt 2025–sep 2026 (kompressor-andel =
+# boiler_nrgconstotal-delta minus auxelecheatnrgconstotal-delta, mot
+# thermostat_dampedoutdoortemp), se docs/forbrukningsanalys.md avsnitt 7.
+# Ersätter den tidigare kalibreringen (nov 2025–jul 2026, k=1.275) som kraftigt
+# underskattade förbrukningen vid riktig kyla (t.ex. -7,8°C: gamla modellen
+# ~29 kWh mot uppmätt 63 kWh).
 CONF_HEAT_BALANCE_TEMP       = "heat_balance_temp"
 CONF_HEAT_FACTOR_KWH_DD      = "heat_factor_kwh_dd"
 CONF_BASE_DHW_KWH            = "base_dhw_kwh"
 CONF_DISINFECTING_EXTRA_KWH  = "disinfecting_extra_kwh"
-DEFAULT_HEAT_BALANCE_TEMP    = 14.0   # °C – balanstemperatur (uppvärmning startar under denna)
-DEFAULT_HEAT_FACTOR_KWH_DD   = 1.275  # kWh per gradddag
-DEFAULT_BASE_DHW_KWH         = 1.33   # kWh/dag – fast varmvattenbas
+DEFAULT_HEAT_BALANCE_TEMP    = 12.0   # °C – balanstemperatur (uppvärmning startar under denna)
+DEFAULT_HEAT_FACTOR_KWH_DD   = 2.39   # kWh per gradddag
+DEFAULT_BASE_DHW_KWH         = 1.0    # kWh/dag – fast varmvattenbas
 DEFAULT_DISINFECTING_EXTRA_KWH = 5.0  # kWh extra vid desinficering/legionella
+
+# EV-marginal i exportgolvet: flat säkerhetsbuffert (inte hela vägen till
+# soc_target) när en bil är vald och kan behöva ladda under ett mörkt/lågsol-
+# fönster. Se energy_planner.py::build_plan().
+CONF_EV_RESERVE_MARGIN_KWH   = "ev_reserve_margin_kwh"
+DEFAULT_EV_RESERVE_MARGIN_KWH = 2.5
 CONF_NEGATIVE_PRICE_THRESHOLD = "negative_price_threshold_sek"
 CONF_PROACTIVE_ABSORPTION_SLOTS = "proactive_absorption_slots"
 CONF_EXPORT_SELL_PERCENTILE = "export_sell_percentile"

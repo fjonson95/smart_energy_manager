@@ -24,6 +24,7 @@
           "ev_power_unit": "EV-laddare effektenhet (W eller kW)",
           "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)",
           "outdoor_temp_entity": "Utomhustemperatur (sensor, valfri – aktiverar förbrukningsprognos)",
+          "damped_outdoor_temp_entity": "Dämpad utomhustemperatur (sensor, valfri – bättre prognosunderlag än momentan temp om den finns)",
           "disinfecting_extra_kwh": "Extra kWh vid desinficering/legionella (standard 5.0)",
           "nordpool_type": "Nordpool-integrationstyp",
           "nordpool_area": "Nordpool prisområde (t.ex. SE3) – endast för officiell integration"
@@ -62,6 +63,7 @@
           "export_min_sell_price_sek_kwh": "Proaktiv export: absolut minimipris (kr/kWh, 0 = inaktivt)",
           "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
           "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
+          "ev_reserve_margin_kwh": "EV-marginal i exportgolvet vid låg sol (kWh, standard 2.5)",
           "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
         }
       },
@@ -162,6 +164,7 @@
           "ev_power_unit": "EV-laddare effektenhet (W eller kW)",
           "yesterday_consumption_entity": "Gårdagens förbrukning exkl. EV (sensor)",
           "outdoor_temp_entity": "Utomhustemperatur (sensor, valfri – aktiverar förbrukningsprognos)",
+          "damped_outdoor_temp_entity": "Dämpad utomhustemperatur (sensor, valfri – bättre prognosunderlag än momentan temp om den finns)",
           "disinfecting_extra_kwh": "Extra kWh vid desinficering/legionella (standard 5.0)",
           "nordpool_type": "Nordpool-integrationstyp",
           "nordpool_area": "Nordpool prisområde (t.ex. SE3) – endast för officiell integration"
@@ -200,6 +203,7 @@
           "export_min_sell_price_sek_kwh": "Proaktiv export: absolut minimipris (kr/kWh, 0 = inaktivt)",
           "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
           "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
+          "ev_reserve_margin_kwh": "EV-marginal i exportgolvet vid låg sol (kWh, standard 2.5)",
           "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
         }
       },

@@ -133,6 +133,9 @@ class EnergyPlanner:
         house_load_w: float = 0.0,
         battery_avg_cost_sek_kwh: float = 0.0,
         pv_production_ratio: float = 1.0,
+        yesterday_consumption_kwh: Optional[float] = None,
+        house_load_avg_w: Optional[float] = None,
+        ev_reserve_margin_kwh: float = 0.0,
     ) -> DayPlan:
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
@@ -140,8 +143,15 @@ class EnergyPlanner:
         batt_min_kwh = battery_capacity_kwh * self.battery_min_soc / 100.0
         batt_max_kwh = battery_capacity_kwh * self.battery_max_soc / 100.0
         batt_kwh     = battery_capacity_kwh * battery_soc_pct / 100.0
-        _daily_avg_w = (predicted_daily_kwh / 24.0 * 1000.0) if predicted_daily_kwh > 0 else 0.0
-        hourly_load_kw = max(_daily_avg_w, house_load_w, 500.0) / 1000.0
+        # Samma mönster som _auto_mode() (v0.7.6): predicted_daily_kwh
+        # (temperaturmodell) täcker bara uppvärmning/varmvatten, inte den
+        # generella hushållsbaslasten – ta max mot gårdagens FAKTISKA
+        # förbrukning. Projektionen använder house_load_avg_w (glidande
+        # medel) om den finns, annars momentan house_load_w – en enstaka
+        # kokplatta/dusch ska inte läsas som "hela natten".
+        _eff_daily_kwh = max(predicted_daily_kwh, yesterday_consumption_kwh or 0.0)
+        _load_for_projection_w = house_load_avg_w if house_load_avg_w is not None else house_load_w
+        hourly_load_kw = max(_eff_daily_kwh / 24.0, _load_for_projection_w / 1000.0, 0.5)
 
         # Golvformel (prognosreserv): behov_kwh täcker huslasten fram till solen
         # tar över, räknat mot PESSIMISTISK (p10) solprognos – ett underskattat
@@ -161,6 +171,11 @@ class EnergyPlanner:
             ) + 2.0
         else:
             behov_kwh = hourly_load_kw * 9.0 + 2.0
+        # EV-marginal: flat buffert (inte hela vägen till soc_target – EV-laddning
+        # är fortfarande i första hand sol-/opportunistiskt styrd) mot att en vald
+        # bil kan behöva ladda under det mörka fönstret utan att golvet räknar
+        # som om bilen inte fanns.
+        behov_kwh += max(0.0, ev_reserve_margin_kwh)
         reserv_kwh = behov_kwh * (1.0 + _uncertainty_markup(pv_production_ratio))
         hard_floor_kwh = battery_capacity_kwh * _HARD_FLOOR_FRACTION
         export_floor_kwh = min(batt_max_kwh, max(hard_floor_kwh, reserv_kwh))
@@ -227,21 +242,56 @@ class EnergyPlanner:
         if _min_export_value > 0:
             high_slots = [s for s in high_slots if s.sell_sek > _min_export_value]
 
-        # Prisväktad dispatch av exporterbara kWh
+        # Koncentrerad dispatch av exporterbara kWh: dela high_slots i "ikväll"
+        # och "imorgon bitti" (kalenderdag), räkna kWh-viktat snittpris per
+        # grupp, och allokera exportable_kwh till den HÖGST värderade gruppen
+        # först – upp till vad gruppens egna slots kan bära (effekt × tid).
+        # Bara om den gruppen inte kan bära allt spiller resten över till den
+        # andra. Ersätter den tidigare rena linjära prisviktningen över ALLA
+        # high_slots på en gång, som smetade ut exporten proportionellt även
+        # när en av topparna var betydligt mer värd än den andra (t.ex.
+        # imorgon-morgontoppen 155,7 öre mot kvällens 127,3 öre).
         export_plan: dict[datetime, float] = {}
-        price_sum = sum(s.sell_sek for s in high_slots)
         can_export = (
             exportable_kwh > 0.1
             and net_solar_tomorrow_kwh >= export_floor_kwh
             and solar_forecast_tomorrow_kwh >= self.export_min_solar_tomorrow_kwh
         )
-        if can_export and price_sum > 0:
+        export_plan_price_sum: dict[datetime, float] = {}
+        if can_export and high_slots:
+            groups: dict[object, list] = {}
             for s in high_slots:
-                slot_h = (s.end - s.start).total_seconds() / 3600.0
-                if slot_h <= 0:
+                groups.setdefault(s.start.astimezone().date(), []).append(s)
+
+            def _group_value(group_slots: list) -> float:
+                total_h = sum((s.end - s.start).total_seconds() / 3600.0 for s in group_slots)
+                if total_h <= 0:
+                    return 0.0
+                return sum(s.sell_sek * (s.end - s.start).total_seconds() / 3600.0 for s in group_slots) / total_h
+
+            def _group_capacity_kwh(group_slots: list) -> float:
+                return sum(
+                    battery_max_power_kw * (s.end - s.start).total_seconds() / 3600.0
+                    for s in group_slots
+                )
+
+            ordered_groups = sorted(groups.values(), key=_group_value, reverse=True)
+            remaining_kwh = exportable_kwh
+            for group_slots in ordered_groups:
+                if remaining_kwh <= 0.01:
+                    break
+                group_kwh = min(remaining_kwh, _group_capacity_kwh(group_slots))
+                group_price_sum = sum(s.sell_sek for s in group_slots)
+                if group_kwh <= 0 or group_price_sum <= 0:
                     continue
-                w = (s.sell_sek / price_sum) * exportable_kwh / slot_h * 1000.0
-                export_plan[s.start] = min(w, battery_max_power_kw * 1000.0)
+                for s in group_slots:
+                    slot_h = (s.end - s.start).total_seconds() / 3600.0
+                    if slot_h <= 0:
+                        continue
+                    w = (s.sell_sek / group_price_sum) * group_kwh / slot_h * 1000.0
+                    export_plan[s.start] = min(w, battery_max_power_kw * 1000.0)
+                    export_plan_price_sum[s.start] = group_price_sum
+                remaining_kwh -= group_kwh
 
         # Billiga nätladdningssots: bland mörka slots, lägsta 25%
         dark_slots = [s for s in future_slots if s.solar_kw < _DARK_SOLAR_KW and s.start not in export_plan]
@@ -276,7 +326,8 @@ class EnergyPlanner:
                 expected_revenue += discharged * slot.sell_sek
                 action  = "export"
                 power_w = -actual_w
-                reason  = f"sälj {slot.sell_sek:.2f} kr/kWh vikt {slot.sell_sek:.2f}/{price_sum:.2f}"
+                _grp_sum = export_plan_price_sum.get(slot.start, slot.sell_sek)
+                reason  = f"sälj {slot.sell_sek:.2f} kr/kWh vikt {slot.sell_sek:.2f}/{_grp_sum:.2f}"
 
             elif not is_dark:
                 surplus = max(0.0, solar_kwh - load_kwh)

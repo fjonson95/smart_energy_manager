@@ -47,7 +47,7 @@ from .const import (
     DEFAULT_LEGIONELLA_MAX_PRICE, DEFAULT_LEGIONELLA_DURATION_MINUTES,
     EV_PHASES_OPTIONS,
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
-    CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_OUTDOOR_TEMP_ENTITY, CONF_DAMPED_OUTDOOR_TEMP_ENTITY,
     CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH,
     CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH,
@@ -55,6 +55,7 @@ from .const import (
     DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH,
     CONF_BATTERY_POWER_INVERTED,
     CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
+    CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -122,6 +123,7 @@ def _grid_schema(d: dict) -> vol.Schema:
         ),
         vol.Optional(CONF_YESTERDAY_CONSUMPTION_ENTITY, default=_d(d, CONF_YESTERDAY_CONSUMPTION_ENTITY, "")): _opt_entity_selector(),
         vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=_d(d, CONF_OUTDOOR_TEMP_ENTITY, "")): _opt_entity_selector(),
+        vol.Optional(CONF_DAMPED_OUTDOOR_TEMP_ENTITY, default=_d(d, CONF_DAMPED_OUTDOOR_TEMP_ENTITY, "")): _opt_entity_selector(),
         vol.Optional(CONF_DISINFECTING_EXTRA_KWH, default=_d(d, CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH)): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX)
         ),
@@ -168,6 +170,9 @@ def _battery_schema(d: dict) -> vol.Schema:
         ),
         vol.Optional(CONF_CYCLE_COST_SEK_KWH, default=_d(d, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX)
+        ),
+        vol.Optional(CONF_EV_RESERVE_MARGIN_KWH, default=_d(d, CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=20.0, step=0.5, mode=selector.NumberSelectorMode.BOX)
         ),
     })
 

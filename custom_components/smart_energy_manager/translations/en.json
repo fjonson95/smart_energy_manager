@@ -24,6 +24,7 @@
           "ev_power_unit": "EV charger power unit (W or kW)",
           "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)",
           "outdoor_temp_entity": "Outdoor temperature (sensor, optional – enables consumption forecast)",
+          "damped_outdoor_temp_entity": "Damped outdoor temperature (sensor, optional – better forecast input than instantaneous temp if available)",
           "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)",
           "nordpool_type": "Nordpool integration type",
           "nordpool_area": "Nordpool price area (e.g. SE3) – only for official integration"
@@ -62,6 +63,7 @@
           "export_min_sell_price_sek_kwh": "Proactive export: absolute minimum sell price (SEK/kWh, 0 = disabled)",
           "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
           "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
+          "ev_reserve_margin_kwh": "EV reserve margin under low solar (kWh, default 2.5)",
           "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
         }
       },
@@ -162,6 +164,7 @@
           "ev_power_unit": "EV charger power unit (W or kW)",
           "yesterday_consumption_entity": "Yesterday consumption excl. EV (sensor)",
           "outdoor_temp_entity": "Outdoor temperature (sensor, optional – enables consumption forecast)",
+          "damped_outdoor_temp_entity": "Damped outdoor temperature (sensor, optional – better forecast input than instantaneous temp if available)",
           "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)",
           "nordpool_type": "Nordpool integration type",
           "nordpool_area": "Nordpool price area (e.g. SE3) – only for official integration"
@@ -200,6 +203,7 @@
           "export_min_sell_price_sek_kwh": "Proactive export: absolute minimum sell price (SEK/kWh, 0 = disabled)",
           "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
           "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
+          "ev_reserve_margin_kwh": "EV reserve margin under low solar (kWh, default 2.5)",
           "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
         }
       },
