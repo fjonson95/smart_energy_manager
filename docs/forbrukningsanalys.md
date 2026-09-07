@@ -626,23 +626,39 @@ lösningen (utan prisspärr) räcker till 02:44 nästa natt med bred marginal.
 En garanterad liten besparing (~2 kr/natt) mot en verklig risk att missa
 exakt det golvet ska skydda mot.
 
-**Men: är "0 sol imorgon" ett realistiskt värsta fall?** Kontrollerat mot
-riktig produktionsdata (`sensor.sg_daily_pv_generation`, tillgänglig från
-5 aug 2026 — statistik saknas helt före det datumet, sannolikt en
-omstart/nyinstallation av Sungrow-integrationen). Inom de 33 dygn som
-finns: **inget nolldygn**, sämst 15,1 kWh (27 aug). Användaren delade även
-skärmdumpar från växelriktarens egen app (Sungrow iSolarCloud) för
-dec 2025–mars 2026: december och februari hade enstaka dagar under 1 kWh,
-men **januari visade en sammanhängande period på ~2 veckor (ca 2–15 jan)
-med i det närmaste nollproduktion** — sannolikt snötäckta paneler. Mars
-hade inga nolldagar alls (6–72 kWh/dygn).
+**Är "0 sol imorgon" ett realistiskt värsta fall? — bekräftat med hela årets
+riktiga data.** `sensor.sg_daily_pv_generation`s HA-statistik gick bara
+tillbaka till 5 aug 2026 (troligen en omstart av Sungrow-integrationen då),
+så den frågan gick inte att besvara mot HA. Användaren exporterade istället
+ett helt års dygnsdata direkt från växelriktarens egen molntjänst (Sungrow
+iSolarCloud, "Monthly report"-export) — 12 CSV-filer,
+`testdata/Monthly report_028778 - Fredrik Jonson_*.csv`, **2025-09-01 till
+2026-08-31, alla 365 dygn utan luckor.**
 
-**Slutsats:** en isolerad engångs-nolldag är inte realistisk (bekräftar
-användarens ursprungliga poäng), men en **flera dagar lång
-nollproduktionsperiod** förekommer uppenbarligen verkligen (januari 2026).
-Det är ett svårare scenario än det ursprungliga "0 sol imorgon"-testet,
-eftersom golvet bara planerar fram till NÄSTA förväntade soltakeover — det
-har ingen logik för "vad händer om solen uteblir i två veckor."
+Resultatet var tydligare och allvarligare än skärmdumparna antydde:
+
+| | Antal |
+|---|---|
+| Dygn med exakt 0,0 kWh | **15** |
+| Dygn under 1,0 kWh | 27 |
+| Längsta sammanhängande nollperiod | **11 dygn i rad** |
+
+De 15 nolldygnen: 2025-11-20, 2025-12-11, **2026-01-04 till 2026-01-14
+(elva dygn i sträck, exakt 0,0 kWh varje dygn)**, 2026-02-07, 2026-02-11.
+Ingen annan månad hade mer än ett enstaka isolerat nolldygn — januariperioden
+är unik i datan, sannolikt snötäckta paneler som satt kvar under en hel
+köldknäpp.
+
+**Slutsats, reviderad:** en isolerad engångs-nolldag är fortfarande sällsynt
+(bara 2 av 15 nolldygn var isolerade — de flesta klustrar). Men
+elva-dygns-perioden är inte hypotetisk, den hände verkligen, och den är
+STRÄNGARE än det "0 sol imorgon"-test som användes för att döma ut den naiva
+Option B ovan (som bara testade ETT dygns bortfall). Ingen golvformel som
+planerar "till nästa förväntade soltakeover" kan överleva elva dygn i rad —
+det är inte en kalibreringsfråga, det är fysiskt omöjligt oavsett hur stor
+reserv som byggs in. `_uncertainty_markup()`s maxpåslag (golvet mättas mot
+`batt_max_kwh`, alltså full nattautonomi) skjuter i bästa fall problemet
+en eller ett par dygn framåt, inte elva.
 
 **P3-2-bugg hittad under den här grävningen:** `_update_pv_production_ratio()`
 (coordinator.py) committade bara ett dygn till kvot-historiken om
@@ -690,6 +706,7 @@ föll korrekt till 0,00 med fixen.
 | `sensor.boiler_hpactivity` | text/enum | Pannans aktivitetsstatus (`off`/`heating`/`hot water`/`pool`/`defrost` m.fl.) — källa för helpern "Avfrostningsfunktion aktiv"; ~10 dygns retention, ingen `state_class` möjlig (textsensor) |
 | `sensor.utomhus_humidity` | measurement, % | Utomhus luftfuktighet — permanent statistik, testad mot elpatron-dygn (avsnitt 7), motbevisade den enkla väderhypotesen |
 | `sensor.unknown_70_ee_50_84_24_fc_unknown_05_00_00_0c_b4_54_nederbord_i_dag` | total (dygnsvis), mm | Nederbörd idag — permanent statistik, inte testad ännu |
+| `testdata/Monthly report_028778 - Fredrik Jonson_*.csv` | — | **Inte en HA-sensor.** Dygnsvis PV/köp/export/last-export direkt från växelriktarens molntjänst (Sungrow iSolarCloud), 12 filer = helt år utan luckor (2025-09-01–2026-08-31). Källan till den bekräftade elva-dygns-nollperioden (avsnitt 8) — HA:s egen `sensor.sg_daily_pv_generation`-statistik täcker bara från 5 aug 2026 och kunde inte användas för det. |
 
 **Begränsning att komma ihåg:** rå state-historik (switchar, EV-status)
 rensas efter ~10 dygn. Allt bortom det måste rekonstrueras via
@@ -769,6 +786,10 @@ satt — fungerar bara för de sensorer som faktiskt har det.
    hittades och fixades en verklig P3-2-bugg (se punkt 1 ovan) som gjorde
    att produktionskvoten aldrig upptäckte genuina nollproduktionsdygn.
    Kvarstår: (a) byt ut Option B mot Variant A eller bättre, (b) hantera
-   flerdagars nollproduktionsperioder (bekräftat förekommer, ~2 veckor i
-   januari 2026 enligt växelriktarens egen historik) — golvet planerar
-   idag bara fram till nästa förväntade soltakeover, inte längre perioder.
+   flerdagars nollproduktionsperioder — **bekräftat med hela årets riktiga
+   data** (`testdata/Monthly report_028778*.csv`, 365 dygn utan luckor):
+   15 dygn med exakt 0,0 kWh, varav **11 dygn i rad (4–14 jan 2026)**.
+   Golvet planerar idag bara fram till nästa förväntade soltakeover — ingen
+   reservstorlek löser ett elva dygn långt bortfall, det kräver en helt
+   annan strategi (acceptera nätberoende under perioden snarare än att
+   jaga ett ouppnåeligt golv). Inte påbörjat.

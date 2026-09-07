@@ -20,3 +20,9 @@ custom_components/Forecast Tomorrow.txt
 testdata/Current Setting.txt
 testdata/Sensor Attributes.txt
 testdata/TestRun.txt
+
+# Personlig rådata (elbolagets export/import, Sungrow iSolarCloud-rapporter) -
+# hålls lokal, bara den sammanslagna testdata/history/daily_energy_merged.csv committas
+testdata/Export elnat.csv
+testdata/Import elnat.csv
+testdata/Monthly report_*.csv
