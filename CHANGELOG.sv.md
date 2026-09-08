@@ -2,6 +2,14 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.5
+
+Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del tre (steg 1B) — dygnsbudgetens "dump"-exkludering omgjord kring riktiga sensorer istället för en approximation.
+
+- **Ersatte hela dump-energi-detekteringen.** v0.9.1:s ansats (energi som gick åt medan SEM:s egen `heat_pump_extra_hot_water_entity`-switch var på, med värmepumpens totala effekt) fångade bara det SEM själv kommenderat – missade pannans egen sol-styrda logik och manuella körningar. Spårar nu elpatronen direkt via två nya valfria entiteter (`auxheater_status_entity`, `auxheater_level_entity`, en effektnivå i procent av märkeffekten – kalibrerad till 8,83 kW genom regression mot elpatronens egen energiräknare över 22 dygn, eftersom den räknarens hel-kWh-upplösning inte duger per cykel på egen hand).
+- **Klassificeringen antar inte längre ett veckovis desinficeringsschema.** Elpatronenergi behålls i dygnsbudgeten (exkluderas INTE som dump) bara medan `legionella_switch_entity` faktiskt är på, plus 45 minuters eftersläng för EMS-ESP-rapporteringslagg – aldrig härlett från en konfigurerad veckodag, vilket visade sig inte matcha när cykeln faktiskt körs.
+- **Oläsbara sensoravläsningar hoppar över redovisningscykeln** istället för att tolkas som noll eller som "inte desinficerar" – samma princip som P3-2-fixen (v0.9.1). När själva desinficeringsswitchen är otillgänglig defaultar cykeln till att INTE exkludera energin – att felaktigt behandla verklig nödvändig förbrukning som dump är farligare än tvärtom, så oklarhet löses åt att behålla energin i budgeten.
+
 ## Nyheter i 0.9.4
 
 Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del två — en ny sensor för att övervaka cykelkostnadsantagandet mot verkligheten istället för att bara förutsätta det.

@@ -178,6 +178,15 @@ DEFAULT_EXTRA_HOT_WATER_MAX_TEMP = 70.0   # °C – stoppa extra varmvatten öve
 DEFAULT_EXTRA_HOT_WATER_MIN_TEMP = 65.0   # °C – starta inte extra varmvatten förrän temp är under detta
 DEFAULT_LEGIONELLA_TARGET_TEMP = 65.0     # °C – bekräfta legionella klar när temp nått detta
 
+# Elpatronens (aux heater) egen status/nivå – valfria, för dygnsbudgetens
+# dump-exkludering (v1.0 steg 1B). auxheaterlevel är en effektnivå i procent
+# av märkeffekten, INTE en energiräknare (sensor.boiler_dhw_auxelecheatnrgcons
+# har bara hel-kWh-upplösning och duger inte per cykel).
+CONF_AUXHEATER_STATUS_ENTITY = "auxheater_status_entity"
+CONF_AUXHEATER_LEVEL_ENTITY = "auxheater_level_entity"
+CONF_AUXHEATER_RATED_KW = "auxheater_rated_kw"
+DEFAULT_AUXHEATER_RATED_KW = 8.83  # kW – regression av nivå mot energiräknaren, 22 dygns data
+
 # ── Prisplanering ─────────────────────────────────────────────────────────────
 CONF_YESTERDAY_CONSUMPTION_ENTITY = "yesterday_consumption_entity"
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"

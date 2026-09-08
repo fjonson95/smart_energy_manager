@@ -80,7 +80,10 @@
           "hot_water_temp_entity": "Hot water tank temperature sensor (°C)",
           "extra_hot_water_max_temp": "Max temp for extra hot water (°C)",
           "extra_hot_water_min_temp": "Min temp to start extra hot water (°C)",
-          "extra_hot_water_min_runtime_minutes": "Min runtime for extra hot water (minutes)"
+          "extra_hot_water_min_runtime_minutes": "Min runtime for extra hot water (minutes)",
+          "auxheater_status_entity": "Aux heater status (optional, for the daily budget's dump exclusion)",
+          "auxheater_level_entity": "Aux heater power level (%, optional)",
+          "auxheater_rated_kw": "Aux heater rated power (kW, default 8.83)"
         }
       },
       "legionella": {
@@ -222,7 +225,10 @@
           "hot_water_temp_entity": "Hot water tank temperature sensor (°C)",
           "extra_hot_water_max_temp": "Max temp for extra hot water (°C)",
           "extra_hot_water_min_temp": "Min temp to start extra hot water (°C)",
-          "extra_hot_water_min_runtime_minutes": "Min runtime for extra hot water (minutes)"
+          "extra_hot_water_min_runtime_minutes": "Min runtime for extra hot water (minutes)",
+          "auxheater_status_entity": "Aux heater status (optional, for the daily budget's dump exclusion)",
+          "auxheater_level_entity": "Aux heater power level (%, optional)",
+          "auxheater_rated_kw": "Aux heater rated power (kW, default 8.83)"
         }
       },
       "legionella_opts": {

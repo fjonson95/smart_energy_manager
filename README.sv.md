@@ -1,17 +1,18 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.4-blue)
+![Version](https://img.shields.io/badge/version-0.9.5-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.4
+## Nyheter i 0.9.5
 
-Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del två — en ny sensor för att övervaka cykelkostnadsantagandet istället för att bara förutsätta det.
+Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del tre — dygnsbudgetens "dump"-exkludering omgjord kring riktiga sensorer.
 
-- **Ny valfri sensor `sem_battery_equivalent_cycles`** (ackumulerad AC-urladdningsenergi ÷ användbar kapacitet), aktiverad av två nya valfria konfigfält för batteriets ackumulerade AC-ur-/urladdningsräknare. Exponerar också ett `measured_eta_roundtrip`-attribut för löpande omverifiering.
-- Garantin (10 år eller 10 000 cykler) binder vid kalendern så länge den verkliga takten ligger under ~2,74 cykler/dygn – den här sensorn gör att antagandet kan övervakas istället för bara förutsättas.
+- **Ersatte dump-energi-detekteringen**: spårar nu elpatronen direkt (`auxheater_status_entity`/`auxheater_level_entity`, kalibrerad till 8,83 kW märkeffekt) istället för energi som gick åt medan SEM:s egen extra-varmvatten-switch var på – vilket missade pannans egen sol-styrda logik och manuella körningar.
+- **Klassificeringen antar inte längre ett veckovis desinficeringsschema** – elpatronenergi behålls i budgeten bara medan desinficeringsswitchen faktiskt är på (plus 45 minuters eftersläng), aldrig härlett från en konfigurerad veckodag.
+- Oläsbara sensoravläsningar hoppar över redovisningscykeln istället för att feltolkas som noll, och löser oklarhet åt att INTE exkludera energi – den säkrare riktningen.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.3:s uppmätta rundgångsverkningsgrad, v0.9.2:s executor-veto-fix, v0.9.1:s golv-skyddsspärr och rullande förbrukningssnitt, och v0.9.0:s säsongsmedvetna laddning/urladdning).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, v0.9.2:s executor-veto-fix, och v0.9.1:s golv-skyddsspärr och rullande förbrukningssnitt).
 
 ## Systemöversikt
 

@@ -15,6 +15,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_HOT_WATER_TEMP_ENTITY, CONF_LEGIONELLA_SWITCH,
     CONF_EXTRA_HOT_WATER_MAX_TEMP, CONF_EXTRA_HOT_WATER_MIN_TEMP, CONF_LEGIONELLA_TARGET_TEMP,
+    CONF_AUXHEATER_STATUS_ENTITY, CONF_AUXHEATER_LEVEL_ENTITY, CONF_AUXHEATER_RATED_KW, DEFAULT_AUXHEATER_RATED_KW,
     CONF_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
     DEFAULT_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_EXTRA_HOT_WATER_MIN_TEMP, DEFAULT_LEGIONELLA_TARGET_TEMP,
     DEFAULT_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
@@ -220,18 +221,25 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # P6-1: senaste skrivningstidpunkt per entitet, för dödband + heartbeat.
         self._last_write_times: dict[str, datetime] = {}
 
-        # 7-dygns rullande snitt av dygnsförbrukning, netto exkl. extra
-        # varmvatten-energi (sol-/negativpris-styrd, steg 2 i absorptionstrappan).
-        # Extra varmvatten kör bara pannans kompressor för DHW, inte samtidig
-        # rumsvärme, så all effekt på heat_pump_power_entity under den tiden
-        # räknas mot varmvattnet. Legionella-desinficering (var 7:e dag) räknas
-        # INTE bort – ett 7-dygnsfönster fångar den perioden naturligt, den är
-        # verklig återkommande last (se docs/forbrukningsanalys.md avsnitt 8).
+        # 7-dygns rullande snitt av dygnsförbrukning, netto exkl. "dump" –
+        # elpatronenergi UTANFÖR ett legionella-desinficeringsfönster (v1.0
+        # steg 1B, docs/v1_implementation_plan.md). Poängen: subtraktionen
+        # finns för att bryta en självförstärkande slinga – dumpas 5 kWh
+        # idag blir morgondagens budget 5 kWh högre, reserven större,
+        # nattladdningen större, och mer dumpas. Grindar direkt på
+        # legionella-switchen (+ 45 minuters eftersläng för EMS-ESP-lagg),
+        # INTE på SEM:s egen extra-varmvatten-switch eller en antagen
+        # veckodag – fångar då även pannans egen PV-logik och manuella
+        # körningar, inte bara det SEM själv kommenderat. Vid tveksamhet
+        # (oläsbar legionella-status) klassas energin som obligatorisk –
+        # fel åt det hållet är ofarligare än att exkludera verklig
+        # nödvändig förbrukning.
         self._daily_consumption_store = Store(hass, 1, f"{DOMAIN}_daily_consumption")
-        self._daily_consumption_history: list[dict] = []  # senaste 7 dygn: [{date, total_kwh, extra_hw_kwh, net_kwh}]
+        self._daily_consumption_history: list[dict] = []  # senaste 7 dygn: [{date, total_kwh, dump_kwh, net_kwh}]
         self._daily_consumption_date: str = ""
-        self._extra_hw_energy_today_kwh: float = 0.0
-        self._extra_hw_last_update: Optional[datetime] = None
+        self._dump_energy_today_kwh: float = 0.0
+        self._dump_last_update: Optional[datetime] = None
+        self._legionella_last_on_time: Optional[datetime] = None
 
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
@@ -334,13 +342,13 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         if isinstance(data, dict):
             self._daily_consumption_history = data.get("history", [])
             self._daily_consumption_date = data.get("date", "")
-            self._extra_hw_energy_today_kwh = float(data.get("extra_hw_kwh_in_progress", 0.0))
+            self._dump_energy_today_kwh = float(data.get("dump_kwh_in_progress", 0.0))
 
     async def _save_daily_consumption_store(self) -> None:
         await self._daily_consumption_store.async_save({
             "history": self._daily_consumption_history,
             "date": self._daily_consumption_date,
-            "extra_hw_kwh_in_progress": self._extra_hw_energy_today_kwh,
+            "dump_kwh_in_progress": self._dump_energy_today_kwh,
         })
 
     def _get_rolling_consumption_kwh(self) -> Optional[float]:
@@ -952,44 +960,69 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     extra = float(c.get(CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH))
                     predicted_daily_kwh += extra
 
-            # 7-dygns rullande dygnsförbrukning, netto exkl. extra varmvatten-energi.
-            # Extra varmvatten kör bara pannans DHW-läge (ingen samtidig rumsvärme,
-            # bekräftat) så all heat_pump_power_w under "på"-perioder räknas mot den.
-            heat_pump_power_w_val = self._get_state_float(c.get(CONF_HEAT_PUMP_POWER))
-            extra_hot_water_on_val = self._get_state_bool(c.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER))
+            # Legionella – läs switch (tri-state: unavailable ska INTE tolkas som av,
+            # annars misstolkas ett kort kommunikationsglapp mot ems-esp som att
+            # pannan avslutat körningen) och temp. Läses här (innan dump-spårningen
+            # nedan) eftersom båda behöver den.
+            legionella_switch_on = self._get_state_tristate(c.get(CONF_LEGIONELLA_SWITCH))
+            if legionella_switch_on:
+                self._legionella_last_on_time = now
+            hot_water_temp = self._get_hot_water_temp()
+
+            # 7-dygns rullande dygnsförbrukning, netto exkl. "dump" – elpatronenergi
+            # UTANFÖR ett legionella-desinficeringsfönster (v1.0 steg 1B). Grindar
+            # på elpatronens EGNA status/nivå (fångar pannans egen PV-logik och
+            # manuella körningar, inte bara SEM:s kommenderade extra-varmvatten),
+            # och på den RIKTIGA desinficeringsswitchen med 45 minuters eftersläng
+            # (EMS-ESP rapporterar av något innan uppvärmningen faktiskt stannar) –
+            # inte en antagen veckodag. auxheaterlevel är en effektnivå i procent av
+            # elpatronens märkeffekt (regression: 8,83 kW, 22 dygns data).
+            auxheater_status = self._get_state_tristate(c.get(CONF_AUXHEATER_STATUS_ENTITY))
+            auxheater_level_val = self._get_state_float(c.get(CONF_AUXHEATER_LEVEL_ENTITY), default=None)
+            auxheater_rated_kw = float(c.get(CONF_AUXHEATER_RATED_KW, DEFAULT_AUXHEATER_RATED_KW))
             today_str = now.strftime("%Y-%m-%d")
             if today_str != self._daily_consumption_date:
                 if self._daily_consumption_date and yesterday_kwh is not None:
-                    net_kwh = max(0.0, yesterday_kwh - self._extra_hw_energy_today_kwh)
+                    net_kwh = max(0.0, yesterday_kwh - self._dump_energy_today_kwh)
                     self._daily_consumption_history.append({
                         "date": self._daily_consumption_date,
                         "total_kwh": round(yesterday_kwh, 3),
-                        "extra_hw_kwh": round(self._extra_hw_energy_today_kwh, 3),
+                        "dump_kwh": round(self._dump_energy_today_kwh, 3),
                         "net_kwh": round(net_kwh, 3),
                     })
                     self._daily_consumption_history = self._daily_consumption_history[-7:]
                     self.hass.async_create_task(self._save_daily_consumption_store())
                     _LOGGER.info(
-                        "Dygnsförbrukning %s: totalt %.1f kWh, extra varmvatten %.1f kWh, netto %.1f kWh",
-                        self._daily_consumption_date, yesterday_kwh, self._extra_hw_energy_today_kwh, net_kwh,
+                        "Dygnsförbrukning %s: totalt %.1f kWh, dump %.1f kWh, netto %.1f kWh",
+                        self._daily_consumption_date, yesterday_kwh, self._dump_energy_today_kwh, net_kwh,
                     )
-                self._extra_hw_energy_today_kwh = 0.0
+                self._dump_energy_today_kwh = 0.0
                 self._daily_consumption_date = today_str
-                self._extra_hw_last_update = now
+                self._dump_last_update = now
 
-            if self._extra_hw_last_update is not None:
-                _dt_h = (now - self._extra_hw_last_update).total_seconds() / 3600.0
+            if self._dump_last_update is not None:
+                _dt_h = (now - self._dump_last_update).total_seconds() / 3600.0
                 # Övre gräns (30 min) skyddar mot felaktiga hopp efter en omstart
-                # eller ett långt pollningsglapp.
-                if extra_hot_water_on_val and 0.0 < _dt_h < 0.5:
-                    self._extra_hw_energy_today_kwh += heat_pump_power_w_val / 1000.0 * _dt_h
-            self._extra_hw_last_update = now
-
-            # Legionella – läs switch (tri-state: unavailable ska INTE tolkas som av,
-            # annars misstolkas ett kort kommunikationsglapp mot ems-esp som att
-            # pannan avslutat körningen) och temp
-            legionella_switch_on = self._get_state_tristate(c.get(CONF_LEGIONELLA_SWITCH))
-            hot_water_temp = self._get_hot_water_temp()
+                # eller ett långt pollningsglapp. Oläsbar elpatron-status/nivå
+                # hoppar över cykeln helt (räknas varken som dump eller normal
+                # förbrukning just den cykeln) istället för att tolkas som 0 –
+                # samma princip som P3-2-fixen.
+                if (
+                    auxheater_status is True
+                    and auxheater_level_val is not None
+                    and 0.0 < _dt_h < 0.5
+                ):
+                    in_disinfection_window = (
+                        legionella_switch_on is not False  # True ELLER okänt (oklart -> obligatorisk, säkrare riktning)
+                        or (
+                            self._legionella_last_on_time is not None
+                            and now - self._legionella_last_on_time <= timedelta(minutes=45)
+                        )
+                    )
+                    if not in_disinfection_window:
+                        auxheater_power_w = auxheater_level_val / 100.0 * auxheater_rated_kw * 1000.0
+                        self._dump_energy_today_kwh += auxheater_power_w / 1000.0 * _dt_h
+            self._dump_last_update = now
             legionella_active, legionella_reason = self._legionella.should_run_now(
                 now, solar_surplus_w, buy_price,
                 switch_is_on=legionella_switch_on,
@@ -1024,9 +1057,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
                 chargers=chargers,
 
-                heat_pump_power_w=heat_pump_power_w_val,
+                heat_pump_power_w=self._get_state_float(c.get(CONF_HEAT_PUMP_POWER)),
                 heat_pump_phase=c.get(CONF_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PHASE),
-                extra_hot_water_on=extra_hot_water_on_val,
+                extra_hot_water_on=self._get_state_bool(c.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)),
                 heat_pump_patron_phases=c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES),
                 heat_pump_patron_power_kw=float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
 

@@ -80,7 +80,10 @@
           "hot_water_temp_entity": "Ackumulatortank temperatur (°C)",
           "extra_hot_water_max_temp": "Max temp för extra varmvatten (°C)",
           "extra_hot_water_min_temp": "Min temp för extra varmvatten (°C)",
-          "extra_hot_water_min_runtime_minutes": "Min körtid extra varmvatten (minuter)"
+          "extra_hot_water_min_runtime_minutes": "Min körtid extra varmvatten (minuter)",
+          "auxheater_status_entity": "Elpatronens status (valfri, för dygnsbudgetens dump-exkludering)",
+          "auxheater_level_entity": "Elpatronens effektnivå (%, valfri)",
+          "auxheater_rated_kw": "Elpatronens märkeffekt (kW, standard 8.83)"
         }
       },
       "legionella": {
@@ -222,7 +225,10 @@
           "hot_water_temp_entity": "Ackumulatortank temperatur (°C)",
           "extra_hot_water_max_temp": "Max temp för extra varmvatten (°C)",
           "extra_hot_water_min_temp": "Min temp för extra varmvatten (°C)",
-          "extra_hot_water_min_runtime_minutes": "Min körtid extra varmvatten (minuter)"
+          "extra_hot_water_min_runtime_minutes": "Min körtid extra varmvatten (minuter)",
+          "auxheater_status_entity": "Elpatronens status (valfri, för dygnsbudgetens dump-exkludering)",
+          "auxheater_level_entity": "Elpatronens effektnivå (%, valfri)",
+          "auxheater_rated_kw": "Elpatronens märkeffekt (kW, standard 8.83)"
         }
       },
       "legionella_opts": {

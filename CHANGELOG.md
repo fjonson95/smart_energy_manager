@@ -2,6 +2,14 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.5
+
+Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part three (step 1B) — the daily-budget "dump" exclusion reworked around real sensors instead of an approximation.
+
+- **Replaced the dump-energy detection mechanism entirely.** The v0.9.1 approach (energy drawn while SEM's own `heat_pump_extra_hot_water_entity` switch was on, using total heat pump power) only captured energy SEM itself commanded — missing the boiler's own PV-diversion logic and manual runs. Now tracks the auxiliary electric heater directly via two new optional entities (`auxheater_status_entity`, `auxheater_level_entity`, a percentage of rated power — calibrated to 8.83 kW by regression against the heater's own energy counter over 22 days, since that counter's whole-kWh resolution isn't usable per-cycle on its own).
+- **Classification no longer assumes a weekly disinfection schedule.** Auxheater energy is only kept in the daily budget (not excluded as dump) while `legionella_switch_entity` is actually on, plus a 45-minute trailing grace period for EMS-ESP reporting lag — never inferred from a configured weekday, which turned out not to match when the cycle actually runs.
+- **Unavailable sensor readings skip the accounting interval** rather than being read as zero or as "not disinfecting" — the same principle as the P3-2 fix (v0.9.1). When the disinfection switch itself is unavailable, the interval defaults to *not* excluding the energy — wrongly treating real necessary consumption as dump is more dangerous than the reverse, so ambiguity resolves toward keeping energy in the budget.
+
 ## What's New in 0.9.4
 
 Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part two — a new sensor to monitor the cycle-cost assumption against reality instead of just asserting it.

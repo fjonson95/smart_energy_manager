@@ -12,13 +12,13 @@ Bygger på granskningen av v0.5.60, förbrukningsanalysen
 
 **Status:** Steg 0 implementerat och verifierat 2026-09-08 (v0.9.2) — se
 `docs/forbrukningsanalys.md` avsnitt "Steg 0 implementerat" för detaljer,
-kodverifiering och acceptanstestresultat. Steg 1 påbörjat (v0.9.3–v0.9.4):
+kodverifiering och acceptanstestresultat. Steg 1 påbörjat (v0.9.3–v0.9.5):
 `eta_roundtrip` och `sell_extra_revenue` uppdaterade till uppmätta värden,
 brytpunktsformlerna verifierade (se korrigeringen om merit-order-viktat
-snitt kontra dygnets min/max, nedan), och `sem_battery_equivalent_cycles`
-(ny valfri sensor, v0.9.4) implementerad. Kvarstår i steg 1: lastprofil
-inkodad i golvformeln, dygnsbudget-attribueringen. Steg 2–8 inte
-påbörjade.
+snitt kontra dygnets min/max, nedan), `sem_battery_equivalent_cycles`
+(v0.9.4) och dygnsbudgetens dump-exkludering (steg 1B, v0.9.5)
+implementerade. Kvarstår i steg 1: lastprofilen (steg 1A) — utredd och
+specificerad, inte inkodad än. Steg 2–8 inte påbörjade.
 
 ---
 
@@ -97,17 +97,85 @@ arkitekturarbete, men de flyttar alla trösklar.
 1. **Kontrollera att 1,5 kW-klämningen är borta.** Den bröt 74 % av
    dygnen okt–mars; kallaste dygnet låg på 4,10 kW. Om `min(max(...), 1500)`
    finns kvar någonstans ska taket bort och golvet på 0,5 kW behållas.
-2. **Lastprofil i stället för platt takt.** Projektionen ska använda
-   medianlast per timme, inte ett dygnssnitt. Både energidumpen och
-   desinficeringen är dagtidshändelser och faller då bort ur nattfönstret
-   automatiskt.
-3. **Dygnsbudget: dra bort dumpen, behåll desinficeringen.**
-   `coordinator.py` Attribuera elpatronens varmvattenenergi på
-   `switch.boiler_dhw_disinfecting` i stället för på SEM:s egen
-   varmvattenswitch — då fångas också pannans egen PV-logik och manuella
-   körningar.
+2. **Lastprofil i stället för platt takt** — se "Steg 1A" nedan, utredd
+   och inskriven i detalj 2026-09-08.
+3. **Dygnsbudget: dra bort dumpen, behåll desinficeringen** — se
+   "Steg 1B" nedan, utredd, inskriven och **implementerad** (v0.9.5).
 4. **Ny sensor: ackumulerade ekvivalenta cykler.** Så att antagandet om
    cykelkostnaden övervakas i stället för att förutsättas.
+   **Implementerad (v0.9.4):** `sem_battery_equivalent_cycles`, se
+   `docs/forbrukningsanalys.md`.
+
+### Steg 1A — Lastprofilen: form skild från nivå
+
+Arkitekturvalet: fönstret får inte bära nivån alls. Lasten delas i **form**
+och **nivå**:
+
+- **Form:** 24 timhinkar, median över ett rullande 21-dygnsfönster,
+  normaliserade mot varje dygns egen summa (en fraktion av dygnet, inte
+  ett absolutvärde), hållna konstanta över sina fyra kvartsprisslots.
+  Kvartshinkar avfärdade — på den nivån är variationen termostatcykling,
+  och varje hink får en fjärdedel så många observationer.
+- **Nivå:** kommer från gradtimmodellen som redan finns i koden
+  (`predicted_daily_kwh = base_dhw + k * max(0, t_bal - temp)`), INTE
+  från fönstret.
+
+Det löser årstidsproblemet utan ett vinterläge: ett fönster långt nog för
+stabila hinkar (21 dygn) hinner aldrig med en köldknäpp, men nivån
+reagerar på morgondagens temperaturprognos direkt eftersom den kommer
+från en helt annan källa än formen.
+
+P50 (median) används för planeringen i allmänhet, **P75 för reserven**
+specifikt — den extra marginalen ("augustinattens premie") är bara
+1–10 % jämfört med P50, en billig försiktighetsmarginal.
+
+**Status:** utredd och specificerad 2026-09-08. Inte implementerad —
+kräver en ny rullande 21-dygns/24-hinkars datastruktur (samma
+Store-mönster som `_daily_consumption_history`/`_pv_ratio_history`) och
+att `hourly_load_kw` i `energy_planner.py` byts från en skalär till en
+per-slot form×nivå-uppslagning.
+
+### Steg 1B — Dygnsbudgeten: bryt den självförstärkande slingan
+
+Poängen med subtraktionen (inte tidigare tydligt formulerad): den finns
+för att bryta en självförstärkande slinga. Dumpas 5 kWh idag blir
+morgondagens budget 5 kWh högre, reserven större, nattladdningen större —
+och mer dumpas. Inget annat är syftet. Åt andra hållet är felet farligare
+(att felaktigt exkludera verklig obligatorisk förbrukning underskattar
+reserven), så vid tveksamhet klassas energin som obligatorisk.
+
+**Två rättelser från mätdata (2026-09-08):**
+
+- Den ursprungligen föreslagna räknaren, `sensor.boiler_dhw_auxelecheatnrgcons`,
+  har bara hel-kWh-upplösning och duger inte per cykel. Använd i stället
+  `sensor.boiler_auxheaterstatus` (på/av) + `sensor.boiler_auxheaterlevel`
+  (effektnivå i %). Regression av nivån mot räknaren över 22 dygn ger
+  elpatronens märkeffekt till **8,83 kW** (driftnivå 66 % ⇒ 5,8 kW),
+  stämmande inom räknarens egen kvantisering varje dygn.
+- Desinficeringen kör inte pålitligt på en fast veckodag trots
+  konfigurationen (`legionella_preferred_hour_start/end` styr en
+  villkorad, inte kalenderbunden, körning) — bekräftat mot verklig
+  switch-historik (`switch.boiler_dhw_disinfecting`): två påslag med
+  exakt 7 dagars mellanrum, båda på en lördag, inte den konfigurerade
+  veckodagen. Grinda alltså direkt på switchen, schemalägg aldrig på
+  veckodag.
+
+**En verklig (inte hypotetisk) detalj:** EMS-ESP-entiteterna går
+`unavailable` ungefär två gånger per dygn. En oläsbar avläsning måste
+hoppa över redovisningscykeln i stället för att räknas som noll (samma
+princip som P3-2-fixen), och desinficeringsfönstret behöver 45 minuters
+eftersläng (EMS-ESP rapporterar av något innan uppvärmningen faktiskt
+stannar).
+
+**Status: implementerad (v0.9.5).** `coordinator.py` spårar nu
+elpatroneffekt (`auxheaterstatus` × `auxheaterlevel` × märkeffekt) och
+exkluderar den ur dygnsbudgeten bara när den ligger UTANFÖR ett
+desinficeringsfönster (switch på, eller av inom 45 minuter). Oläsbar
+elpatron-status hoppar över cykeln; oläsbar legionella-status tolkas som
+"kanske desinficering" (exkluderar inte, säkrare riktning). Verifierat
+med sju fristående testfall (normal dump, legionella aktiv, inom/utanför
+45-minutersfönstret, båda sensorerna otillgängliga var för sig, elpatron
+av) — alla gav förväntat resultat.
 
 **Acceptans:** Brytpunktsformlerna reproducerar tabellen:
 `spot_hög > 1,178 · spot_låg + 0,215` på köpsidan, `+ 0,070` på säljsidan.
