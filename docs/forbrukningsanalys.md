@@ -660,6 +660,16 @@ reserv som byggs in. `_uncertainty_markup()`s maxpåslag (golvet mättas mot
 `batt_max_kwh`, alltså full nattautonomi) skjuter i bästa fall problemet
 en eller ett par dygn framåt, inte elva.
 
+**Korsvaliderat mot värmepumpens egen effekt** (`sensor.ivt_total_active_power`,
+timvis, 2025-09-30–2026-08-29, manuell HA-export eftersom sensorn saknar
+långtidsstatistik — se `testdata/history/heat_pump_power_hourly.csv`):
+värmepumpen drog **1774 W i snitt under 4–14 januari-perioden**, mot 1297 W
+veckan innan och 1131 W veckan efter — en ökning på 37–57%. Bekräftar att
+nollsol-perioden sammanföll med en genuin köldknäpp (matchar de extrema
+minusgraderna i `Import elnat.csv`, se ovan), inte bara ett sensorfel —
+och att det är den värsta tänkbara kombinationen: nollproduktion och
+förhöjd förbrukning samtidigt, i elva dygn.
+
 **P3-2-bugg hittad under den här grävningen:** `_update_pv_production_ratio()`
 (coordinator.py) committade bara ett dygn till kvot-historiken om
 `_pv_last_actual_reading > 0` — men `_get_state_float()` returnerar `0.0`
@@ -707,6 +717,9 @@ föll korrekt till 0,00 med fixen.
 | `sensor.utomhus_humidity` | measurement, % | Utomhus luftfuktighet — permanent statistik, testad mot elpatron-dygn (avsnitt 7), motbevisade den enkla väderhypotesen |
 | `sensor.unknown_70_ee_50_84_24_fc_unknown_05_00_00_0c_b4_54_nederbord_i_dag` | total (dygnsvis), mm | Nederbörd idag — permanent statistik, inte testad ännu |
 | `testdata/Monthly report_028778 - Fredrik Jonson_*.csv` | — | **Inte en HA-sensor.** Dygnsvis PV/köp/export/last-export direkt från växelriktarens molntjänst (Sungrow iSolarCloud), 12 filer = helt år utan luckor (2025-09-01–2026-08-31). Källan till den bekräftade elva-dygns-nollperioden (avsnitt 8) — HA:s egen `sensor.sg_daily_pv_generation`-statistik täcker bara från 5 aug 2026 och kunde inte användas för det. |
+| `sensor.ivt_total_active_power` | measurement, W | Värmepumpens (IVT) egen totaleffekt — `heat_pump_power_entity`, saknar långtidsstatistik i HA. Manuellt exporterad "history"-CSV (2025-09-30–2026-08-29, timvis) konverterad via `testdata/history/_convert_heat_pump.py` till `heat_pump_power_hourly.csv` — fyllde en tidigare lucka där `backtest.py` alltid använde 0.0 W för `heat_pump_power_w` (filen saknades i `_HISTORY_DIR_SERIES`, nu fixat). Används för korsvalideringen av januari-köldknäppen ovan. |
+| `sensor.nordpool_kwh_se3_sek_3_10_0_2` | measurement, öre/kWh | Spotpris. Manuellt exporterad "history"-CSV (2025-11-08–2026-08-31, tim→kvartsupplösning) konverterad via `testdata/history/_convert_nordpool_csv.py` till `nordpool_price_extended.csv`. Ersätter INTE `backtest.py`s `price_quarterhour.csv` (som styr pivotens tidsgrid) — täcker inte samma svans (till 2026-09-05) som de andra P7-1-serierna, skulle krympa istället för förlänga det gemensamma backtest-fönstret. Ligger bredvid som referens. |
+| `testdata/history/daily_energy_merged.csv` | — | **Sammanslagen master-fil**, byggd av `_merge_daily_energy.py` ur fyra källor ovan (nätägarens export/import/temp, Sungrows PV/last, värmepumpens timvisa effekt, Nordpool-priset) till en rad per dygn, 2025-01-01–2026-09-01 (609 dygn). Kolumner: `pv_kwh, import_kwh, export_kwh, temp_c, load_kwh, pv_source, heat_pump_avg_w, heat_pump_kwh_est, price_mean/min/max_sek_kwh, price_n_points`. UTC-källor konverteras till Europe/Stockholm-lokaltid INNAN dygnsgruppering, så gränserna matchar elbolagets/Sungrows egna dygn. Tomma celler = ingen täckning den källan/dagen (PV/last: 365/609 dygn, värmepump: 333/609, pris: 297/609). |
 
 **Begränsning att komma ihåg:** rå state-historik (switchar, EV-status)
 rensas efter ~10 dygn. Allt bortom det måste rekonstrueras via

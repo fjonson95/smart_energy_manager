@@ -19,6 +19,8 @@ grid_l1_hourly.csv          Nätfas L1 (kW)         1h           2026-08-06T11:0
 grid_l2_hourly.csv          Nätfas L2 (kW)         1h           2026-08-06T11:00:00Z       2026-09-05T19:00:00Z      729
 grid_l3_hourly.csv          Nätfas L3 (kW)         1h           2026-08-06T11:00:00Z       2026-09-05T19:00:00Z      729
 battery_inout_hourly.csv    Batteri in/ut (W)      1h           2026-08-06T11:00:00Z       2026-09-05T19:00:00Z      727
+heat_pump_power_hourly.csv  Värmepump IVT (W)      1h           2025-09-30T22:00:00Z       2026-08-29T02:00:00Z      7968
+nordpool_price_extended.csv Spotpris (SEK/kWh)     1h→15min     2025-11-08T10:00:00Z       2026-08-31T21:45:00Z      6677
 
 Källentiteter:
   solar_hourly.csv          sensor.sg_total_active_power
@@ -31,9 +33,18 @@ Källentiteter:
   grid_l3_hourly.csv        sensor.elmatare_active_power_l3
   battery_inout_hourly.csv  sensor.sonnenbatterie_271100_state_battery_inout (positiv=laddning,
                             negativ=urladdning — vänds i backtest.py:s SETTINGS["battery_power_inverted"])
+  heat_pump_power_hourly.csv sensor.ivt_total_active_power — saknades helt fram till 2026-09-08,
+                            heat_pump_power_w defaultade till 0.0 i varje backtest. Konverterad
+                            från en manuell HA "history"-export (inte statistics-API:t) via
+                            _convert_heat_pump.py; källfilen blandar upplösning (~timvis fram till
+                            2026-08-29T02:12, sedan ~15s-rådata) — bara timdelen togs med.
+  nordpool_price_extended.csv sensor.nordpool_kwh_se3_sek_3_10_0_2 — manuell HA "history"-export,
+                            konverterad via _convert_nordpool_csv.py. INTE samma fil som
+                            backtest.py faktiskt läser (price_quarterhour.csv) — se
+                            "Begränsande faktorer" nedan för varför den inte bytte ut den.
 
 Kolumner (statistics-filerna): timestamp_utc, mean, min, max (HA:s timvisa aggregat).
-Kolumner (price_quarterhour.csv): timestamp (lokal tid, ISO), spot_sek_kwh.
+Kolumner (price_quarterhour.csv / nordpool_price_extended.csv): timestamp (ISO), spot_sek_kwh.
 
 Begränsande faktorer
 ---------------------
@@ -48,6 +59,21 @@ Begränsande faktorer
   2026-08-26 till 2026-09-05, kortare än de andra filerna.
 - Den praktiskt användbara perioden där ALLA storheter finns samtidigt är
   alltså bara 2026-08-26 till 2026-09-05 (~10 dygn), inte de fulla ~30 dagarna.
+- heat_pump_power_hourly.csv har täckning nästan ett helt år (2025-09-30 till
+  2026-08-29), men load_history_dir() styr sina tidsstämplar från
+  price_quarterhour.csv — så en riktig backtest-körning kan ändå bara
+  utnyttja värmepumpsdatan inom samma ~10-dagarsfönster som resten, tills
+  prisserien förlängs. Fram till dess är den längre värmepumpsserien bara
+  användbar för fristående analys (t.ex. docs/forbrukningsanalys.md), inte
+  via backtest.py direkt.
+- nordpool_price_extended.csv (2025-11-08–2026-08-31) täcker INTE 2026-09-01
+  till 2026-09-05, den svans som de andra filerna (huslast/sol/temp/SOC/
+  nätfaser/batteri-inout) sträcker sig till — att ersätta price_quarterhour.csv
+  med den skulle alltså KRYMPA det gemensamma fönstret, inte förlänga det.
+  Den ligger därför bredvid som en separat fil, inte inbytt. Om huslast/sol/
+  temp/SOC någon gång också får en längre export (samma mönster som
+  värmepumps- och prisfilerna) kan alla fem bytas ut samtidigt för ett
+  betydligt längre användbart backtest-fönster.
 
 Återskapa/utöka
 -----------------

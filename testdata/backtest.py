@@ -211,6 +211,9 @@ _HISTORY_DIR_SERIES = {
     "grid_l2_hourly.csv":      "sensor.elmatare_active_power_l2",
     "grid_l3_hourly.csv":      "sensor.elmatare_active_power_l3",
     "battery_inout_hourly.csv":"sensor.sonnenbatterie_271100_state_battery_inout",
+    # Värmepumpens (IVT) egen effekt - saknades tidigare, heat_pump_power_w
+    # defaultade till 0.0 i varje backtest-körning. Timvis, sep 2025-aug 2026.
+    "heat_pump_power_hourly.csv":"sensor.ivt_total_active_power",
 }
 
 # Filer vars närvaro avgör om "actual"/skugg-redovisningen och P7-2:s
