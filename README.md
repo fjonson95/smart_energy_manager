@@ -1,20 +1,20 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.2-blue)
+![Version](https://img.shields.io/badge/version-0.9.3-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.2
+## What's New in 0.9.3
 
-Step 0 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — fixes the root cause of the battery-idle-through-a-price-peak bug instead of patching around it further.
+Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part one — two assumed constants replaced with measured ones.
 
-- **Fixed `apply_plan_executor()`'s `self_consume_ok` check silently overriding the planner's own `cover_load` decision** based on a separately-recomputed evening target. Confirmed live: the plan projected SOC ~53% by 08:45, but the real battery bottomed at 58% and started recovering before solar even took over. The check now only enforces the physical floor (`battery_min_soc`); policy stays in the planner. Verified: a reconstructed case (SOC 59%, evening target 73.7%, buy 2.37 SEK/kWh) went from 0 W discharge to ≈1050 W.
-- **Fixed a double-deduction in the v0.9.1 price-gated floor relaxation** (`battery_min_soc` and `hard_floor` were both being subtracted — with both at 10% live, that silently recreated a 20% floor) and **removed the `pv_production_ratio ≥ 0.8` condition** that closed the relaxation exactly on the low-confidence days the reserve exists for (uncertainty is already reflected in the floor size itself).
-- **Replaced the flat 2 kW "is this slot dark" threshold with a comparison against the slot's own load rate** — a fixed cutoff classified much of shoulder-season and winter daylight as "night" even when solar covered the load.
+- **`eta_roundtrip` corrected from an assumed 0.87 to a measured 0.849**, read directly off the battery's own cumulative AC charge/discharge counters (10,692/12,589 kWh).
+- **`sell_extra_revenue` default corrected from a stale 0.07 to 0.065**, matching what the live configuration already had (Lerum Energi's grid-benefit compensation).
+- Verified the resulting break-even formulas against real data — with an important caveat documented for step 3: they must be tested against the merit-order-weighted average of tradeable hours, never a day's raw min/max spot price, which overstates the achievable spread by roughly 2×.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.1's floor safety cap and rolling consumption average, v0.9.0's season-aware charge/discharge handling, v0.8.0's negative-price absorption ladder, and v0.7.6's evening-target fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.2's executor-veto fix, v0.9.1's floor safety cap and rolling consumption average, v0.9.0's season-aware charge/discharge handling, and v0.8.0's negative-price absorption ladder).
 
 ## System Overview
 

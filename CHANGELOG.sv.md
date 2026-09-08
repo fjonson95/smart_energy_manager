@@ -2,6 +2,14 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.3
+
+Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del ett — två antagna konstanter ersatta med uppmätta.
+
+- **`eta_roundtrip`-defaulten rättad från en antagen 0,87 till en uppmätt 0,849** — `sensor.sonnen_batt_use_energy` / `sensor.sonnen_battcharge_energy` (batteriets egna ackumulerade AC-ur-/urladdningsräknare) ger 10 692 / 12 589 kWh, en exakt 0,8493 rundgångsverkningsgrad. Verifierat mot planens egna citerade tal (10 637/12 525 kWh, fångade tidigare) — kvoten har hållit sig stabil trots att fler cykler hunnit ackumuleras.
+- **`sell_extra_revenue`-defaulten rättad från en föråldrad 0,07 till 0,065** — live-konfigurationen hade redan rätt värde (0,065, Lerum Energis nätnyttoersättning, 6,50 öre inkl. moms); bara kod-defaulten som visas för nya installationer var omodern.
+- Verifierade att motsvarande brytpunktsformler (`spot_hög > 1,178 × spot_låg + 0,215` köpsidan, `+ 0,070` säljsidan) reproduceras exakt mot de uppdaterade konstanterna — men bara när de testas mot ett merit-order-viktat snitt av de timmar batteriet faktiskt handlar till, aldrig ett dygns råa min/max-spotpris (som överskattar den uppnåeliga spridningen med ungefär en faktor 2, och skulle ha felklassat ett verkligt dygn som lönsamt att cykla när det inte var det). Dokumenterat i `docs/v1_implementation_plan.md` som en generell varning inför steg 3:s implementation.
+
 ## Nyheter i 0.9.2
 
 Steg 0 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — den observerade drift-buggen (batteriet stod stilla genom en prispeak) spårad till en specifik interaktion, fixad vid källan istället för att lappas ytterligare.

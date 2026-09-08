@@ -111,7 +111,7 @@ DEFAULT_GRID_VOLTAGE = 230
 DEFAULT_VAT_RATE = 0.25
 DEFAULT_GRID_FEES = 0.45
 DEFAULT_ENERGY_TAX = 0.536
-DEFAULT_SELL_EXTRA_REVENUE = 0.07
+DEFAULT_SELL_EXTRA_REVENUE = 0.065  # Nätnytta, Lerum Energi (6,50 öre inkl. moms) – uppmätt (v1.0 steg 1)
 DEFAULT_BATTERY_MIN_SOC = 10
 DEFAULT_BATTERY_MAX_SOC = 95
 
@@ -214,7 +214,9 @@ DEFAULT_PROACTIVE_ABSORPTION_SLOTS = 4   # Antal negativa kvartstimmar inom 2h f
 DEFAULT_EXPORT_SELL_PERCENTILE = 0.75    # Urladda/exportera när säljpris ≥ 75:e percentilen av dagens priser
 DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH = 5.0  # Minsta Solcast-prognos imorgon för att tillåta export-urladdning
 DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH = 0.70  # Absolut minimipris – exporterar alltid om ≥ detta (oavsett percentil)
-DEFAULT_ETA_ROUNDTRIP = 0.87             # Batteriets tur-och-retur-verkningsgrad
+DEFAULT_ETA_ROUNDTRIP = 0.849            # Batteriets tur-och-retur-verkningsgrad – uppmätt (v1.0 steg 1):
+                                          # sensor.sonnen_batt_use_energy / sensor.sonnen_battcharge_energy,
+                                          # anläggningens egna AC-räknare, inte en antagen siffra
 DEFAULT_CYCLE_COST_SEK_KWH = 0.05        # Uppskattad slitagekostnad per cyklad kWh
 
 DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH = 10.0   # Opportunistisk laddning tillåts om sol imorgon < detta (kWh)

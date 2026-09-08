@@ -12,7 +12,12 @@ Bygger på granskningen av v0.5.60, förbrukningsanalysen
 
 **Status:** Steg 0 implementerat och verifierat 2026-09-08 (v0.9.2) — se
 `docs/forbrukningsanalys.md` avsnitt "Steg 0 implementerat" för detaljer,
-kodverifiering och acceptanstestresultat. Steg 1–8 inte påbörjade.
+kodverifiering och acceptanstestresultat. Steg 1 påbörjat (v0.9.3):
+`eta_roundtrip` och `sell_extra_revenue` uppdaterade till uppmätta värden,
+brytpunktsformlerna verifierade (se korrigeringen om merit-order-viktat
+snitt kontra dygnets min/max, nedan). Kvarstår i steg 1: lastprofil
+inkodad i golvformeln, dygnsbudget-attribueringen, ny cykel-sensor.
+Steg 2–8 inte påbörjade.
 
 ---
 
@@ -106,6 +111,32 @@ arkitekturarbete, men de flyttar alla trösklar.
 **Acceptans:** Brytpunktsformlerna reproducerar tabellen:
 `spot_hög > 1,178 · spot_låg + 0,215` på köpsidan, `+ 0,070` på säljsidan.
 Fyra januari klassas som "cykla inte".
+
+**Viktigt om hur brytpunktstestet ska köras (upptäckt 2026-09-08, gav
+nästan en falsk röd flagga):** formeln ska aldrig testas mot dygnets
+enskilda min/max-spotpris — bara mot **merit-order-viktat snitt av de
+timmar batteriet faktiskt hade handlat till**. Batteriet tar timmar att
+ladda/ladda ur (27 kWh vid 8 kW, 11 timmar att göra av med i ett hus som
+drar 2,5 kW) — det handlar aldrig till den enskilt billigaste eller
+dyraste kvarten. Mot 4 januari 2026 gav min/max (0,818/1,332) en falsk
+"cykla"-signal (+7/+5 kr); det transaktabla snittet (0,863 laddning /
+1,120 urladdning) ger korrekt "stå still" (−2/−4 kr, beroende på η) —
+spridningen mellan enskilda extremvärden överskattar systematiskt,
+ungefär en faktor två här. Reserven FÖRBJUDER för övrigt inte cykeln på
+ett dygn som 4 januari — den KRÄVER den (60,3 kWh dygnsförbrukning mot
+27 kWh batteri, ingen spekulativ cykling inblandad); det enda öppna är om
+prisskillnaden täcker rundgångsförlusten, vilket den marginellt inte gör
+just den dagen (2–3 januari gjorde den, med god marginal).
+
+Det här är en genuin tvetydighet i den slutna formeln, inte ett fel i
+implementationen: formeln är ett diagnostik-/handräkningsverktyg, giltigt
+bara mot priser man faktiskt kan transagera till. I värdemodellen (steg 3)
+försvinner tvetydigheten av sig själv, eftersom V per definition ÄR priset
+i den marginella tilldelade sloten, inte dygnets högsta — samma
+mekanism, bara redan rätt konstruerad. `pv_production_ratio`s roll i V
+(steg 3) är separat: den höjer värdet på lagrad energi under osäkerhet så
+systemet håller hårdare och köper tidigare — inte det som avgör om ett
+enskilt dygn ska klassas "stå still".
 
 ---
 

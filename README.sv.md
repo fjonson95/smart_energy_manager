@@ -1,18 +1,18 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.2-blue)
+![Version](https://img.shields.io/badge/version-0.9.3-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.2
+## Nyheter i 0.9.3
 
-Steg 0 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — fixar grundorsaken till buggen där batteriet stod stilla genom en prispeak, istället för att lappa den ytterligare.
+Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del ett — två antagna konstanter ersatta med uppmätta.
 
-- **Fixade att `apply_plan_executor()`s `self_consume_ok`-kontroll tyst överskrev planerarens eget `cover_load`-beslut**, baserat på ett separat omräknat kvällsmål. Bekräftat live: planen förutspådde SOC ~53% vid 08:45, men batteriet bottnade på 58% och började återhämta sig innan solen ens tog över. Kontrollen kräver nu bara den fysiska gränsen (`battery_min_soc`); policyn ligger i planeraren. Verifierat: ett rekonstruerat fall (SOC 59%, kvällsmål 73,7%, köp 2,37 kr/kWh) gick från 0 W urladdning till ≈1050 W.
-- **Fixade ett dubbelavdrag i v0.9.1:s prisstyrda golvavlämpning** (`battery_min_soc` och `hard_floor` drogs båda av – med båda på 10% live skapade det tyst ett 20%-golv) och **tog bort villkoret `pv_production_ratio ≥ 0,8`** som stängde avlämpningen exakt de lågsäkerhetsdygn reserven finns till för (osäkerheten återspeglas redan i golvets egen storlek).
-- **Ersatte den fasta 2 kW-tröskeln för "är den här sloten mörk" med en jämförelse mot slotens egen lasttakt** – en fast gräns klassade stora delar av mellansäsongens och vinterns dagsljus som "natt" även när solen täckte lasten.
+- **`eta_roundtrip` rättad från en antagen 0,87 till en uppmätt 0,849**, läst direkt från batteriets egna ackumulerade AC-laddnings-/urladdningsräknare (10 692/12 589 kWh).
+- **`sell_extra_revenue`-defaulten rättad från en föråldrad 0,07 till 0,065**, matchar vad live-konfigurationen redan hade (Lerum Energis nätnyttoersättning).
+- Verifierade de resulterande brytpunktsformlerna mot verklig data — med en viktig brasklapp dokumenterad inför steg 3: de måste testas mot ett merit-order-viktat snitt av handelsbara timmar, aldrig ett dygns råa min/max-spotpris, som överskattar den uppnåeliga spridningen med ungefär en faktor 2.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.1:s golv-skyddsspärr och rullande förbrukningssnitt, v0.9.0:s säsongsmedvetna laddning/urladdning, v0.8.0:s absorptionstrappa vid negativt pris, och v0.7.6:s fix för kvällsmålet).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.2:s executor-veto-fix, v0.9.1:s golv-skyddsspärr och rullande förbrukningssnitt, v0.9.0:s säsongsmedvetna laddning/urladdning, och v0.8.0:s absorptionstrappa vid negativt pris).
 
 ## Systemöversikt
 

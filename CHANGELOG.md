@@ -2,6 +2,14 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.3
+
+Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part one — two assumed constants replaced with measured ones.
+
+- **`eta_roundtrip` default corrected from an assumed 0.87 to a measured 0.849** — `sensor.sonnen_batt_use_energy` / `sensor.sonnen_battcharge_energy` (the battery's own cumulative AC discharge/charge counters) give 10,692 / 12,589 kWh, an exact 0.8493 round-trip efficiency. Verified against the plan's own cited figures (10,637/12,525 kWh, captured earlier) — the ratio has held steady as more cycles accumulated.
+- **`sell_extra_revenue` default corrected from a stale 0.07 to 0.065** — the live configuration already had the correct value (0.065, Lerum Energi's grid-benefit compensation, 6.50 öre incl. VAT); only the code default shown to new installations was out of date.
+- Verified the corresponding break-even formulas (`spot_high > 1.178 × spot_low + 0.215` buy-side, `+ 0.070` sell-side) reproduce exactly against the updated constants — but only when tested against the merit-order-weighted average of the hours the battery actually trades at, never a day's raw min/max spot price (which overstates the achievable spread by roughly 2×, and would have misclassified a real day as profitable to cycle when it wasn't). Documented in `docs/v1_implementation_plan.md` as a general caution for step 3's implementation.
+
 ## What's New in 0.9.2
 
 Step 0 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the observed live bug (battery idle through a price peak) traced to one specific interaction, fixed at its source instead of patched around further.
