@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Slår ihop fyra råkällor till en sammanhängande dygnsvis energitidslinje:
 
-  - Nätägarens export/import (Export elnat.csv / Import elnat.csv,
+  - Elleverantörens export/import (Export elnat.csv / Import elnat.csv,
     ";"-separerad, svensk decimalkomma) - facit för import/export/temp,
-    elbolagets egna mätarvärden, inte växelriktarens.
+    elleverantörens egna mätarvärden, inte växelriktarens uppskattning.
   - Sungrow iSolarCloud "Monthly report"-export (testdata/Monthly report_*.csv)
-    - PV-produktion och hushållslast (nätägaren har ingen PV-kolumn).
+    - PV-produktion och hushållslast (elleverantören har ingen PV-kolumn).
   - Värmepumpens (IVT) egen effekt, timvis (heat_pump_power_hourly.csv,
     UTC) - aggregeras till dygnsmedel + ett grovt dygns-kWh-estimat
     (medel_W × 24 / 1000; hörnfall vid ofullständiga dygn ger en
@@ -14,8 +14,8 @@
     (nordpool_price_extended.csv, UTC) - aggregeras till dygnsmedel/min/max.
 
 Alla UTC-tidsstämplar konverteras till Europe/Stockholm INNAN de grupperas
-per dygn, så dygnsgränserna matchar elbolagets/Sungrows lokala dygn (annars
-skulle t.ex. kvällstimmar UTC hamna på fel dygn under sommartid).
+per dygn, så dygnsgränserna matchar elleverantörens/Sungrows lokala dygn
+(annars skulle t.ex. kvällstimmar UTC hamna på fel dygn under sommartid).
 
 Output: testdata/history/daily_energy_merged.csv
   date, pv_kwh, import_kwh, export_kwh, temp_c, load_kwh, pv_source,

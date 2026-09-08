@@ -979,10 +979,13 @@ class EnergyController:
             decision.evening_target_soc if decision.evening_target_soc > 0
             else day_plan.evening_target_soc_pct
         )
-        self_consume_ok = (
-            state.battery_soc_pct > self.battery_min_soc
-            and state.battery_soc_pct > evening_target
-        )
+        # Kvällsmålet (evening_target) styr INTE längre det här grindet (v1.0
+        # steg 0) – planeraren har redan vägt golv, pris och bana mot varandra
+        # när den valde cover_load; executorn ska bara klämma mot fysiken
+        # (min_soc), inte lägga ett eget, motstridigt veto ovanpå ett beslut
+        # som redan är fattat. Se docs/forbrukningsanalys.md "Option B" och
+        # SOC-divergensen 2026-09-08 (planerat 53%, verkligt 58% kl 08).
+        self_consume_ok = state.battery_soc_pct > self.battery_min_soc
 
         # Spara compute()s ursprungliga reason (EV/varmvatten/faskydd m.m.)
         # innan vi bygger om batteridelen – annars försvinner t.ex. vilken

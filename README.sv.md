@@ -1,17 +1,18 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.1-blue)
+![Version](https://img.shields.io/badge/version-0.9.2-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.1
+## Nyheter i 0.9.2
 
-- **`export_floor_kwh` är nu klämt till max 85% av det användbara SOC-spannet** (`battery_max_soc − battery_min_soc`), inte bara mot total kapacitet. På ett verkligt högförbrukningsdygn blev reservformeln (mörka fönstrets last × upp till +300% osäkerhetspåslag) STÖRRE än hela det användbara spannet, vilket klämde kvällsmålet mot `battery_max_soc` och lät batteriet stå stilla genom en hel kvällsprisptopp istället för att ladda ur. En helårsanalys av förbrukningen (`docs/forbrukningsanalys.md` avsnitt 8) visade att detta inte går att lösa med en bättre natt-specifik lasttakt ensam – natt och dag är nästan identiska på de höst-/vinterdygn med hög förbrukning som utlöser felet, och skiljer sig bara på sommaren, då golvet sällan är ett problem. Den nya spärren är ett säsongsoberoende skyddsnät som garanterar att minst 15% av spannet alltid går att nå.
-- **Reservberäkningen använder nu ett 7-dygns rullande förbrukningssnitt, som räknar bort sol-styrd extra varmvatten.** Triggerdygnet ovan låg själv ~20% över det verkliga 17-dagarssnittet – en enskild ovanligt hög dag blåste upp golvet på egen hand. Extra varmvatten (absorptionstrappans sol-/negativpris-styrda opportunistiska steg) netto:as bort eftersom den aldrig kör samtidigt som rumsvärme och kommer från solöverskott som inte säger något om nattens behov; legionella-desinficeringen (var 7:e dag) lämnas medvetet kvar, eftersom ett 7-dygnsfönster representerar dess verkliga återkommande kostnad korrekt på egen hand.
-- **Fixade att P3-2 (produktionskvoten) tyst ignorerade genuina nollproduktionsdygn** (t.ex. snötäckta paneler) – de behandlades likadant som en sensor som aldrig svarat, så ett verkligt flerdagarsavbrott sänkte aldrig kvoten eller höjde golvets osäkerhetsmarginal.
-- **Ny interimslösning: prisstyrd golvavlämpning ("Option B")**: låter batteriet ladda ur under reserven mot hard_floor när nätets köppris överstiger batteriets egen lagrade kostnad och solprognosen är tillräckligt pålitlig. Uttryckligen en första version – se `docs/forbrukningsanalys.md` för kända begränsningar och den säkrare variant som fortfarande utvärderas.
+Steg 0 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — fixar grundorsaken till buggen där batteriet stod stilla genom en prispeak, istället för att lappa den ytterligare.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.0:s säsongsmedvetna laddning/urladdning, v0.8.0:s absorptionstrappa vid negativt pris, v0.7.6:s fix för kvällsmålet och v0.7.7:s fix för det delade börvärdet).
+- **Fixade att `apply_plan_executor()`s `self_consume_ok`-kontroll tyst överskrev planerarens eget `cover_load`-beslut**, baserat på ett separat omräknat kvällsmål. Bekräftat live: planen förutspådde SOC ~53% vid 08:45, men batteriet bottnade på 58% och började återhämta sig innan solen ens tog över. Kontrollen kräver nu bara den fysiska gränsen (`battery_min_soc`); policyn ligger i planeraren. Verifierat: ett rekonstruerat fall (SOC 59%, kvällsmål 73,7%, köp 2,37 kr/kWh) gick från 0 W urladdning till ≈1050 W.
+- **Fixade ett dubbelavdrag i v0.9.1:s prisstyrda golvavlämpning** (`battery_min_soc` och `hard_floor` drogs båda av – med båda på 10% live skapade det tyst ett 20%-golv) och **tog bort villkoret `pv_production_ratio ≥ 0,8`** som stängde avlämpningen exakt de lågsäkerhetsdygn reserven finns till för (osäkerheten återspeglas redan i golvets egen storlek).
+- **Ersatte den fasta 2 kW-tröskeln för "är den här sloten mörk" med en jämförelse mot slotens egen lasttakt** – en fast gräns klassade stora delar av mellansäsongens och vinterns dagsljus som "natt" även när solen täckte lasten.
+
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.1:s golv-skyddsspärr och rullande förbrukningssnitt, v0.9.0:s säsongsmedvetna laddning/urladdning, v0.8.0:s absorptionstrappa vid negativt pris, och v0.7.6:s fix för kvällsmålet).
 
 ## Systemöversikt
 

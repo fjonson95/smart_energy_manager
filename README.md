@@ -1,19 +1,20 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.1-blue)
+![Version](https://img.shields.io/badge/version-0.9.2-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.1
+## What's New in 0.9.2
 
-- **`export_floor_kwh` is now capped at 85% of the usable SOC range** (`battery_max_soc − battery_min_soc`), not just against total capacity. On a real high-consumption day the reserve formula (dark-window load × up to +300% forecast-uncertainty markup) came out *larger* than the entire usable range, pinning the evening target at `battery_max_soc` and leaving the battery idle through an entire evening price peak instead of discharging. A full-year consumption analysis (`docs/forbrukningsanalys.md` §8) showed this can't be fixed by a better night-specific load rate alone — night and day consumption are nearly identical on the autumn/winter high-consumption days that trigger it, and only diverge in summer, when the floor is rarely a problem. The new cap is a season-agnostic safety net guaranteeing at least 15% of the usable range always stays reachable.
-- **The reserve calculation now uses a 7-day rolling consumption average, excluding solar-driven extra hot water.** The trigger day above was itself ~20% above the real 17-day average — a single unusually-high day was inflating the floor on its own. Extra hot water (the absorption ladder's solar/negative-price opportunistic step) is netted out since it never runs concurrently with space heating and comes from solar surplus that says nothing about nighttime need; the legionella disinfection cycle (every 7 days) is deliberately left in, since a 7-day window represents its real recurring cost correctly on its own.
-- **Fixed P3-2 (production-ratio tracking) silently ignoring genuine zero-production days** (e.g. snow-covered panels) — it treated them the same as a sensor that never reported, so a real multi-day outage never lowered the ratio or raised the floor's uncertainty margin.
-- **New interim price-gated floor relaxation ("Option B")**: lets the battery discharge below the reserve toward the hard floor when grid buy price exceeds the battery's own stored cost and the solar forecast is trusted enough. Explicitly a first pass — see `docs/forbrukningsanalys.md` for its known limitations and the safer variant still under evaluation.
+Step 0 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — fixes the root cause of the battery-idle-through-a-price-peak bug instead of patching around it further.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.0's season-aware charge/discharge handling, v0.8.0's negative-price absorption ladder, v0.7.6's evening-target fix, and v0.7.7's shared-setpoint fix).
+- **Fixed `apply_plan_executor()`'s `self_consume_ok` check silently overriding the planner's own `cover_load` decision** based on a separately-recomputed evening target. Confirmed live: the plan projected SOC ~53% by 08:45, but the real battery bottomed at 58% and started recovering before solar even took over. The check now only enforces the physical floor (`battery_min_soc`); policy stays in the planner. Verified: a reconstructed case (SOC 59%, evening target 73.7%, buy 2.37 SEK/kWh) went from 0 W discharge to ≈1050 W.
+- **Fixed a double-deduction in the v0.9.1 price-gated floor relaxation** (`battery_min_soc` and `hard_floor` were both being subtracted — with both at 10% live, that silently recreated a 20% floor) and **removed the `pv_production_ratio ≥ 0.8` condition** that closed the relaxation exactly on the low-confidence days the reserve exists for (uncertainty is already reflected in the floor size itself).
+- **Replaced the flat 2 kW "is this slot dark" threshold with a comparison against the slot's own load rate** — a fixed cutoff classified much of shoulder-season and winter daylight as "night" even when solar covered the load.
+
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.1's floor safety cap and rolling consumption average, v0.9.0's season-aware charge/discharge handling, v0.8.0's negative-price absorption ladder, and v0.7.6's evening-target fix).
 
 ## System Overview
 

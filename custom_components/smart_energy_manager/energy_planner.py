@@ -22,7 +22,6 @@ from .price_scheduler import PriceSchedule
 
 _LOGGER = logging.getLogger(__name__)
 
-_DARK_SOLAR_KW   = 2.0   # Soleffekt under detta → "mörk" slot
 _PLAN_HORIZON_H  = 28    # Timmar framåt att planera
 _HARD_FLOOR_FRACTION = 0.10  # Hårt golv: andel av batterikapaciteten som aldrig underskrids
 _FLOOR_SAFETY_CAP_FRACTION = 0.85  # Skyddsspärr: golvet äter aldrig mer än denna andel av användbart SOC-spann
@@ -35,8 +34,10 @@ _FLOOR_SAFETY_CAP_FRACTION = 0.85  # Skyddsspärr: golvet äter aldrig mer än d
 # hard_floor timmar innan nästa kvällstopp om solprognosen slår fel. Två
 # säkrare varianter (dynamisk percentiltröskel; smalare relaxation) är
 # skisserade men inte implementerade. Håll koll på det här avsnittet när den
-# riktiga lösningen bestäms.
-_PRICE_GATE_PV_CONFIDENCE = 0.8  # Bara aktiv när pv_production_ratio (P3-2) är minst detta
+# riktiga lösningen bestäms. Osäkerheten i solprognosen väger INTE in här
+# längre (v1.0 steg 0) – den hanteras redan av _uncertainty_markup() som
+# höjer själva golvet; att dessutom stänga prisspärren vid låg pv_kvot
+# slog igen den precis de dygn (snötäckta paneler) reserven finns till för.
 
 
 def _uncertainty_markup(pv_production_ratio: float) -> float:
@@ -257,7 +258,7 @@ class EnergyPlanner:
             s for s in future_slots
             if s.sell_sek >= eff_threshold
             and s.start < window_end
-            and (s.solar_kw < _DARK_SOLAR_KW if has_solar_data
+            and (s.solar_kw < hourly_load_kw if has_solar_data
                  else s.start.astimezone() < takeover_local)
         ]
 
@@ -322,7 +323,7 @@ class EnergyPlanner:
                 remaining_kwh -= group_kwh
 
         # Billiga nätladdningssots: bland mörka slots, lägsta 25%
-        dark_slots = [s for s in future_slots if s.solar_kw < _DARK_SOLAR_KW and s.start not in export_plan]
+        dark_slots = [s for s in future_slots if s.solar_kw < hourly_load_kw and s.start not in export_plan]
         buy_prices = sorted(s.buy_sek for s in dark_slots)
         cheap_threshold = buy_prices[max(0, int(self.cheap_charge_buy_percentile * len(buy_prices)) - 1)] if buy_prices else 0.0
         cheap_set = {s.start for s in dark_slots if s.buy_sek <= cheap_threshold}
@@ -337,7 +338,10 @@ class EnergyPlanner:
                 continue
 
             soc_est = batt_kwh / battery_capacity_kwh * 100.0
-            is_dark = slot.solar_kw < _DARK_SOLAR_KW
+            # "Mörk" = solen täcker inte huslasten, inte ett godtyckligt kW-tak
+            # (v1.0 steg 0) – en fast 2 kW-gräns klassade stora delar av
+            # mellansäsongens och vinterns dagsljus som "natt".
+            is_dark = slot.solar_kw < hourly_load_kw
             solar_kwh = slot.solar_kw * slot_h
             load_kwh  = hourly_load_kw * slot_h
 
@@ -409,14 +413,18 @@ class EnergyPlanner:
                 avail_kwh = max(0.0, batt_kwh - batt_min_kwh - _eff_floor)
                 # Interimslösning ("Option B", se konstant-kommentaren ovan): vid
                 # golvet men köppriset överstiger vad energin i batteriet redan
-                # kostat (+ cykelkostnad) – och prognosen är tillräckligt säker
-                # (pv_kvot) – öppna ner mot hard_floor istället för att köpa nät
-                # som är dyrare än batteriets egen sparade energi.
+                # kostat (+ cykelkostnad) – öppna ner mot hard_floor istället för
+                # att köpa nät som är dyrare än batteriets egen sparade energi.
+                # Osäkerheten i solprognosen är INTE ett villkor här (v1.0 steg 0)
+                # – den hanteras redan av _uncertainty_markup() i golvet självt.
                 price_gate_used = False
-                if avail_kwh <= 0.01 and deficit_kwh > 0.01 and pv_production_ratio >= _PRICE_GATE_PV_CONFIDENCE:
+                if avail_kwh <= 0.01 and deficit_kwh > 0.01:
                     price_threshold = battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh
                     if slot.buy_sek > price_threshold:
-                        avail_kwh_gated = max(0.0, batt_kwh - batt_min_kwh - hard_floor_kwh)
+                        # hard_floor ÄR det absoluta golvet – ersätter batt_min_kwh
+                        # här, adderas inte till det (annars låser ett golv och en
+                        # min_soc på samma nivå, t.ex. 10%+10%, en spärr på 20%).
+                        avail_kwh_gated = max(0.0, batt_kwh - hard_floor_kwh)
                         if avail_kwh_gated > 0.01:
                             avail_kwh = avail_kwh_gated
                             price_gate_used = True

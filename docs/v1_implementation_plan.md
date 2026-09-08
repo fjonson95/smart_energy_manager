@@ -1,0 +1,390 @@
+# Implementationsplan · v0.9.1 → v1.0
+
+## Vägen till värdemodellen
+
+Nio steg från koden som kör idag till en regulator där ett enda tal styr allt.
+Varje steg lämnar systemet körbart, och de fyra första kan göras utan att
+röra arkitekturen.
+
+Bygger på granskningen av v0.5.60, förbrukningsanalysen
+(`docs/forbrukningsanalys.md`), regelmodellsutredningen och läsning av
+`energy_planner.py`, `energy_controller.py` och `coordinator.py` i v0.9.1.
+
+**Status:** Steg 0 implementerat och verifierat 2026-09-08 (v0.9.2) — se
+`docs/forbrukningsanalys.md` avsnitt "Steg 0 implementerat" för detaljer,
+kodverifiering och acceptanstestresultat. Steg 1–8 inte påbörjade.
+
+---
+
+### Utgångsläget är bättre än granskningen beskrev
+
+Sedan den skrevs är NameError-buggen borta, fasskyddet testar `abs(phase_current)`
+mot en marginal, vinterläget är avvecklat, skrivningarna har dödband,
+huslastgolvet är villkorat på att sensorn saknas, `async_zero_battery()`
+finns, strypningen mot Sungrow är inkopplad, och `apply_plan_executor` är
+uttryckligen enda skrivstället — delat mellan drift och backtest.
+
+Det som återstår är alltså inte en uppröjning. Det är ett byte av
+beslutsprincip, plus en rad som råkade överleva den förra städningen.
+
+---
+
+## STEG 0 — Ta bort executorns veto
+*en kväll*
+
+Det observerade felet — batteriet står stilla genom pristoppen — har en
+enda orsak, och den är en rad. Gör det här först och mät effekten innan
+något annat rörs.
+
+**Nu:** Planeraren beslutar `cover_load` via prisspärren. Executorn räknar
+om `self_consume_ok` mot kvällsmålet, som härleds ur golvet, och lägger in
+sitt veto. Vid SOC 59 % mot kvällsmål 73,7 % blir urladdningen 0 W.
+
+**Mål:** Executorn klämmer mot fysiken — min_soc, effekt, faser. Policyn
+ligger i planeraren, som redan vägt golv, pris och bana mot varandra.
+
+1. **Ta bort kvällsmålet ur executorns grind.** `energy_controller.py` ·
+   `apply_plan_executor`
+   ```python
+   self_consume_ok = (
+       state.battery_soc_pct > self.battery_min_soc
+       and state.battery_soc_pct > evening_target
+   )
+   ```
+2. **Låt "mörk" betyda att solen inte täcker huset.** `energy_planner.py`
+   Ersätt `_DARK_SOLAR_KW = 2.0` med en jämförelse per slot:
+   `is_dark = slot.solar_kw < hourly_load_kw`. Tröskeln på 2 kW klassar en
+   stor del av mellansäsongens och vinterns dagsljustimmar som natt.
+3. **Låt prognososäkerhet höja golvet, inte stänga prisspärren.**
+   `energy_planner.py` Villkoret `pv_production_ratio >= 0.8` stänger
+   spärren vid snötäckta paneler — exakt de dygn reserven finns för. Ta
+   bort det från spärren; osäkerheten hanteras redan av
+   `_uncertainty_markup`.
+4. **Dubbelavdraget i den öppnade grenen.**
+   `avail = batt − batt_min − hard_floor` låser 20 % när båda är 10 %. Om
+   `hard_floor` är det absoluta golvet ska det ersätta `batt_min`, inte
+   adderas.
+5. **Verifiera vakthunden.** Att `async_zero_battery()` faktiskt anropas
+   från `async_unload_entry` i `__init__.py`, och att HA-automationen som
+   nollar vid unavailable finns kvar.
+
+**Acceptans:** Kör backtesten på 8 september-scenariot: SOC 59 %,
+kvällsmål 73,7 %, köp 2,37 kr, batterikostnad 0,80. Före ändringen 0 W
+urladdning, efter ändringen ≈1050 W. Och i drift: en kväll med SOC under
+kvällsmålet och köppris över batterikostnaden ska ge verklig urladdning.
+
+---
+
+## STEG 1 — Uppmätta konstanter in
+*en kväll*
+
+Fyra tal som idag är antaganden och som sitter i varje beslut. Inget
+arkitekturarbete, men de flyttar alla trösklar.
+
+| Parameter | Idag | Ska vara | Grund |
+|---|---|---|---|
+| Rundgångsverkningsgrad | 0,87 (antagen) | 0,849 | 10 637 / 12 525 kWh, anläggningens egna AC-räknare |
+| Cykelkostnad | 0,05 (gissad) | 0,05 (motiverad) | Garantin 10 år eller 10 000 cykler; kalendern binder vid 0,36–1,0 cykler/dygn |
+| Säljpåslag | 0,06–0,07 | 0,065 | Lerum Energi, nätnytta 6,50 öre inkl. moms |
+| Lasttakt i golvet | dygnssnitt, ev. klämt | dygnsprofil | natt 0,75–0,85 kW, dag 0,85–1,15 kW (aug 2026) |
+
+1. **Kontrollera att 1,5 kW-klämningen är borta.** Den bröt 74 % av
+   dygnen okt–mars; kallaste dygnet låg på 4,10 kW. Om `min(max(...), 1500)`
+   finns kvar någonstans ska taket bort och golvet på 0,5 kW behållas.
+2. **Lastprofil i stället för platt takt.** Projektionen ska använda
+   medianlast per timme, inte ett dygnssnitt. Både energidumpen och
+   desinficeringen är dagtidshändelser och faller då bort ur nattfönstret
+   automatiskt.
+3. **Dygnsbudget: dra bort dumpen, behåll desinficeringen.**
+   `coordinator.py` Attribuera elpatronens varmvattenenergi på
+   `switch.boiler_dhw_disinfecting` i stället för på SEM:s egen
+   varmvattenswitch — då fångas också pannans egen PV-logik och manuella
+   körningar.
+4. **Ny sensor: ackumulerade ekvivalenta cykler.** Så att antagandet om
+   cykelkostnaden övervakas i stället för att förutsättas.
+
+**Acceptans:** Brytpunktsformlerna reproducerar tabellen:
+`spot_hög > 1,178 · spot_låg + 0,215` på köpsidan, `+ 0,070` på säljsidan.
+Fyra januari klassas som "cykla inte".
+
+---
+
+## STEG 2 — Golvet blir en bana
+*två–tre kvällar*
+
+Den strukturella fixen. Golvet är idag ett skalärt tal som räknas fram
+som nattens behov och sedan används som något som inte får röras — samma
+tal i två motstridiga roller.
+
+**Nu:** `export_floor_kwh` är konstant över hela natten. Vid rätt
+dimensionerad reserv blir `avail = batt − min − golv` noll, och batteriet
+vägrar täcka lasten reserven fanns för. Med taket på 0,85 får ett fullt
+batteri leverera 4,1 kWh av 27.
+
+**Mål:** Reservkravet räknas från varje slot och framåt och krymper med
+natten. Batteriet dräneras längs kurvan och landar på min_soc ungefär när
+solen tar över.
+
+1. **Reservfunktion i stället för konstant.** `energy_planner.py`
+   ```
+   reserve_at(t) = Σ  max(0, last_kwh(s) − sol_p10_kwh(s))   för s ≥ t, s < takeover
+                   × (1 + osäkerhetspåslag(pv_production_ratio))
+   tillåten urladdning i slot t:
+       avail = batt_kwh(t) − batt_min_kwh − reserve_at(t+1)
+   ```
+   Eftersom både batteriet och reservkravet minskar med samma kWh när
+   lasten täcks blir `avail` positiv genom hela natten — vilket är hela
+   poängen.
+2. **Skyddsspärren kan utgå.** `_FLOOR_SAFETY_CAP_FRACTION` var en lapp
+   mot att det skalära golvet kunde överstiga hela spannet. Med en bana
+   kan det inte hända.
+3. **Prisspärren kan utgå.** Option B var en lapp mot samma sak. Behåll
+   den tills banan är verifierad i backtest, ta sedan bort den.
+4. **Kvällsmålet härleds ur banan**, inte ur ett skalärt golv — eller
+   utgår helt, eftersom steg 3 gör det överflödigt.
+
+**Acceptans:** Backtest på en januarivecka: SOC-kurvan sjunker jämnt genom
+natten och bottnar nära min_soc vid soluppgång, i stället för att stanna
+på 26 kWh. Ingen natt slutar med batteriet över 50 % och nätimport under
+pristoppen.
+
+---
+
+## STEG 3 — Marginalvärdet V
+*tre–fyra kvällar*
+
+Kärnan. Ett tal ersätter nio konkurrerande trösklar, och de fyra besluten
+blir jämförelser mot det talet.
+
+1. **Beräkna V per planeringscykel.** `energy_planner.py`
+   ```
+   1. Projicera nettobehov per kvart:  deficit(s) = last(s) − sol_p10(s)
+   2. Sortera framtida underskottsslots efter köppris, dyrast först
+   3. Dela ut batteriets energi i den ordningen, begränsat av effekt per slot
+      och av vad solen fyller på däremellan
+   4. V = köppriset i den BILLIGASTE slot som fick tilldelning
+      Räcker energin till alla underskott → V = bästa framtida säljpris
+   ```
+2. **Fyra beslutsregler.**
+   ```
+   V > sälj_nu            → ladda från solöverskott hellre än att sälja
+   köp_nu > V              → täck huslasten från batteriet
+   köp_nu + cykel < V      → nätladda
+   sälj_nu > V + cykel     → exportera
+   ```
+   Reglerna är ömsesidigt uteslutande av konstruktion, eftersom
+   köp > sälj alltid. Laddning och urladdning kan aldrig begäras
+   samtidigt.
+3. **Riskpåslaget flyttar in i V.**
+   `V_effektiv = V × (1 + risk(pv_production_ratio))`. Ett högre V ger
+   mindre export, sparsammare självkonsumtion och nätladdning vid högre
+   priser — alla tre effekterna man vill ha när panelerna kan vara
+   snötäckta.
+4. **Exponera V som sensor**, tillsammans med vilken slot som satte
+   marginalen. Utan den går ingenting att felsöka.
+5. **Horisont 36–48 h.** Ingen prisprognos behövs: besluten som kräver
+   morgondagens priser fattas på kvällen, när de finns.
+
+**Acceptans:** V-sensorn ligger mellan bästa framtida säljpris och
+dyraste framtida köppris i alla lägen. Backtest över ett år ger lägre
+total kostnad än steg 2 — och januari fungerar utan specialfall.
+
+---
+
+## STEG 4 — Riv det som blivit överflödigt
+*en kväll*
+
+Städningen är en del av vinsten. Varje kvarlämnad tröskel är en plats där
+två regler kan säga olika saker.
+
+| Tas bort | Ersätts av |
+|---|---|
+| `can_export` | Regel 4 |
+| `export_sell_percentile` | Regel 4 |
+| `export_min_sell_price` | Regel 4 |
+| `export_min_solar_tomorrow_kwh` | V:s beroende av sol_p10 |
+| `prefer_sell` / `sell_solar_min_price` | Regel 1 |
+| `economic_peak` | Regel 2 |
+| prisspärren (Option B) | Regel 2 |
+| `evening_target_soc` | Reservbanan |
+| `_FLOOR_SAFETY_CAP_FRACTION` | Reservbanan |
+
+**Behålls:** `battery_min_soc` som hård fysisk gräns i executorn.
+Fasskyddet och exporttaket. Force-lägena för hand. `_uncertainty_markup`,
+men nu som påslag på V.
+
+**Acceptans:** Ingen kodväg sätter längre både `battery_charge_power_w`
+och `battery_discharge_power_w`. Avvikelseloggens mjuka matchningar kan
+tas bort utan att loggen börjar larma.
+
+---
+
+## STEG 5 — Sommarens laddningstiming
+*två kvällar*
+
+Den enda posten i planen som är gratis: ingen extra cykel, ingen
+förlust, ingen risk. Och den är inte implementerad idag.
+
+**Nu:** `prefer_sell = sell_price >= 0,80 kr` — en fast tröskel som
+avgör punktvis om en soltimme ska lagras eller säljas.
+
+**Mål:** Batteriet fylls ändå under dagen. Valet är vilka
+överskottstimmar som går in i det. Ladda i timmarna med lägst säljpris,
+exportera i de högsta.
+
+1. **Merit-order på säljsidan.** Rangordna dygnets överskottsslots efter
+   säljpris stigande, fyll batteriet ur de billigaste upp till
+   tillgängligt utrymme, exportera resten. Samma mekanism som
+   urladdningens merit-order, spegelvänd.
+2. **Extracykeln, villkorad.** Ladda ur mot nätet i dygnets dyra timmar
+   och låt solen fylla igen i de billiga, när
+   `sälj(topp) > 1,178 · sälj(botten) + 0,070`. Maj–augusti 2026 var
+   villkoret uppfyllt 76 av 123 dygn.
+3. **Morgontoppen före kvällstoppen.** Säljs på morgonen fyller dagens sol
+   batteriet före kvällen. Säljs på kvällen står det tomt in i natten.
+   Alternativkostnaden skiljer även när priset inte gör det.
+4. **Kräv p10-täckning** innan extracykeln startas — annars fylls
+   batteriet inte igen.
+
+**Fasskyddet blir skarpt här:** 8 kW batteriexport plus solproduktion i
+morgontimmarna närmar sig både 14 kW-gränsen och 20 A per fas.
+Fasskyddet testar redan `abs()`, men exporttaket
+`min(14 000, 3 × 18 × 230) − solar_w` måste finnas innan sommarläget
+aktiveras.
+
+**Acceptans:** Backtest juli: samma exporterade energi som idag men
+högre intäkt. Ingen fas överstiger 20 A i någon riktning över hela
+sommaren.
+
+---
+
+## STEG 6 — Bilen som planerbar last
+*två kvällar*
+
+12 kWh, 1-fas 16 A på L1, alltså högst 3,7 kW och drygt tre timmar från
+tom till full. Liten i energi, men den enda lasten som konkurrerar med
+batteriets nattladdning om samma fas.
+
+1. **In i optimeringen som schemalagd last** med energibehov och
+   deadline. Den konkurrerar på samma måttstock som allt annat: ladda i
+   de slots där köppriset är lägst inom deadlinen.
+2. **Fas 1-samordning.** 8 kW batteriladdning plus 2,4 kW huslast är
+   redan 15 A per fas. Bilens 3,7 kW på L1 spränger gränsen. Planeraren
+   måste fördela dem i tid, inte lita på att `_apply_phase_limits` städar
+   upp reaktivt.
+3. **Invariant kvar:** i autoläge laddas bilen bara ur solöverskott som
+   återstår efter huslasten, eller i uttryckligt schemalagda billiga
+   slots. Batteriets urladdning överstiger aldrig husets underskott
+   exklusive bilen.
+
+**Acceptans:** En vinternatt med både billaddning och batteriladdning
+håller alla tre faserna under 20 A, utan att fasskyddet behöver ingripa.
+
+---
+
+## STEG 7 — Huset som värmelager
+*störst, och störst vinst*
+
+Värmepumpen är 61–62 % av förbrukningen i januari och februari. Batteriet
+räcker till en dryg tredjedel av en januarinatt. Det här är den enda
+resursen som är i rätt storleksordning för vintern.
+
+1. **Identifiera husets termiska parametrar** ur befintlig data. Tretton
+   rumstemperaturer, dämpad utetemperatur och pannans energiräknare i
+   timupplösning sedan oktober 2025. En regression ger tidskonstant och
+   kWh per grad utan att någon behöver frysa en natt. Kontrollera först
+   vilka rumsgivare som har `state_class` och alltså långtidsstatistik.
+2. **Håll elpatronerna utanför.** Förutsättningen för allt annat.
+   `number.boiler_tempparmode` (10 °C idag) sänks mot 0…−5 °C,
+   `auxheaterdelay` förlängs under dyra slots. Använd helpern
+   "Eltillskott aktivt" som facit under intrimningen.
+3. **Rumsvis strategi, inte en gemensam offset.** Sovrummen (18 °C) är
+   tomma under kvällstoppen och används på natten som är billig — de tål
+   störst nedreglering just när det är dyrast. Vardagsrummet (21 °C) rörs
+   minst. Förslag att utgå från: ±1 °C i vardagsrum och kök, ±1,5 °C i
+   sovrum och sällan använda rum, inget i badrum.
+4. **Lönsamhetsregel med COP.** Förvärmning kostar extra eftersom
+   verkningsgraden sjunker vid högre framledning. Du har redan helpern
+   "VP verkningsgrad".
+   ```
+   vinst   = (pris_topp − pris_förvärm) × kWh_förskjuten
+   kostnad = kWh_förskjuten × (1/cop_förvärm − 1/cop_normal) × pris_förvärm
+   ```
+5. **Soldrift via pannans egen väg.** `number.boiler_pvmaxcomp` (0–25 kW,
+   står på 0) är kompressorns maxeffekt vid PV-överskott — pannans
+   inbyggda soldriftläge, oanvänt idag.
+6. **Dumpen och desinficeringen blir schemalagda laster.** Dumpa till
+   varmvatten när V < sälj_nu — samma jämförelse som avgör om batteriet
+   ska laddas. Desinficeringen är en bunden last med deadline, som
+   planeras in i den billigaste sloten inom sitt sjudygnsfönster i
+   stället för att starta på ett tröskelvillkor.
+
+**Acceptans:** Under en vintervecka minskar andelen
+uppvärmningsenergi som köps under dygnets dyraste fyra timmar, mot en
+jämförbar vecka utan styrning, utan att inomhustemperaturen lämnar det
+tillåtna spannet och utan att Eltillskott aktivt går igång under
+återhämtningen.
+
+---
+
+## STEG 8 — Validering
+*löpande*
+
+Simulatorn finns redan och delar `apply_plan_executor` med driften,
+vilket är exakt rätt konstruktion. Det som saknas är att peka den mot
+hela året.
+
+**Känd lucka (upptäckt 2026-09-08, inte i original­planen):** `backtest.py`
+läser sina tidsstämplar från `price_quarterhour.csv`, som bara täcker
+~10 dagar (2026-08-26–2026-09-05). Värmepumpsdatan (nästan ett helt år)
+och en förlängd Nordpool-prisserie (`nordpool_price_extended.csv`,
+2025-11-08–2026-08-31) finns nu i `testdata/history/`, men husast/sol/
+temp/SOC/nätfaser täcker fortfarande bara samma korta fönster. Steg 8:s
+"kör mot hela året"-acceptans kräver motsvarande långa exporter av de
+serierna innan den går att uppfylla fullt ut — se
+`testdata/history/Series info.txt`.
+
+1. **Två syratester.** Januari 2026 med de nolldygnen (15 dygn med exakt
+   0,0 kWh, 11 i följd 4–14 jan — bekräftat, se
+   `docs/forbrukningsanalys.md` avsnitt 8), och juli 2026 med maximal
+   export. Ett system som klarar båda utan specialfall är klart.
+2. **Mätetal i kronor** mot en referens utan batteri och utan styrning.
+   Kör varje steg mot samma period så att vinsten per ändring blir
+   synlig.
+3. **Kör om steg 0 till 3 i tur och ordning** mot samma data. Om något
+   steg inte förbättrar utfallet är antingen steget eller antagandet fel
+   — och då vill man veta det innan nästa steg byggs ovanpå.
+
+**Acceptans:** Simulatorn reproducerar en verklig vecka inom rimlig
+felmarginal på köpt och såld energi. Först då säger den något om
+framtiden.
+
+---
+
+## Invarianter — enhetstester, inte kommentarer
+
+- `battery_charge_power_w` och `battery_discharge_power_w` är aldrig
+  båda skilda från noll.
+- Batteriets urladdning överstiger aldrig husets underskott exklusive
+  bilen. Detta är hela garantin för mål 5.
+- Ingen fas överstiger 20 A i vare sig import- eller exportriktning
+  efter klämning.
+- Batteriet går aldrig under `battery_min_soc`.
+- Vid negativt säljpris är nettoexporten mot nätet noll eller negativ.
+- Varje börvärde till Sonnen har ett motsvarande värde skrivet inom de
+  senaste fem minuterna, annars nollas det.
+- Planeraren beslutar policy, executorn klämmer mot fysik. Ingen tröskel
+  finns på båda ställena.
+
+---
+
+## Vad vi medvetet inte bygger
+
+- **Export som vinststrategi.** `köp − sälj = 0,25 · spot + 1,17` —
+  egenanvändning slår alltid försäljning för energi huset kommer att
+  förbruka. Export är en restpost, utom i sommarens timingmanövrer.
+- **Effekttariffhantering.** Det finns ingen effekttariff på
+  abonnemanget. Fasgränsen är en säkringsfråga, inte en ekonomisk.
+- **Prisprognos.** Besluten som kräver morgondagens priser fattas efter
+  kl 13, när de publicerats.
+- **Ett vinterläge.** Säsong är indata, inte en kodväg.

@@ -719,12 +719,82 @@ föll korrekt till 0,00 med fixen.
 | `testdata/Monthly report_028778 - Fredrik Jonson_*.csv` | — | **Inte en HA-sensor.** Dygnsvis PV/köp/export/last-export direkt från växelriktarens molntjänst (Sungrow iSolarCloud), 12 filer = helt år utan luckor (2025-09-01–2026-08-31). Källan till den bekräftade elva-dygns-nollperioden (avsnitt 8) — HA:s egen `sensor.sg_daily_pv_generation`-statistik täcker bara från 5 aug 2026 och kunde inte användas för det. |
 | `sensor.ivt_total_active_power` | measurement, W | Värmepumpens (IVT) egen totaleffekt — `heat_pump_power_entity`, saknar långtidsstatistik i HA. Manuellt exporterad "history"-CSV (2025-09-30–2026-08-29, timvis) konverterad via `testdata/history/_convert_heat_pump.py` till `heat_pump_power_hourly.csv` — fyllde en tidigare lucka där `backtest.py` alltid använde 0.0 W för `heat_pump_power_w` (filen saknades i `_HISTORY_DIR_SERIES`, nu fixat). Används för korsvalideringen av januari-köldknäppen ovan. |
 | `sensor.nordpool_kwh_se3_sek_3_10_0_2` | measurement, öre/kWh | Spotpris. Manuellt exporterad "history"-CSV (2025-11-08–2026-08-31, tim→kvartsupplösning) konverterad via `testdata/history/_convert_nordpool_csv.py` till `nordpool_price_extended.csv`. Ersätter INTE `backtest.py`s `price_quarterhour.csv` (som styr pivotens tidsgrid) — täcker inte samma svans (till 2026-09-05) som de andra P7-1-serierna, skulle krympa istället för förlänga det gemensamma backtest-fönstret. Ligger bredvid som referens. |
-| `testdata/history/daily_energy_merged.csv` | — | **Sammanslagen master-fil**, byggd av `_merge_daily_energy.py` ur fyra källor ovan (nätägarens export/import/temp, Sungrows PV/last, värmepumpens timvisa effekt, Nordpool-priset) till en rad per dygn, 2025-01-01–2026-09-01 (609 dygn). Kolumner: `pv_kwh, import_kwh, export_kwh, temp_c, load_kwh, pv_source, heat_pump_avg_w, heat_pump_kwh_est, price_mean/min/max_sek_kwh, price_n_points`. UTC-källor konverteras till Europe/Stockholm-lokaltid INNAN dygnsgruppering, så gränserna matchar elbolagets/Sungrows egna dygn. Tomma celler = ingen täckning den källan/dagen (PV/last: 365/609 dygn, värmepump: 333/609, pris: 297/609). |
+| `testdata/history/daily_energy_merged.csv` | — | **Sammanslagen master-fil**, byggd av `_merge_daily_energy.py` ur fyra källor ovan (elleverantörens export/import/temp, Sungrows PV/last, värmepumpens timvisa effekt, Nordpool-priset) till en rad per dygn, 2025-01-01–2026-09-01 (609 dygn). Kolumner: `pv_kwh, import_kwh, export_kwh, temp_c, load_kwh, pv_source, heat_pump_avg_w, heat_pump_kwh_est, price_mean/min/max_sek_kwh, price_n_points`. UTC-källor konverteras till Europe/Stockholm-lokaltid INNAN dygnsgruppering, så gränserna matchar elleverantörens/Sungrows egna dygn. Tomma celler = ingen täckning den källan/dagen (PV/last: 365/609 dygn, värmepump: 333/609, pris: 297/609). |
 
 **Begränsning att komma ihåg:** rå state-historik (switchar, EV-status)
 rensas efter ~10 dygn. Allt bortom det måste rekonstrueras via
 long-term statistics (`source=statistics`) på sensorer med `state_class`
 satt — fungerar bara för de sensorer som faktiskt har det.
+
+## 9. Steg 0 implementerat (v0.9.2) — executorns eget veto var grundorsaken
+
+Användaren delade en fristående implementationsplan (`docs/v1_implementation_plan.md`,
+"v0.9.1 → v1.0") som diagnostiserade den observerade buggen (batteriet
+stilla genom en prispeak) till en enda specifik interaktion: planeraren
+beslutar `cover_load`, men `apply_plan_executor()` räknar om
+`self_consume_ok` mot ett separat kvällsmål och kasserar planerarens
+beslut tyst om det inte håller — oberoende av prisspärren (Option B)
+i planeraren.
+
+**Alla fem konkreta kodpåståenden i Steg 0 verifierades mot både repot och
+live-konfigurationen innan något ändrades:**
+
+1. `self_consume_ok = battery_soc_pct > battery_min_soc AND battery_soc_pct
+   > evening_target` — bekräftat exakt i `energy_controller.py`.
+2. `_DARK_SOLAR_KW = 2.0` (platt tröskel) — bekräftat exakt i
+   `energy_planner.py`.
+3. `pv_production_ratio >= 0.8`-villkoret på prisspärren (Option B,
+   v0.9.1) — bekräftat exakt, egen kod från den här sessionen.
+4. Dubbelavdraget `batt_kwh - batt_min_kwh - hard_floor_kwh` — bekräftat,
+   OCH bekräftat mot live-konfigurationen att `battery_min_soc=10` (INTE
+   20 som alla testskript i den här sessionen antagit) — med båda på 10%
+   skapar dubbelavdraget tyst ett 20%-golv istället för det avsedda 10%.
+5. Vakthunden: `async_zero_battery()` anropas från `async_unload_entry`
+   i `__init__.py` (bekräftat), och `automation.sem_vakthund_nolla_batteri_vid_tystnad`
+   är aktiverad live (bekräftat, `state=on`).
+
+**Empirisk bekräftelse innan kod ändrades:** jämförde planen genererad
+2026-09-07 21:00 (förutspådde SOC ~53% vid 08:45) mot verklig SOC-historik
+natten efter — batteriet bottnade på **58% kl 07:59–08:32**, ~5
+procentenheter högre än planerat, och började återhämta sig innan solen
+ens tog över. Ett verkligt, uppmätt glapp mellan planerarens beslut och
+executorns faktiska agerande, precis det Steg 0 diagnostiserar.
+
+**Implementerat:**
+- `energy_controller.py::apply_plan_executor()`: `self_consume_ok`
+  kontrollerar nu bara `battery_soc_pct > battery_min_soc` — kvällsmålet
+  borttaget ur grinden. `evening_target`-variabeln behålls (används
+  fortfarande av `evening_fill`-logiken på andra ställen i funktionen).
+- `energy_planner.py`: `is_dark` (tre användningsställen: exportfönstret,
+  billig nätladdning, huvudloopen) jämför nu `slot.solar_kw < hourly_load_kw`
+  istället för mot konstanten `_DARK_SOLAR_KW`, som är borttagen.
+- `energy_planner.py`: `pv_production_ratio >= 0.8`-villkoret borttaget
+  ur Option B:s prisspärr — osäkerheten hanteras redan av
+  `_uncertainty_markup()` i golvet.
+- `energy_planner.py`: dubbelavdraget fixat — `avail_kwh_gated = batt_kwh
+  - hard_floor_kwh` (batt_min_kwh borttaget från den specifika raden;
+  hard_floor ersätter det, adderas inte till det).
+
+**Verifiering:**
+- Planens eget acceptanstest reproducerat exakt via ett direkt anrop till
+  `apply_plan_executor()`: SOC 59%, kvällsmål 73,7%, köp 2,37 kr,
+  batterikostnad 0,80 → **0W före fixen, 1050W efter** (matchar planens
+  "≈1050 W" prognos).
+- Full `build_plan()`-körning med `pv_production_ratio=0.3` (låg säkerhet,
+  som snötäckta paneler): golvet blir korrekt STÖRRE (23,2 kWh, kvällsmål
+  86%, mot ~20 kWh vid 0,86) istället för att stänga prisspärren — bekräftar
+  att osäkerheten nu bara syns i golvets storlek, inte som ett separat
+  villkor.
+
+**Kvarstår (Steg 1–8 i `docs/v1_implementation_plan.md`):** inte
+påbörjade. Steg 2 (golvet som en bana istället för ett skalärt tal) gör
+både 85%-skyddsspärren (v0.9.1) och Option B (v0.9.1) överflödiga av
+konstruktion — ärligt sagt rimliga interimslösningar givet tidspress
+under den sessionen, men patchar på fel lager enligt den nya planen.
+Steg 8:s helårs-backtest kräver längre huslast/sol/temp/SOC/nätfas-exporter
+än vad som finns i `testdata/history/` idag (bara värmepump och delar av
+priset täcker nästan ett år; resten är fortfarande begränsat till
+~10 dagar, se `Series info.txt`).
 
 ## Öppna spår
 
@@ -806,3 +876,13 @@ satt — fungerar bara för de sensorer som faktiskt har det.
    reservstorlek löser ett elva dygn långt bortfall, det kräver en helt
    annan strategi (acceptera nätberoende under perioden snarare än att
    jaga ett ouppnåeligt golv). Inte påbörjat.
+9. **Löst (v0.9.2, avsnitt 9):** grundorsaken till att batteriet stod
+   stilla genom prispeakar var inte golvformeln i sig, utan att
+   `apply_plan_executor()` hade ett eget veto (`self_consume_ok` mot
+   kvällsmålet) oberoende av vad planeraren redan beslutat via
+   prisspärren. Executorns veto borttaget, dubbelavdraget i Option B
+   fixat, `pv_production_ratio`-villkoret borttaget från prisspärren,
+   och "mörk" är nu dynamisk mot huslasten istället för en fast 2 kW-gräns.
+   Se `docs/v1_implementation_plan.md` för hela vägen till v1.0 (steg 1–8,
+   inte påbörjade) — steg 2 gör både 85%-spärren och Option B överflödiga
+   av konstruktion när golvet blir en bana istället för ett skalärt tal.
