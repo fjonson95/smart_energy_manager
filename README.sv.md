@@ -1,18 +1,17 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.3-blue)
+![Version](https://img.shields.io/badge/version-0.9.4-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.3
+## Nyheter i 0.9.4
 
-Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del ett — två antagna konstanter ersatta med uppmätta.
+Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del två — en ny sensor för att övervaka cykelkostnadsantagandet istället för att bara förutsätta det.
 
-- **`eta_roundtrip` rättad från en antagen 0,87 till en uppmätt 0,849**, läst direkt från batteriets egna ackumulerade AC-laddnings-/urladdningsräknare (10 692/12 589 kWh).
-- **`sell_extra_revenue`-defaulten rättad från en föråldrad 0,07 till 0,065**, matchar vad live-konfigurationen redan hade (Lerum Energis nätnyttoersättning).
-- Verifierade de resulterande brytpunktsformlerna mot verklig data — med en viktig brasklapp dokumenterad inför steg 3: de måste testas mot ett merit-order-viktat snitt av handelsbara timmar, aldrig ett dygns råa min/max-spotpris, som överskattar den uppnåeliga spridningen med ungefär en faktor 2.
+- **Ny valfri sensor `sem_battery_equivalent_cycles`** (ackumulerad AC-urladdningsenergi ÷ användbar kapacitet), aktiverad av två nya valfria konfigfält för batteriets ackumulerade AC-ur-/urladdningsräknare. Exponerar också ett `measured_eta_roundtrip`-attribut för löpande omverifiering.
+- Garantin (10 år eller 10 000 cykler) binder vid kalendern så länge den verkliga takten ligger under ~2,74 cykler/dygn – den här sensorn gör att antagandet kan övervakas istället för bara förutsättas.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.2:s executor-veto-fix, v0.9.1:s golv-skyddsspärr och rullande förbrukningssnitt, v0.9.0:s säsongsmedvetna laddning/urladdning, och v0.8.0:s absorptionstrappa vid negativt pris).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.3:s uppmätta rundgångsverkningsgrad, v0.9.2:s executor-veto-fix, v0.9.1:s golv-skyddsspärr och rullande förbrukningssnitt, och v0.9.0:s säsongsmedvetna laddning/urladdning).
 
 ## Systemöversikt
 

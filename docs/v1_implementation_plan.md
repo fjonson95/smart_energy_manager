@@ -12,12 +12,13 @@ Bygger på granskningen av v0.5.60, förbrukningsanalysen
 
 **Status:** Steg 0 implementerat och verifierat 2026-09-08 (v0.9.2) — se
 `docs/forbrukningsanalys.md` avsnitt "Steg 0 implementerat" för detaljer,
-kodverifiering och acceptanstestresultat. Steg 1 påbörjat (v0.9.3):
+kodverifiering och acceptanstestresultat. Steg 1 påbörjat (v0.9.3–v0.9.4):
 `eta_roundtrip` och `sell_extra_revenue` uppdaterade till uppmätta värden,
 brytpunktsformlerna verifierade (se korrigeringen om merit-order-viktat
-snitt kontra dygnets min/max, nedan). Kvarstår i steg 1: lastprofil
-inkodad i golvformeln, dygnsbudget-attribueringen, ny cykel-sensor.
-Steg 2–8 inte påbörjade.
+snitt kontra dygnets min/max, nedan), och `sem_battery_equivalent_cycles`
+(ny valfri sensor, v0.9.4) implementerad. Kvarstår i steg 1: lastprofil
+inkodad i golvformeln, dygnsbudget-attribueringen. Steg 2–8 inte
+påbörjade.
 
 ---
 

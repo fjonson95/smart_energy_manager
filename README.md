@@ -1,20 +1,19 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.3-blue)
+![Version](https://img.shields.io/badge/version-0.9.4-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.3
+## What's New in 0.9.4
 
-Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part one — two assumed constants replaced with measured ones.
+Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part two — a new sensor to monitor the cycle-cost assumption instead of just asserting it.
 
-- **`eta_roundtrip` corrected from an assumed 0.87 to a measured 0.849**, read directly off the battery's own cumulative AC charge/discharge counters (10,692/12,589 kWh).
-- **`sell_extra_revenue` default corrected from a stale 0.07 to 0.065**, matching what the live configuration already had (Lerum Energi's grid-benefit compensation).
-- Verified the resulting break-even formulas against real data — with an important caveat documented for step 3: they must be tested against the merit-order-weighted average of tradeable hours, never a day's raw min/max spot price, which overstates the achievable spread by roughly 2×.
+- **New optional `sem_battery_equivalent_cycles` sensor** (accumulated AC discharge energy ÷ usable capacity), enabled by two new optional config fields for the battery's cumulative AC charge/discharge counters. Also exposes a `measured_eta_roundtrip` attribute for ongoing re-verification.
+- The warranty (10 years or 10,000 cycles) binds on the calendar as long as the real rate stays under ~2.74 cycles/day — this sensor lets that assumption be watched rather than assumed.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.2's executor-veto fix, v0.9.1's floor safety cap and rolling consumption average, v0.9.0's season-aware charge/discharge handling, and v0.8.0's negative-price absorption ladder).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.3's measured round-trip efficiency, v0.9.2's executor-veto fix, v0.9.1's floor safety cap and rolling consumption average, and v0.9.0's season-aware charge/discharge handling).
 
 ## System Overview
 

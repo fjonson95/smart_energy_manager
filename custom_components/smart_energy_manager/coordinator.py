@@ -36,6 +36,7 @@ from .const import (
     CONF_GRID_FEES, CONF_ENERGY_TAX, CONF_VAT_RATE, CONF_SELL_EXTRA_REVENUE,
     CONF_MAX_CURRENT_PER_PHASE, CONF_GRID_VOLTAGE, CONF_MAX_EXPORT_W, DEFAULT_MAX_EXPORT_W,
     CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC,
+    CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY, CONF_BATTERY_AC_CHARGE_ENERGY_ENTITY,
     CONF_HOUSE_LOAD_ENTITY, CONF_GRID_POWER_UNIT, CONF_EV_POWER_UNIT,
     UNIT_W, UNIT_KW,
     DEFAULT_MAX_CURRENT, DEFAULT_GRID_VOLTAGE, DEFAULT_VAT_RATE,
@@ -1014,6 +1015,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 battery_power_w=battery_pwr_w,
                 battery_capacity_kwh=float(c.get(CONF_BATTERY_CAPACITY_KWH, 10.0)),
                 battery_max_power_kw=float(c.get(CONF_BATTERY_MAX_POWER_KW, 5.0)),
+                battery_ac_discharge_energy_kwh=self._get_state_float(
+                    c.get(CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY), default=None,
+                ),
+                battery_ac_charge_energy_kwh=self._get_state_float(
+                    c.get(CONF_BATTERY_AC_CHARGE_ENERGY_ENTITY), default=None,
+                ),
 
                 chargers=chargers,
 

@@ -2,6 +2,12 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.4
+
+Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part two — a new sensor to monitor the cycle-cost assumption against reality instead of just asserting it.
+
+- **New optional `sem_battery_equivalent_cycles` sensor**, computed as accumulated AC discharge energy ÷ usable battery capacity. Two new optional config fields (cumulative AC discharge/charge energy entities) — the sensor is only created when the discharge entity is configured. Also exposes `measured_eta_roundtrip` as an attribute whenever both entities are set, so the round-trip efficiency constant (see v0.9.3) can be re-verified going forward without manually querying two sensors. The warranty (10 years or 10,000 cycles) binds on the calendar, not the cycle count, as long as the actual rate stays under ~2.74 cycles/day (10,000 ÷ 3,650) — this sensor lets that assumption be watched rather than assumed.
+
 ## What's New in 0.9.3
 
 Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part one — two assumed constants replaced with measured ones.

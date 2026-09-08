@@ -13,6 +13,7 @@ from homeassistant.helpers import selector
 from .const import (
     DOMAIN,
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_INVERTER_CHARGE, CONF_BATTERY_INVERTER_DISCHARGE,
+    CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY, CONF_BATTERY_AC_CHARGE_ENERGY_ENTITY,
     CONF_BATTERY_OPERATING_MODE_ENTITY,
     CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
     CONF_SOLAR_INVERTER_TOTAL,
@@ -174,6 +175,8 @@ def _battery_schema(d: dict) -> vol.Schema:
         vol.Optional(CONF_EV_RESERVE_MARGIN_KWH, default=_d(d, CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH)): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.0, max=20.0, step=0.5, mode=selector.NumberSelectorMode.BOX)
         ),
+        vol.Optional(CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY, default=_d(d, CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY, "")): _opt_entity_selector(),
+        vol.Optional(CONF_BATTERY_AC_CHARGE_ENERGY_ENTITY, default=_d(d, CONF_BATTERY_AC_CHARGE_ENERGY_ENTITY, "")): _opt_entity_selector(),
     })
 
 

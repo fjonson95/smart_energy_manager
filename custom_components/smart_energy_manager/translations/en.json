@@ -64,7 +64,9 @@
           "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
           "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
           "ev_reserve_margin_kwh": "EV reserve margin under low solar (kWh, default 2.5)",
-          "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
+          "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)",
+          "battery_ac_discharge_energy_entity": "Cumulative AC discharge energy (kWh, optional – for equivalent full cycles and measured efficiency)",
+          "battery_ac_charge_energy_entity": "Cumulative AC charge energy (kWh, optional – for measured efficiency)"
         }
       },
       "heat_pump": {
@@ -204,7 +206,9 @@
           "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
           "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
           "ev_reserve_margin_kwh": "EV reserve margin under low solar (kWh, default 2.5)",
-          "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)"
+          "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)",
+          "battery_ac_discharge_energy_entity": "Cumulative AC discharge energy (kWh, optional – for equivalent full cycles and measured efficiency)",
+          "battery_ac_charge_energy_entity": "Cumulative AC charge energy (kWh, optional – for measured efficiency)"
         }
       },
       "heat_pump_opts": {
@@ -379,6 +383,9 @@
       },
       "battery_energy": {
         "name": "Battery Energy"
+      },
+      "battery_equivalent_cycles": {
+        "name": "Battery Equivalent Full Cycles"
       },
       "day_plan_action": {
         "name": "Plan: action"

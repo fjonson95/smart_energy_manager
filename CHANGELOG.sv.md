@@ -2,6 +2,12 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.4
+
+Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del två — en ny sensor för att övervaka cykelkostnadsantagandet mot verkligheten istället för att bara förutsätta det.
+
+- **Ny valfri sensor `sem_battery_equivalent_cycles`**, beräknad som ackumulerad AC-urladdningsenergi ÷ användbar batterikapacitet. Två nya valfria konfigfält (ackumulerade AC-ur-/urladdningsräknare) – sensorn skapas bara om urladdningsentiteten är konfigurerad. Exponerar också `measured_eta_roundtrip` som ett attribut när båda entiteterna är satta, så rundgångsverkningsgraden (se v0.9.3) går att omverifiera framöver utan att fråga två sensorer manuellt. Garantin (10 år eller 10 000 cykler) binder vid kalendern, inte cykelantalet, så länge den verkliga takten ligger under ~2,74 cykler/dygn (10 000/3 650) – den här sensorn gör att antagandet kan övervakas istället för bara förutsättas.
+
 ## Nyheter i 0.9.3
 
 Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del ett — två antagna konstanter ersatta med uppmätta.

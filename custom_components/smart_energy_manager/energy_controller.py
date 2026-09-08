@@ -161,6 +161,11 @@ class EnergyState:
     battery_capacity_kwh: float = 10.0
     battery_max_power_kw: float = 5.0
 
+    # Ackumulerade AC-ur-/urladdningsräknare (kWh) – valfria, för
+    # sem_battery_equivalent_cycles (v1.0 steg 1). None om ej konfigurerade.
+    battery_ac_discharge_energy_kwh: Optional[float] = None
+    battery_ac_charge_energy_kwh: Optional[float] = None
+
     # EV-laddare (ny modell)
     chargers: list[ChargerState] = field(default_factory=list)
 

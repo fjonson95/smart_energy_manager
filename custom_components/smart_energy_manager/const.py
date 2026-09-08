@@ -51,6 +51,13 @@ CONF_BATTERY_CAPACITY_KWH = "battery_capacity_kwh"
 CONF_BATTERY_MAX_POWER_KW = "battery_max_power_kw"
 CONF_BATTERY_MIN_SOC = "battery_min_soc"
 CONF_BATTERY_MAX_SOC = "battery_max_soc"
+# Ackumulerade AC-ur-/urladdningsräknare (kWh, total_increasing) – valfria.
+# Om satta: (a) grund för sem_battery_equivalent_cycles (v1.0 steg 1, se
+# docs/v1_implementation_plan.md), (b) samma källa eta_roundtrip kalibrerades
+# mot 2026-09-08 (0.849, uppmätt mot dessa räknare på just den här
+# anläggningen – gäller INTE generellt för andra batterier/config-defaulten).
+CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY = "battery_ac_discharge_energy_entity"
+CONF_BATTERY_AC_CHARGE_ENERGY_ENTITY = "battery_ac_charge_energy_entity"
 
 # ── Elpanna / värmepump ───────────────────────────────────────────────────────
 CONF_HEAT_PUMP_POWER = "heat_pump_power_entity"

@@ -64,7 +64,9 @@
           "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
           "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
           "ev_reserve_margin_kwh": "EV-marginal i exportgolvet vid låg sol (kWh, standard 2.5)",
-          "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
+          "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)",
+          "battery_ac_discharge_energy_entity": "Ackumulerad AC-urladdning (kWh, valfri – för ekvivalenta fullcykler och uppmätt verkningsgrad)",
+          "battery_ac_charge_energy_entity": "Ackumulerad AC-laddning (kWh, valfri – för uppmätt verkningsgrad)"
         }
       },
       "heat_pump": {
@@ -204,7 +206,9 @@
           "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
           "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
           "ev_reserve_margin_kwh": "EV-marginal i exportgolvet vid låg sol (kWh, standard 2.5)",
-          "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)"
+          "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)",
+          "battery_ac_discharge_energy_entity": "Ackumulerad AC-urladdning (kWh, valfri – för ekvivalenta fullcykler och uppmätt verkningsgrad)",
+          "battery_ac_charge_energy_entity": "Ackumulerad AC-laddning (kWh, valfri – för uppmätt verkningsgrad)"
         }
       },
       "heat_pump_opts": {
@@ -379,6 +383,9 @@
       },
       "battery_energy": {
         "name": "Batterienergi"
+      },
+      "battery_equivalent_cycles": {
+        "name": "Batteri ekvivalenta fullcykler"
       },
       "day_plan_action": {
         "name": "Plan: åtgärd"

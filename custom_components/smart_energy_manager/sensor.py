@@ -93,6 +93,11 @@ async def async_setup_entry(
     if coordinator._config.get(CONF_OUTDOOR_TEMP_ENTITY):
         entities.append(PredictedHouseLoadSensor(coordinator, entry))
 
+    # Ekvivalenta fullcykler om batteriets AC-urladdningsräknare är konfigurerad
+    from .const import CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY
+    if coordinator._config.get(CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY):
+        entities.append(BatteryEquivalentCyclesSensor(coordinator, entry))
+
     # EnergyPlanner-sensorer (plan vs faktisk)
     entities += [
         DayPlanActionSensor(coordinator, entry),
@@ -900,6 +905,47 @@ class BatteryEnergyKwhSensor(_BaseEnergySensor):
             "capacity_kwh":       s.battery_capacity_kwh,
             "remaining_capacity_kwh": round((1 - s.battery_soc_pct / 100.0) * s.battery_capacity_kwh, 2),
         }
+
+
+class BatteryEquivalentCyclesSensor(_BaseEnergySensor):
+    """Ackumulerade ekvivalenta fullcykler (v1.0 steg 1).
+
+    fullcykler = ackumulerad AC-urladdning (battery_ac_discharge_energy_entity)
+    / användbar batterikapacitet – samma AC-räknare eta_roundtrip kalibrerades
+    mot 2026-09-08 (0,849, uppmätt på just den här anläggningen). Gör att
+    antagandet om cykelkostnaden går att övervaka mot verklig cyklingstakt
+    istället för att bara förutsättas – garantin (10 år eller 10 000 cykler)
+    binder vid kalendern, inte cykelantalet, så länge takten ligger under
+    ~2,74 cykler/dygn (10 000/3650); se docs/v1_implementation_plan.md steg 1.
+    """
+
+    _attr_unique_id   = "sem_battery_equivalent_cycles"
+    _attr_translation_key = "battery_equivalent_cycles"
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_icon        = "mdi:battery-sync"
+
+    @property
+    def native_value(self) -> float | None:
+        s = self.coordinator.current_state
+        if not s or s.battery_ac_discharge_energy_kwh is None or s.battery_capacity_kwh <= 0:
+            return None
+        return round(s.battery_ac_discharge_energy_kwh / s.battery_capacity_kwh, 1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        s = self.coordinator.current_state
+        if not s:
+            return {}
+        attrs: dict[str, Any] = {
+            "discharge_energy_kwh": s.battery_ac_discharge_energy_kwh,
+            "charge_energy_kwh":    s.battery_ac_charge_energy_kwh,
+            "capacity_kwh":         s.battery_capacity_kwh,
+        }
+        if s.battery_ac_discharge_energy_kwh and s.battery_ac_charge_energy_kwh:
+            attrs["measured_eta_roundtrip"] = round(
+                s.battery_ac_discharge_energy_kwh / s.battery_ac_charge_energy_kwh, 4
+            )
+        return attrs
 
 
 class NordpoolPriceScheduleSensor(_BaseEnergySensor):
