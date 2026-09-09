@@ -53,8 +53,9 @@ faktiskt förvärmningsbeslut än. **Punkt 6 (dump/desinficering som
 schemalagda laster) klar (v0.9.15):** `should_dump_to_hot_water()` och
 `schedule_cheapest_window()`, samma sak — rena funktioner, `legionella.py`
 avsiktligt orörd (stateful, skarp styrning trots att den inte heter
-coordinator/energy_controller). Punkt 2, 5 inte påbörjade. Se "Steg 7
-implementerat". Steg 8 inte påbörjat.
+coordinator/energy_controller). **Steg 7 pausat (2026-09-09)** — punkt 2
+(elpatroner utanför) och 5 (soldrift via pannans egen väg) inte
+påbörjade. Se "Steg 7 implementerat". Steg 8 inte påbörjat.
 
 ---
 
