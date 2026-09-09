@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.10
+
+A fifth finding — this time in the **backtest tooling itself**, not the planner — that substantially revises how step 3's prior results (v0.9.8's 45%, v0.9.9's 55%) should be read. **Still not recommended for deployment**, but the gap to step 2 turns out to be much smaller than previously reported.
+
+- **Fixed `testdata/backtest.py`'s price parsing.** `SENSOR_MAP`'s transform for the Nordpool sensor was `lambda v: v / 100.0` — dividing the raw CSV string by a float, which raises `TypeError`, silently caught by `_safe()`, defaulting `state.buy_price_sek_kwh`/`sell_price_sek_kwh`/`spot_price_sek_kwh` to a *constant* (1.2325/0.065/0.0 SEK/kWh) on every single row of every backtest run this session — not just step 3's. Steps 0–2 never surfaced it because their dominant behavior (`cover_load`/`solar_charge` via a plain SOC threshold) doesn't consume those specific state fields in `apply_plan_executor()`; step 3 does, heavily (`econ_peak`/`prefer_sell` gate `grid_charge`/export re-evaluation on exactly those fields), so only step 3's results were corrupted by it. Fixed: `lambda v: float(v) / 100.0`.
+- **Revised comparison, same 10-day window, correct prices in both runs:** the "% savings vs. reference" metric became unstable after the fix (the no-battery reference's cost fell close to zero, since correct sell prices credit its 301.5 kWh of raw solar export far more than the old floor price did) — comparing absolute net cost instead: step 2 nets −114.85 SEK (a 114.85 SEK profit) over the 10 days, step 3 (with all five findings fixed) nets −99.26 SEK. **Step 3 now reaches ~86% of step 2's profit** — a materially different picture than the previously-reported "45%"/"55% vs. 91%", which were computed against the same broken reference and should be read as *ordering* (step 3 behind step 2, improving with each of the four earlier fixes), not as precise figures.
+- Also added a cycle-cost term to rule 2 (self-consumption discharge), matching the cost already applied to rules 3/4 — consistent with "wear cost per cycled kWh" applying equally regardless of which of the three discharge paths a kWh takes. No measurable backtest effect on its own, but correct to keep the four rules' thresholds consistent.
+- `energy_planner.py` still contains only step 3's code. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance. The now-small remaining gap (~15.6 SEK / 10 days) is judged worth continuing to close with targeted fixes rather than requiring a new architecture, per `docs/v1_implementation_plan.md`.
+
 ## What's New in 0.9.9
 
 A fourth bug in step 3's V computation, found via user code review — **still not recommended for deployment**, but a substantial improvement (45% → 55% backtest savings, up from v0.9.8, still short of step 2's 91%).

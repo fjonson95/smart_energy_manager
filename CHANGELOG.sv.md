@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.10
+
+Ett femte fynd — den här gången i själva backtest-verktyget, inte i planeraren — som väsentligt omprövar hur steg 3:s tidigare resultat (v0.9.8:s 45 %, v0.9.9:s 55 %) ska läsas. **Fortfarande inte rekommenderad för driftsättning**, men gapet till steg 2 visar sig vara mycket mindre än tidigare rapporterat.
+
+- **Fixade `testdata/backtest.py`:s prisinläsning.** `SENSOR_MAP`:s transform för Nordpool-sensorn var `lambda v: v / 100.0` – dividerar den råa CSV-strängen med ett flyttal, vilket kastar `TypeError`, tyst fångat av `_safe()`, och satte `state.buy_price_sek_kwh`/`sell_price_sek_kwh`/`spot_price_sek_kwh` till en KONSTANT (1,2325/0,065/0,0 kr/kWh) på varenda rad i varenda backtest den här sessionen – inte bara steg 3:s. Steg 0–2 märkte det aldrig eftersom deras dominerande beteende (`cover_load`/`solar_charge` via en ren SOC-tröskel) inte konsumerar just de state-fälten i `apply_plan_executor()`; steg 3 gör det tungt (`econ_peak`/`prefer_sell` grindar om `grid_charge`/export-beslut baserat på exakt de fälten), så bara steg 3:s resultat förorenades av det. Fixat: `lambda v: float(v) / 100.0`.
+- **Omprövad jämförelse, samma 10-dagarsfönster, korrekta priser i båda körningarna:** procentmåttet "besparing mot referens" blev instabilt efter fixen (referensfallets kostnad föll nära noll, eftersom korrekta säljpriser krediterar dess 301,5 kWh råa solexport mycket mer än det gamla golvpriset gjorde) – jämfört istället i absolut nettokostnad: steg 2 landar på −114,85 kr (114,85 kr vinst) över 10 dagar, steg 3 (med alla fem fynden åtgärdade) på −99,26 kr. **Steg 3 når nu ~86 % av steg 2:s vinst** – en helt annan bild än de tidigare rapporterade "45 %"/"55 % mot 91 %", som räknades mot samma trasiga referens och bör läsas som ORDNING (steg 3 sämre än steg 2, förbättrad av var och en av de fyra tidigare fixarna), inte exakta tal.
+- Lade också till en cykelkostnadsterm på regel 2 (självkonsumtionsurladdning), i linje med kostnaden som redan gäller regel 3/4 – konsekvent med att "slitagekostnad per cyklad kWh" gäller lika oavsett vilken av de tre urladdningsvägarna en kWh tar. Ingen mätbar effekt i backtest på egen hand, men korrekt för att hålla de fyra reglernas trösklar konsekventa.
+- `energy_planner.py` innehåller fortfarande bara steg 3:s kod. v0.9.7 (commit `a57cea2`) förblir den senast verifierade, säkra versionen att köra mot den riktiga HA-instansen. Det nu lilla kvarvarande gapet (~15,6 kr/10 dygn) bedöms värt att fortsätta stänga med riktade fixar istället för att kräva en ny arkitektur, enligt `docs/v1_implementation_plan.md`.
+
 ## Nyheter i 0.9.9
 
 En fjärde bugg i steg 3:s V-beräkning, hittad via användarens kodgranskning – **fortfarande inte rekommenderad för driftsättning**, men en väsentlig förbättring (45 % → 55 % besparing i backtest, upp från v0.9.8, ändå under steg 2:s 91 %).

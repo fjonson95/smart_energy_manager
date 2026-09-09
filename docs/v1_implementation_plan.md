@@ -23,13 +23,18 @@ verifierade. **Steg 2 klart (v0.9.7):** golvet är nu en avtagande
 (`_FLOOR_SAFETY_CAP_FRACTION`) borttagen, prisspärren ("Option B") behållen
 i väntan på en riktig vinterbacktest — se avsnitt "Steg 2 implementerat"
 nedan för detaljer och verifieringsresultat. **Steg 3 försökt men INTE
-klart (v0.9.8–v0.9.9) — förbättrad men fortfarande under steg 2 i
-backtest (55 % besparing mot steg 2:s 91 %, upp från 45 % i v0.9.8 sedan
-en fjärde bugg hittad och fixad), INTE driftsatt.** `energy_planner.py`
-innehåller för närvarande steg 3:s kod (`reserve_at(t)` är borttagen ur
-filen, ersatt), men v0.9.7 (commit `a57cea2`) är den senast verifierade,
-säkra versionen att köra — se avsnitt "Steg 3 implementerat" nedan för
-grundorsaksanalysen innan arbetet återupptas. Steg 5–8 inte påbörjade.
+klart (v0.9.8–v0.9.9) — fem fynd (fyra i planeraren, ett i
+`testdata/backtest.py` självt: en trasig prissträng→float-konvertering
+som gett alla tidigare procenttal i den här filen/CHANGELOG en missvisande
+referens), fortfarande under steg 2 men gapet nu litet: −99,26 kr mot
+steg 2:s −114,85 kr över samma 10 dagar (~86 % av steg 2:s vinst), INTE
+driftsatt.** `energy_planner.py` innehåller för närvarande steg 3:s kod
+(`reserve_at(t)` är borttagen ur filen, ersatt), men v0.9.7
+(commit `a57cea2`) är den senast verifierade, säkra versionen att köra —
+se avsnitt "Steg 3 implementerat" nedan, särskilt "Femte fyndet", för
+grundorsaksanalysen innan arbetet återupptas. **Steg 4 pausat** tills
+steg 3 slår steg 2 i backtest — se motivering i "Steg 3 implementerat".
+Steg 5–8 inte påbörjade.
 
 ---
 
@@ -469,6 +474,74 @@ Steg 3 kräver mer arbete innan det slår steg 2, troligen en av:
 - Eller en omprövning av om en enda skalär V per planeringscykel
   verkligen är rätt abstraktion för den här tariffstrukturen, givet hur
   stor köp/sälj-spreaden är.
+
+#### Femte fyndet: en bugg i testverktyget, inte i planeraren (2026-09-09)
+
+Under det fortsatta arbetet på att stänga gapet (cykelkostnad även på
+regel 2 – i sig korrekt men utan mätbar effekt) upptäcktes att
+`export`-slots i backtesten sålde till ett konstant golvpris (0,065
+kr/kWh) i sammanfattningsstatistiken, trots att planerarens EGEN
+`reason`-text visade helt andra, korrekt varierande priser (0,29–2,36
+kr/kWh) för samma beslut. Spårat till roten: `testdata/backtest.py`:s
+`SENSOR_MAP` hade `"sensor.nordpool_kwh_se3_sek_3_10_0_2": ("nordpool_raw",
+lambda v: v / 100.0)` – transformen delar `v` med 100.0 utan att först
+konvertera strängen (`_safe()` skickar alltid in rådata som str direkt
+från CSV) till float. `str / float` kastar `TypeError`, `_safe()` fångar
+den tyst och returnerar `None`, och `build_state()` faller tillbaka på
+`vals.get("nordpool_raw", 0.0)` = 0.0 för VARJE rad. `state.buy_price_sek_kwh`
+och `state.sell_price_sek_kwh` (och `spot_price_sek_kwh`) har därför varit
+KONSTANTA (1,2325 / 0,065 kr/kWh, exakt avgifterna på ett nollpris) i
+`apply_plan_executor()`s egna `econ_peak`/`prefer_sell`-omprövningar
+genom HELA sessionen – inte bara i steg 3:s körningar.
+
+Steg 0–2 märkte det aldrig eftersom deras dominerande beteende
+(`cover_load`/`solar_charge` via `self_consume_ok`, en ren SOC-tröskel)
+inte är prisberoende i executorn. Steg 3 är mycket mer prisberoende
+(`grid_charge`/`export` styrs av `econ_peak`/`prefer_sell`, båda byggda
+på de trasiga fälten) – så bara steg 3 fick fel resultat av det här,
+trots att buggen själv är lika gammal som `build_state()`.
+
+**Fix:** `lambda v: float(v) / 100.0`. Verifierat isolerat (rätt
+varierande spotpris läses nu in) och i full backtest.
+
+**Reviderat resultat (samma 10-dagarsfönster, nu med korrekt pris i
+BÅDA leden):** procentandelen "besparing mot referens" blev instabil
+efter fixen (referenskostnaden föll till nästan noll – rätt säljpris ger
+referensfallets 301,5 kWh rå solexport mycket mer krediterad intäkt än
+det gamla golvpriset gjorde, vilket gör division-mot-nästan-noll
+missvisande). Jämfört istället i ABSOLUT nettokostnad över samma 10
+dagar, samma verktygsfix i båda körningarna:
+- **Steg 2** (commit `a57cea2`, med `reserve_at(t)`): −114,85 kr (dvs.
+  114,85 kr i vinst över perioden).
+- **Steg 3** (nuvarande kod, alla fem fynden ovan åtgärdade): −99,26 kr
+  (99,26 kr i vinst).
+
+Gapet är alltså ~15,6 kr över 10 dygn (~1,5 kr/dygn) — steg 3 når nu
+**~86 %** av steg 2:s vinst, en helt annan bild än de tidigare (bugg-
+förorenade) siffrorna "45 %" och "55 % mot steg 2:s 91 %" gav. De
+tidigare procentsiffrorna i den här filen och i CHANGELOG.md/.sv.md för
+v0.9.8/v0.9.9 var beräknade mot samma trasiga referens och bör läsas som
+ORDNING (steg 3 sämre än steg 2, förbättrad av var och en av de fyra
+tidigare buggfixarna), inte som exakta tal.
+
+**Uppdaterat beslut:** steg 3 slår fortfarande inte steg 2, men gapet är
+nu litet nog att vara värt att fortsätta stänga med riktade fixar
+(t.ex. horisontbegränsningen eller nätladdningens lönsamhet) istället för
+att anses kräva en ny grundarkitektur. INTE driftsatt än.
+
+**Steg 4 pausat (2026-09-09).** Kartläggning inför steg 4 visade att
+`prefer_sell`, `economic_peak`, `sell_solar_min_price` och
+`evening_target_soc` inte bara finns i `energy_planner.py` (redan döda
+sedan steg 3) — de finns som EGEN, AKTIV logik inuti
+`apply_plan_executor()` (`energy_controller.py:980-1059`), det enda
+skrivstället för batteriets börvärden i SKARP DRIFT (delat med
+`testdata/backtest.py`). Steg 4:s tabell förutsätter att executorn kan
+lita på planens `target_power_w` rakt av istället för att själv
+omvärdera — men det kräver att V är tillräckligt pålitligt för det, och
+V slår fortfarande inte steg 2 (55 % mot 91 %) och är inte driftsatt.
+Beslut: fortsätt täppa till gapet i V (steg 3) innan `apply_plan_executor()`
+rörs — annars ändras skarp, levande styrlogik baserat på ett ännu
+overifierat V. Steg 4 återupptas när steg 3 slår steg 2 i backtest.
 
 ---
 

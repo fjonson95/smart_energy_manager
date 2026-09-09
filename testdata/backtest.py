@@ -127,7 +127,7 @@ SETTINGS = {
 
 # Sensor entity_id → EnergyState field + transform
 SENSOR_MAP = {
-    "sensor.nordpool_kwh_se3_sek_3_10_0_2":                    ("nordpool_raw",           lambda v: v / 100.0),
+    "sensor.nordpool_kwh_se3_sek_3_10_0_2":                    ("nordpool_raw",           lambda v: float(v) / 100.0),
     "sensor.el_forbruk_power_power":                            ("house_load_w",           float),
     "sensor.sg_total_active_power":                             ("solar_w",                float),
     "sensor.sonnenbatterie_271100_state_battery_percentage_real":("battery_soc_pct",       float),

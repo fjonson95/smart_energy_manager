@@ -404,21 +404,25 @@ class EnergyPlanner:
                     reason = f"sol {slot.solar_kw:.1f}kW → sälj direkt (V·η {V_charge:.2f}≤sälj {slot.sell_sek:.2f})"
 
             # Regel 2 (köp_nu > V → täck från batteri): bara relevant när
-            # solen inte räcker till lasten.
+            # solen inte räcker till lasten. Cykelkostnaden läggs på här
+            # också (konsekvent med regel 3/4) – "slitagekostnad per cyklad
+            # kWh" gäller lika mycket när batteriet töms för egenförbrukning
+            # som när det töms för export; annars blir tröskeln inkonsekvent
+            # mellan de fyra reglerna för samma fysiska händelse (urladdning).
             elif deficit_kwh > 0.01:
-                if slot.buy_sek > V:
+                if slot.buy_sek > V + self.cycle_cost_sek_kwh:
                     avail = max(0.0, batt_kwh - _reserved_kwh)
                     if avail > 0.01:
                         dis_kwh = min(deficit_kwh, avail, battery_max_power_kw * slot_h)
                         batt_kwh -= dis_kwh
                         power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
                         action = "cover_load"
-                        reason = f"köp {slot.buy_sek:.2f}>V {V:.2f} → batteri {-power_w:.0f}W"
+                        reason = f"köp {slot.buy_sek:.2f}>V {V:.2f}+cykel → batteri {-power_w:.0f}W"
                     else:
                         action = "cover_load"
-                        reason = f"köp {slot.buy_sek:.2f}>V {V:.2f} men batteri vid reserven → nät"
+                        reason = f"köp {slot.buy_sek:.2f}>V {V:.2f}+cykel men batteri vid reserven → nät"
                 else:
-                    reason = f"köp {slot.buy_sek:.2f}≤V {V:.2f} → nät billigare, spara batteriet"
+                    reason = f"köp {slot.buy_sek:.2f}≤V {V:.2f}+cykel → nät billigare, spara batteriet"
             else:
                 reason = "balans: sol täcker last"
 

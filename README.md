@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.9-blue)
+![Version](https://img.shields.io/badge/version-0.9.10-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.9
+## What's New in 0.9.10
 
-> **⚠️ Do not deploy this version.** It's an in-progress, backtest-regressed attempt at step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), kept in source control for reference. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that.
+> **⚠️ Do not deploy this version.** It's an in-progress attempt at step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), kept in source control for reference. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that.
 
-A fourth bug in step 3's "marginal value V" computation, found via user code review: the merit-order acceptance loop ranked opportunities by value but only checked feasibility against a single point in time, letting a high-value opportunity late in the horizon get accepted before an earlier, lower-value one reserved its share — accepted volume reached 62–70 kWh against a physically available ~22 kWh. Fixed with a true minimum-slack check across the whole remaining horizon. Result: backtest savings improved from 45% to 55%, still short of step 2's 91%. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
+Found and fixed a bug in the *backtest tooling itself*: `testdata/backtest.py` was dividing a raw CSV price string by a float, silently defaulting `state.buy_price_sek_kwh`/`sell_price_sek_kwh` to a constant on every row for the whole session — corrupting only step 3's results, since steps 0–2 don't consume those fields. With correct prices in both runs, step 3 now reaches ~86% of step 2's profit (−99.26 vs. −114.85 SEK over the same 10 days) — a much smaller, and much more encouraging, gap than the previously-reported "45%"/"55% vs. 91%". See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
 
 See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
