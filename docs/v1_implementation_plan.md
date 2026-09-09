@@ -44,7 +44,11 @@ laddning (merit-order mot deadline, undviker batteriets nätladdningsslots)
 — men BARA planering. Ingen koppling till skarp laddarstyrning eller
 punkt 3-invarianten; kräver `coordinator.py`/`energy_controller.py`,
 medvetet stoppat inför den ändringen. Se "Steg 6 implementerat".
-Steg 7–8 inte påbörjade.
+**Steg 7:s rumsreglering (punkt 1, 3) parkerad (2026-09-09)** — rumsgivarna
+har bara ~6 veckors historik (sedan ~2026-07-25), inte de ~11 månader
+planen antog; meningsfull regression kräver en vintersäsong. Helhusdelarna
+(punkt 2, 4–6) är öppna. Se "STEG 7"-avsnittets nya notis. Steg 8 inte
+påbörjat.
 
 ---
 
@@ -798,20 +802,48 @@ Värmepumpen är 61–62 % av förbrukningen i januari och februari. Batteriet
 räcker till en dryg tredjedel av en januarinatt. Det här är den enda
 resursen som är i rätt storleksordning för vintern.
 
+**Rumsregleringen parkerad (2026-09-09) tills en vinters mätningar finns.**
+Datakontroll mot skarpa HA-instansen visade att antagandet "tretton
+rumstemperaturer... sedan oktober 2025" INTE stämmer: alla 13 individuella
+rumsgivare (plus de två medelvärdena `nere`/`uppe medelrumstemperatur`) har
+`state_class: measurement` (så långtidsstatistik funkar framåt) men började
+alla spela in data samtidigt, ~2026-07-25 — bara ~6 veckor, nästan
+uteslutande sensommar/tidig höst. Den dämpade utetemperaturen
+(`sensor.thermostat_dampedoutdoortemp`) och värmepumpens effektmätare
+(`sensor.ivt_total_active_power`) har DÄREMOT data sedan 2025-10-01 som
+antaget – det är bara rumsgivarna som är nya (troligen samma tillfälle
+EMS-ESP-klimatuppsättningen sattes upp). En regression av rumsvis
+tidskonstant/kWh-per-grad (punkt 1, underlag för punkt 3:s rumsvisa
+strategi) kräver ett temperaturspann regressionen kan förklara – 6 veckor
+sensommardata duger inte för att förstå ett rums vinterbeteende. Blir
+meningsfullt tidigast efter denna vinter (våren 2027).
+
+**Kvar öppet, inte beroende av rumsdata:** punkt 2 (håll elpatronerna
+utanför), 4 (COP-lönsamhetsregel), 5 (soldrift via pannans egen väg) och
+6 (dump/desinficering som schemalagda laster) är helhus-nivå, inte
+rumsspecifika – kan i princip påbörjas oberoende av rumsregleringen. En
+grövre HELHUS-regression (utetemp + värmepumpens energiräknare, samma typ
+som redan skisserad i `docs/forbrukningsanalys.md` avsnitt 7, fast inte
+rumsuppdelad) skulle också kunna göras nu, om punkt 1:s syfte (grovt
+tidskonstant/kWh-per-grad-underlag) behövs innan rumsdata finns.
+
 1. **Identifiera husets termiska parametrar** ur befintlig data. Tretton
    rumstemperaturer, dämpad utetemperatur och pannans energiräknare i
-   timupplösning sedan oktober 2025. En regression ger tidskonstant och
+   timupplösning sedan oktober 2025. ~~En regression ger tidskonstant och
    kWh per grad utan att någon behöver frysa en natt. Kontrollera först
-   vilka rumsgivare som har `state_class` och alltså långtidsstatistik.
+   vilka rumsgivare som har `state_class` och alltså långtidsstatistik.~~
+   **Parkerad – se ovan.** `state_class` kontrollerad och OK, men
+   historiken räcker inte än.
 2. **Håll elpatronerna utanför.** Förutsättningen för allt annat.
    `number.boiler_tempparmode` (10 °C idag) sänks mot 0…−5 °C,
    `auxheaterdelay` förlängs under dyra slots. Använd helpern
    "Eltillskott aktivt" som facit under intrimningen.
-3. **Rumsvis strategi, inte en gemensam offset.** Sovrummen (18 °C) är
+3. **Rumsvis strategi, inte en gemensam offset.** ~~Sovrummen (18 °C) är
    tomma under kvällstoppen och används på natten som är billig — de tål
    störst nedreglering just när det är dyrast. Vardagsrummet (21 °C) rörs
    minst. Förslag att utgå från: ±1 °C i vardagsrum och kök, ±1,5 °C i
-   sovrum och sällan använda rum, inget i badrum.
+   sovrum och sällan använda rum, inget i badrum.~~ **Parkerad – se ovan**,
+   bygger på punkt 1:s regression.
 4. **Lönsamhetsregel med COP.** Förvärmning kostar extra eftersom
    verkningsgraden sjunker vid högre framledning. Du har redan helpern
    "VP verkningsgrad".
