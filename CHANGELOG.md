@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.11
+
+Closed part of the remaining step 3 gap by re-enabling `battery_avg_cost_sek_kwh` as a floor under rule 4 (export) — **still not recommended for deployment**, but the gap to step 2 narrowed further.
+
+- **Rule 4 now requires `sell_now > max(V, battery_avg_cost_sek_kwh) + cycle_cost`, not just `V + cycle_cost`.** V is recomputed every ~15 minutes against a rolling 48h horizon, so a trade that looked profitable when the energy was charged (V high then) can still clear the bare `V + cycle` bar later even if V has since drifted down — the check only ever compares against *now*, never against what the energy actually cost. Verified in backtest: before this change, the grid-charge average price (1.47 SEK/kWh) was actually *higher* than the export average price (1.43 SEK/kWh) — the arbitrage was a wash despite every individual decision being locally correct at its own moment.
+- **`testdata/backtest.py` couldn't previously test this at all** — `EnergyState.battery_avg_cost_sek_kwh` was hardcoded to `0.0` in `build_state()`, since the real cost-basis accumulator (`BatteryAccumulatedCostSensor`, sensor.py) only exists in live HA. Added a matching miniature tracker (`sim_avg_cost_sek_kwh`) to the P7-2 forward simulation loop: solar charging books at sell price (opportunity cost), grid charging at buy price, discharge leaves the average untouched (only the underlying energy pool shrinks) — mirroring the documented live accounting rule in CLAUDE.md exactly.
+- **Result:** export average price rose from 1.43 to 1.72 SEK/kWh (fewer, better-quality exports — 26.6 kWh instead of 34.0, all clearing the real cost floor). Net cost improved from −99.26 to −102.87 SEK over the same 10 days. Step 3 now reaches **~90%** of step 2's profit (up from ~86%), gap narrowed from ~15.6 to ~12.0 SEK / 10 days.
+- `energy_planner.py` still contains only step 3's code, not recommended for deployment. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance.
+
 ## What's New in 0.9.10
 
 A fifth finding — this time in the **backtest tooling itself**, not the planner — that substantially revises how step 3's prior results (v0.9.8's 45%, v0.9.9's 55%) should be read. **Still not recommended for deployment**, but the gap to step 2 turns out to be much smaller than previously reported.

@@ -548,6 +548,14 @@ def run_backtest(
     # P7-2: framåtsimulerad batterimodell + referens utan batteri/styrning
     sim_soc: Optional[float] = None
     sim_prev_battery_power_w: Optional[float] = None
+    # Speglar BatteryAccumulatedCostSensor (sensor.py) i miniatyr: sol till
+    # batteri bokförs till säljpris (alternativkostnad), nät till köppris,
+    # urladdning skriver INTE ner snittkostnaden (bara den totala poolen
+    # krymper proportionellt - se CLAUDE.md "Batterikostnad"). Utan den här
+    # spegling var battery_avg_cost_sek_kwh alltid 0.0 i backtest (state.py
+    # hårdkodar den), vilket gjorde v1.0 steg 3:s regel 4-broms mot att
+    # sälja under lagringskostnad omöjlig att verifiera.
+    sim_avg_cost_sek_kwh: float = 0.0
     total_sim_import_kwh   = 0.0
     total_sim_export_kwh   = 0.0
     total_sim_cost_sek     = 0.0
@@ -693,7 +701,7 @@ def run_backtest(
                         solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
                         solar_takeover_dt=None,
                         house_load_w=state.house_load_w,
-                        battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
+                        battery_avg_cost_sek_kwh=sim_avg_cost_sek_kwh,
                         yesterday_consumption_kwh=state.yesterday_consumption_kwh,
                         house_load_avg_w=state.house_load_avg_w,
                     )
@@ -721,6 +729,22 @@ def run_backtest(
             sim_export_kwh = max(0.0, -sim_grid_w / 1000.0 * slot_h)
             sim_cost_sek   = sim_import_kwh * state.buy_price_sek_kwh
             sim_rev_sek    = sim_export_kwh * state.sell_price_sek_kwh
+
+            # Snittkostnad (SEK/kWh) för den lagrade energin, samma princip
+            # som BatteryAccumulatedCostSensor (sensor.py): sol till
+            # batteri bokförs till säljpris (alternativkostnad), nät till
+            # köppris. Uppdateras bara vid laddning - urladdning ändrar inte
+            # snittkostnaden, bara hur mycket energi den gäller för (se
+            # kommentaren vid variabelns deklaration).
+            if sim_decision.battery_charge_power_w > 50:
+                _old_kwh = sim_soc / 100.0 * s["battery_capacity_kwh"]
+                _charge_kwh = sim_decision.battery_charge_power_w / 1000.0 * slot_h
+                _solar_kwh = min(_charge_kwh, max(0.0, sim_solar_surplus_w) / 1000.0 * slot_h)
+                _grid_kwh = _charge_kwh - _solar_kwh
+                _charge_cost_sek = _solar_kwh * state.sell_price_sek_kwh + _grid_kwh * state.buy_price_sek_kwh
+                _new_kwh = _old_kwh + _charge_kwh
+                if _new_kwh > 0.01:
+                    sim_avg_cost_sek_kwh = (sim_avg_cost_sek_kwh * _old_kwh + _charge_cost_sek) / _new_kwh
 
             new_sim_soc = _simulate_battery_soc(
                 sim_soc, sim_decision.battery_charge_power_w,

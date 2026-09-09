@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.11
+
+Stängde en del av det kvarvarande steg 3-gapet genom att återinföra `battery_avg_cost_sek_kwh` som en golv-broms under regel 4 (export) – **fortfarande inte rekommenderad för driftsättning**, men gapet till steg 2 krympte ytterligare.
+
+- **Regel 4 kräver nu `sälj_nu > max(V, battery_avg_cost_sek_kwh) + cykelkostnad`, inte bara `V + cykelkostnad`.** V räknas om var ~15:e minut mot en rullande 48h-horisont, så en affär som såg lönsam ut när energin laddades (V högt då) kan fortfarande klara det enkla `V + cykel`-kravet senare även om V sjunkit sedan dess – kontrollen jämför bara mot NUET, aldrig mot vad energin faktiskt kostade. Verifierat i backtest: innan den här ändringen låg nätladdningens snittpris (1,47 kr/kWh) faktiskt HÖGRE än exportens snittpris (1,43 kr/kWh) – arbitraget var ett nollsummespel trots att varje enskilt beslut var lokalt korrekt vid sitt eget tillfälle.
+- **`testdata/backtest.py` kunde tidigare inte testa det här alls** – `EnergyState.battery_avg_cost_sek_kwh` var hårdkodad till `0.0` i `build_state()`, eftersom den riktiga kostnadsackumulatorn (`BatteryAccumulatedCostSensor`, sensor.py) bara finns i skarp HA-drift. Lade till en motsvarande minispårare (`sim_avg_cost_sek_kwh`) i P7-2:s framåtsimulering: sol till batteri bokförs till säljpris (alternativkostnad), nät till köppris, urladdning lämnar snittet orört (bara energipoolen krymper) – speglar den dokumenterade skarpa redovisningsregeln i CLAUDE.md exakt.
+- **Resultat:** exportsnittpriset steg från 1,43 till 1,72 kr/kWh (färre, bättre exportaffärer – 26,6 kWh istället för 34,0, alla över det riktiga kostnadsgolvet). Nettokostnaden förbättrades från −99,26 till −102,87 kr över samma 10 dagar. Steg 3 når nu **~90 %** av steg 2:s vinst (upp från ~86 %), gapet krympte från ~15,6 till ~12,0 kr/10 dagar.
+- `energy_planner.py` innehåller fortfarande bara steg 3:s kod, inte rekommenderad för driftsättning. v0.9.7 (commit `a57cea2`) förblir den senast verifierade, säkra versionen att köra mot den riktiga HA-instansen.
+
 ## Nyheter i 0.9.10
 
 Ett femte fynd — den här gången i själva backtest-verktyget, inte i planeraren — som väsentligt omprövar hur steg 3:s tidigare resultat (v0.9.8:s 45 %, v0.9.9:s 55 %) ska läsas. **Fortfarande inte rekommenderad för driftsättning**, men gapet till steg 2 visar sig vara mycket mindre än tidigare rapporterat.

@@ -153,15 +153,13 @@ class EnergyPlanner:
         load_shape_p50: Optional[list] = None,
         load_shape_p75: Optional[list] = None,
     ) -> DayPlan:
-        # solar_forecast_tomorrow_kwh, solar_takeover_dt och
-        # battery_avg_cost_sek_kwh konsumeras inte längre av logiken nedan
-        # (v1.0 steg 3): V:s merit-order-allokering ser redan morgondagens
-        # sol_p10 per slot via ps.slots, och exportbeslutet (regel 4) är nu
-        # rent framåtblickande – V representerar redan bästa alternativa
-        # användning av energin, så vad den en gång kostade att lagra
-        # (sunk cost) styr inte längre om den är värd att sälja nu. Kvar i
+        # solar_forecast_tomorrow_kwh och solar_takeover_dt konsumeras inte
+        # längre av logiken nedan (v1.0 steg 3): V:s merit-order-allokering
+        # ser redan morgondagens sol_p10 per slot via ps.slots. Kvar i
         # signaturen bara för att inte behöva röra coordinator.py:s anrop
-        # innan steg 4:s städning.
+        # innan steg 4:s städning. battery_avg_cost_sek_kwh används
+        # däremot fortfarande, som en broms mot regel 4 (export) – se
+        # kommentaren där.
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
 
@@ -440,7 +438,20 @@ class EnergyPlanner:
                     power_w = min(charge_kwh / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
                     action = "grid_charge"
                     reason = f"nätladda {slot.buy_sek:.2f}+cykel<V·η {V_charge:.2f}"
-                elif deficit_kwh <= 0.01 and slot.sell_sek > V + self.cycle_cost_sek_kwh:
+                # Regel 4:s tröskel är max(V, battery_avg_cost) + cykel, inte
+                # bara V. V beräknas om varje planeringscykel mot en 48h-
+                # horisont som vandrar framåt i tiden – en affär som var
+                # lönsam när energin laddades (V högt då) kan se lönsam ut
+                # för export senare även om V sjunkit under tiden, eftersom
+                # V bara jämförs mot NUET, inte mot vad energin faktiskt
+                # kostade. Verifierat i backtest: grid_charge-snittpriset
+                # (1,47 kr/kWh) låg FAKTISKT ÖVER export-snittpriset
+                # (1,43 kr/kWh) innan den här spärren – handeln var i
+                # praktiken ett nollsummespel trots att varje enskilt beslut
+                # följde V korrekt vid sitt eget tillfälle. battery_avg_cost
+                # (bokförd kostnad, se sensor.py:s ackumulator) är den enda
+                # tillgängliga bromsen mot just den glidande-horisont-effekten.
+                elif deficit_kwh <= 0.01 and slot.sell_sek > max(V, battery_avg_cost_sek_kwh) + self.cycle_cost_sek_kwh:
                     avail = max(0.0, batt_kwh - _reserved_kwh)
                     if avail > 0.01:
                         dis_kwh = min(avail, battery_max_power_kw * slot_h)
@@ -448,7 +459,7 @@ class EnergyPlanner:
                         power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
                         action = "export"
                         expected_revenue += dis_kwh * slot.sell_sek
-                        reason = f"exportera {slot.sell_sek:.2f}>V {V:.2f}+cykel"
+                        reason = f"exportera {slot.sell_sek:.2f}>max(V {V:.2f}, snittkostnad {battery_avg_cost_sek_kwh:.2f})+cykel"
 
             planned.append(PlannedSlot(
                 start=slot.start.astimezone(),

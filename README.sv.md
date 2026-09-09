@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.10-blue)
+![Version](https://img.shields.io/badge/version-0.9.11-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.10
+## Nyheter i 0.9.11
 
 > **⚠️ Driftsätt inte den här versionen.** Det är ett pågående försök på steg 3 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), sparat i källkoden som referens. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den.
 
-Hittade och fixade en bugg i SJÄLVA backtest-verktyget: `testdata/backtest.py` dividerade en rå CSV-prissträng med ett flyttal, vilket tyst satte `state.buy_price_sek_kwh`/`sell_price_sek_kwh` till en konstant på varje rad hela sessionen – förorenade bara steg 3:s resultat, eftersom steg 0–2 inte konsumerar de fälten. Med korrekta priser i båda körningarna når steg 3 nu ~86 % av steg 2:s vinst (−99,26 mot −114,85 kr över samma 10 dagar) – ett mycket mindre, och mycket mer uppmuntrande, gap än de tidigare rapporterade "45 %"/"55 % mot 91 %". Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
+Återinförde `battery_avg_cost_sek_kwh` som en golv-broms under exportregeln, så en affär som såg lönsam ut när energin laddades inte kan klara sig bara på ett sedan sjunkande V – den måste också slå vad energin faktiskt kostade. Lade även till motsvarande kostnadsspårare i `testdata/backtest.py`:s simulering (tidigare hårdkodad till 0, så det gick inte att testa alls). Resultat: exportsnittpriset steg från 1,43 till 1,72 kr/kWh, nettokostnaden förbättrades till −102,87 kr – steg 3 når nu ~90 % av steg 2:s vinst, upp från ~86 %. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
 
 Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 

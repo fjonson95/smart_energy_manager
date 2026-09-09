@@ -23,15 +23,16 @@ verifierade. **Steg 2 klart (v0.9.7):** golvet är nu en avtagande
 (`_FLOOR_SAFETY_CAP_FRACTION`) borttagen, prisspärren ("Option B") behållen
 i väntan på en riktig vinterbacktest — se avsnitt "Steg 2 implementerat"
 nedan för detaljer och verifieringsresultat. **Steg 3 försökt men INTE
-klart (v0.9.8–v0.9.9) — fem fynd (fyra i planeraren, ett i
+klart (v0.9.8–v0.9.11) — sex fynd (fem i planeraren, ett i
 `testdata/backtest.py` självt: en trasig prissträng→float-konvertering
 som gett alla tidigare procenttal i den här filen/CHANGELOG en missvisande
-referens), fortfarande under steg 2 men gapet nu litet: −99,26 kr mot
-steg 2:s −114,85 kr över samma 10 dagar (~86 % av steg 2:s vinst), INTE
+referens), fortfarande under steg 2 men gapet nu litet: −102,87 kr mot
+steg 2:s −114,85 kr över samma 10 dagar (~90 % av steg 2:s vinst), INTE
 driftsatt.** `energy_planner.py` innehåller för närvarande steg 3:s kod
 (`reserve_at(t)` är borttagen ur filen, ersatt), men v0.9.7
 (commit `a57cea2`) är den senast verifierade, säkra versionen att köra —
-se avsnitt "Steg 3 implementerat" nedan, särskilt "Femte fyndet", för
+se avsnitt "Steg 3 implementerat" nedan, särskilt "Femte" och "Sjätte
+fyndet", för
 grundorsaksanalysen innan arbetet återupptas. **Steg 4 pausat** tills
 steg 3 slår steg 2 i backtest — se motivering i "Steg 3 implementerat".
 Steg 5–8 inte påbörjade.
@@ -528,6 +529,45 @@ tidigare buggfixarna), inte som exakta tal.
 nu litet nog att vara värt att fortsätta stänga med riktade fixar
 (t.ex. horisontbegränsningen eller nätladdningens lönsamhet) istället för
 att anses kräva en ny grundarkitektur. INTE driftsatt än.
+
+#### Sjätte fyndet: nätladdning och export nettade inte mot varandra (v0.9.11)
+
+Undersökte varför affären (nätladda→exportera) knappt gick jämnt upp:
+`grid_charge`-snittpriset (1,47 kr/kWh) låg FAKTISKT ÖVER export-
+snittpriset (1,43 kr/kWh) i v0.9.10:s körning. Orsak: regel 4 jämför bara
+`sälj_nu > V + cykel`, aldrig mot vad energin faktiskt kostade att lagra.
+V räknas om varje planeringscykel mot en 48h-horisont som vandrar framåt
+i tiden – ett beslut som var lokalt rationellt vid laddningstillfället
+(V var högt då) kan fortfarande klara det enkla V-kravet vid
+exporttillfället även om V sjunkit under tiden, eftersom kontrollen
+aldrig minns vad som en gång motiverade laddningen.
+
+`battery_avg_cost_sek_kwh` (planerarens redan existerande, men efter
+steg 3:s omskrivning oanvända, parameter) är precis den broms som saknas
+– samma princip Option B/steg 0–2 redan använde. Regel 4 ändrad till
+`sälj_nu > max(V, battery_avg_cost_sek_kwh) + cykel`.
+
+Kunde dock inte verifieras direkt: `testdata/backtest.py` hårdkodade
+`EnergyState.battery_avg_cost_sek_kwh = 0.0` i `build_state()` – den
+riktiga kostnadsackumulatorn (`BatteryAccumulatedCostSensor`, sensor.py)
+finns bara i skarp drift. Lade till en motsvarande minispårare
+(`sim_avg_cost_sek_kwh`) i P7-2:s framåtsimuleringsloop, som speglar
+CLAUDE.md:s dokumenterade regel exakt: sol till batteri bokförs till
+säljpris (alternativkostnad), nät till köppris, urladdning lämnar
+snittkostnaden orörd (bara energipoolen den gäller för krymper).
+
+**Resultat:** exportsnittpriset steg till 1,72 kr/kWh (färre men bättre
+exportaffärer – 26,6 kWh istället för 34,0, alla nu över det riktiga
+kostnadsgolvet). Nettokostnaden förbättrades från −99,26 till −102,87 kr
+över samma 10 dagar. **Steg 3 når nu ~90 % av steg 2:s vinst**, upp från
+~86 %. Gapet är ~12,0 kr/10 dagar.
+
+Stickprov av kvarvarande "sälj direkt"-tillfällen (istället för att
+ladda batteriet) visar inget uppenbart nytt fel – de flesta är antingen
+batteriet redan fullt (inget annat val för överskottet) eller nära
+brytpunkten. Kvarvarande gap bedöms nu bero mer på den redan
+identifierade horisontbegränsningen (skyddar bara ~2 synliga nätter) än
+på ytterligare trösklfel.
 
 **Steg 4 pausat (2026-09-09).** Kartläggning inför steg 4 visade att
 `prefer_sell`, `economic_peak`, `sell_solar_min_price` och
