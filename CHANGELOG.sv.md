@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.16
+
+Utökade backtest-fönstret mot riktig data från en månad till fyra, på uttrycklig begäran. **Inga kodändringar — bara testdata och dokumentation, ingen funktionell release.**
+
+- **`testdata/history_jan_apr2026/`** — slår ihop `testdata/history_jan2026/` med tre ytterligare månader HA-långtidsstatistik (samma sensorer, samma `statistic_types=["state"]`-fix för Nordpool-prissensorn) och tre nya iSolarCloud-solexporter (februari–april 2026), vilket ger en sammanhängande 120-dygnsperiod (2025-12-31–2026-04-30).
+- **Datakvalitetsfynd**: mars- och april-exporterna från iSolarCloud innehåller utspridda negativa kW-avläsningar (62 respektive 88 timmar av totalt ~1460) under eftermiddagstimmar med lågt/svängande ljus — tolkat som växelriktarens egen driftsförbrukning mot nätet, inte faktisk negativ produktion (januari och februari är rena). Klampat till 0 W före konvertering; husets riktiga nätuttag under de timmarna bokförs redan separat via nätfassensorerna, så inget dubbelräknas eller går förlorat.
+- **Backtest-resultat över hela 4-månadersperioden**: steg 2 (`a57cea2`, säker/driftsatt) — 5,5 % besparing (625,04 kr, 5,21 kr/dygn), klart över januari ensamt (1,3 %) eftersom feb–apr har mycket mer sol. Steg 3+5+6 (nuvarande, odriftsatt) — 3,9 % (445,25 kr, 3,71 kr/dygn). Gapet mot steg 2 krymper kraftigt jämfört med januari ensamt (1,3 % mot 0,2 % där) men stängs inte — 48h-horisont-svagheten är starkast i ren vinter men försvinner inte helt när vårmånader blandas in.
+- Se `docs/v1_implementation_plan.md`, "Utökning till januari–april 2026" under "Steg 2 implementerat", för hela genomgången.
+
 ## Nyheter i 0.9.15
 
 Steg 7, punkt 6 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — dump-/desinficeringsschemaläggningen, på uttrycklig begäran. **Fortfarande inte kopplad till skarp styrning, inte rekommenderad för driftsättning.**

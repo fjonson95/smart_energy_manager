@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.16
+
+Extended the real-data backtest window from one month to four, at explicit request. **No code changes — testdata and documentation only, not a functional release.**
+
+- **`testdata/history_jan_apr2026/`** — merges `testdata/history_jan2026/` with three more months of HA long-term statistics (same sensors, same `statistic_types=["state"]` fix for the Nordpool price sensor) and three more iSolarCloud solar exports (February–April 2026), producing one continuous 120-day dataset (2025-12-31–2026-04-30).
+- **Data-quality finding**: the March and April iSolarCloud exports contain scattered negative kW readings (62 and 88 hours respectively, out of ~1460) during low/variable-light afternoon hours — read as the inverter's own idle draw against the grid, not actual negative production (January and February are clean). Clamped to 0 W before conversion; the house's real grid draw during those hours is already accounted for separately via the grid-phase sensors, so nothing is double-counted or lost.
+- **Backtest results over the full 4 months**: step 2 (`a57cea2`, safe/deployed) — 5.5% savings (625.04 SEK, 5.21 SEK/day), well above January alone (1.3%) since Feb–Apr have far more sun. Step 3+5+6 (current, undeployed) — 3.9% (445.25 SEK, 3.71 SEK/day). The gap versus step 2 narrows sharply compared to January alone (1.3% vs 0.2% there) but doesn't close — the 48h-horizon weakness is worst in deep winter but doesn't fully disappear once spring months are mixed in.
+- See `docs/v1_implementation_plan.md`, "Utökning till januari–april 2026" under "Steg 2 implementerat", for the full writeup.
+
 ## What's New in 0.9.15
 
 Step 7, point 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the dump/disinfection scheduling rules, by explicit request. **Still not wired to live control, not recommended for deployment.**

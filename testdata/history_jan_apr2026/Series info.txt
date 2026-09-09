@@ -1,0 +1,61 @@
+P7-1-utökning — januari–april 2026, extraherad 2026-09-09
+============================================================
+
+Utökning av testdata/history_jan2026/ till fyra sammanhängande månader,
+byggd från samma HA-långtidsstatistik-pipeline plus tre ytterligare
+iSolarCloud-exporter (februari, mars, april 2026).
+
+Täcker: 2025-12-31 23:00 UTC – 2026-04-30 22:00 UTC (120 dygn, matchar
+kalendermånaderna januari–april i lokal tid Europe/Stockholm).
+
+Fil                          Storhet                 Källa                                                        Upplösning
+------------------------------------------------------------------------------------------------------------------------------
+solar_hourly.csv             Solproduktion (W)       iSolarCloud "Curve"-export (Inverter1, kW->W konverterat)    1h
+house_load_hourly.csv        Huslast (W)             sensor.el_forbruk_power_power (HA statistics)                1h
+outdoor_temp_hourly.csv      Utomhustemp (°C)        sensor.boiler_outdoortemp (HA statistics)                    1h
+battery_soc_hourly.csv       Batteri-SOC (%)         sensor.sonnenbatterie_271100_..._percentage_real             1h
+grid_l1/l2/l3_hourly.csv     Nätfas L1/L2/L3 (kW)    sensor.elmatare_active_power_l1/l2/l3                        1h
+battery_inout_hourly.csv     Batteri in/ut (W)       sensor.sonnenbatterie_271100_state_battery_inout             1h
+heat_pump_power_hourly.csv   Värmepump IVT (W)       sensor.ivt_total_active_power                                1h
+price_quarterhour.csv        Spotpris (SEK/kWh)      sensor.nordpool_kwh_se3_sek_3_10_0_2 (HA statistics)         1h, replikerad 4x/h
+
+Samma VIKTIGT-anmärkning som i history_jan2026/Series info.txt gäller
+price_quarterhour.csv (skenbart kvartsupplöst, i praktiken 1h-forward-fill).
+
+Negativa solvärden (mars/april)
+--------------------------------
+iSolarCloud-exporterna för mars (62 timmar) och april (88 timmar) 2026
+innehåller enstaka negativa kW-värden (t.ex. -6,163 kW), företrädesvis
+under eftermiddags-/kvällstimmar med sannolikt lågt/svängande ljus.
+Detta är fysiskt orimligt för "Total active power" i produktionsriktning
+och tolkas som växelriktarens egen driftsförbrukning (den lilla effekt
+växelriktaren drar av nätet för att hålla sig aktiv vid för lite sol) —
+inte faktisk negativ solproduktion. Januari och februari är helt fria
+från negativa värden.
+
+Hantering: negativa värden klampas till 0 W i _build_all.py (rad med
+"if kw < 0: kw = 0.0"). Växelriktarens egen förbrukning bokförs redan
+separat i husets nätuttag (grid_l1/l2/l3 + house_load), så klampningen
+tappar ingen energibokföring — den bara undviker att räkna in den som
+negativ "solproduktion" i solar_hourly.csv, vilket build_plan() och
+backtest.py inte är byggda för att hantera (Solcast-liknande fält
+förväntas alltid vara ≥ 0).
+
+Återskapa/utöka
+-----------------
+_build_all.py: bygger alla åtta serier + solar_hourly.csv +
+price_quarterhour.csv genom att slå ihop testdata/history_jan2026/ (redan
+byggd) med tre nya HA-statistics-frågor (sparade som tool-result-JSON,
+sökväg hårdkodad i skriptet — se MONTH_FILES) och tre iSolarCloud-CSV:er
+(Downloads-mappen, inte incheckad här). _price_state_feb/mar/apr.json:
+Nordpool-prisets "state"-fält (samma orsak som i history_jan2026 — bara
+state/sum/change finns i långtidsstatistiken för den här sensorn, inte
+mean).
+
+Kör backtest mot den här mappen:
+  python testdata/backtest.py testdata/history_jan_apr2026 --out resultat.csv
+
+Känd datalucka som INTE är löst av det här: bara januari–april 2026,
+inte sommar/höst eller flera år. Soldata är uteslutande från
+iSolarCloud-exporten (inte HA, som bara har ~1 månad soldata sedan
+~2026-08-06).

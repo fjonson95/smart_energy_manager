@@ -55,7 +55,12 @@ schemalagda laster) klar (v0.9.15):** `should_dump_to_hot_water()` och
 avsiktligt orörd (stateful, skarp styrning trots att den inte heter
 coordinator/energy_controller). **Steg 7 pausat (2026-09-09)** — punkt 2
 (elpatroner utanför) och 5 (soldrift via pannans egen väg) inte
-påbörjade. Se "Steg 7 implementerat". Steg 8 inte påbörjat.
+påbörjade. Se "Steg 7 implementerat". **Testdata utökat till
+januari–april 2026 (v0.9.16):** `testdata/history_jan_apr2026/` —
+steg 2 fortfarande före steg 3+5+6 över hela perioden (5,5 % mot 3,9 %),
+men gapet krymper klart jämfört med januari ensamt (1,3 % mot 0,2 %) — se
+"Utökning till januari–april 2026" under "Steg 2 implementerat". Steg 8
+inte påbörjat.
 
 ---
 
@@ -391,6 +396,34 @@ mer än sommarkörningarna någonsin visat, eftersom vinterlasterna
 (värmepump + elpatron) är mycket högre. Inte utrett vidare än; flaggat
 som en möjlig separat brist att undersöka oavsett vilken planerarversion
 som används.
+
+### Utökning till januari–april 2026 (v0.9.16, 2026-09-09)
+
+Användaren extraherade motsvarande iSolarCloud-export för februari, mars
+och april 2026 ("kör hårt igen"). `testdata/history_jan_apr2026/` (se
+mappens `Series info.txt`) slår ihop `testdata/history_jan2026/` med tre
+nya HA-statistics-frågor och de tre nya soldata-exporterna till en
+sammanhängande 120-dygnsperiod (2025-12-31–2026-04-30).
+
+**Datakvalitetsfynd:** mars- och april-exporterna innehåller enstaka
+negativa kW-värden (62 respektive 88 av totalt ~1460 timmar) — tolkat som
+växelriktarens egen driftsförbrukning vid låg/svängande sol, inte faktisk
+negativ produktion. Klampat till 0 W (se `Series info.txt` för
+resonemang); januari och februari är helt fria från detta.
+
+**Resultat, steg 2 (`a57cea2`) mot hela jan–apr:** 5,5 % besparing mot
+referens (625,04 kr, 5,21 kr/dygn) — betydligt bättre än januari ensamt
+(1,3 %), väntat eftersom februari–april har mycket mer sol än januari.
+
+**Resultat, steg 3+5+6 (nuvarande, ODRIFTSATT kod) mot samma period:**
+3,9 % (445,25 kr, 3,71 kr/dygn) — gapet mot steg 2 krymper klart jämfört
+med januari ensamt (0,2 % där) men steg 3+5+6 slår fortfarande inte steg 2
+över den längre, mer solrika perioden. Bekräftar att 48h-horisont-
+svagheten är starkast i ren vinter men inte helt försvinner när våren
+blandas in — gapet är fortfarande öppet, inte stängt.
+
+Fasgränsbifyndet från januari (`_apply_phase_limits`-korrigeringar) inte
+omkontrollerat mot den längre perioden.
 
 ---
 
@@ -1028,6 +1061,14 @@ med alla nyckelserier, inklusive sol via en iSolarCloud-export. Juli
 samma mönster (HA-långtidsstatistik + en motsvarande iSolarCloud-
 export) skulle lösa det, bara inte gjort än. "Kör mot hela året" i
 bemärkelsen sammanhängande, är fortfarande inte uppfyllt.
+
+**Uppdatering (2026-09-09, senare samma dag): utökat till januari–april.**
+Se "Utökning till januari–april 2026" under "Steg 2 implementerat" ovan —
+`testdata/history_jan_apr2026/` täcker nu en sammanhängande 120-
+dygnsperiod (vinter + tidig vår). Maj–december 2026 samt juli (steg 5:s
+eget acceptanstest) fortfarande olösta; "kör mot hela året" fortfarande
+inte uppfyllt, men fönstret är nu fyra gånger så långt som januari
+ensamt.
 
 1. **Två syratester.** Januari 2026 med de nolldygnen (15 dygn med exakt
    0,0 kWh, 11 i följd 4–14 jan — bekräftat, se
