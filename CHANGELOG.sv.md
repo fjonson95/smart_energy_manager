@@ -2,6 +2,17 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.17
+
+Torkrisk-påslag på V, drivet av SMHI:s väderprognos — ett försök på horisontproblemet från en annan vinkel än v0.9.16:s datautökning. **Inte kopplad till skarp styrning, inte rekommenderad för driftsättning. Verifierad säker (ingen regression) men obevisad (nolleffekt) i backtest.**
+
+- **Två versioner utredda, den första bortplockad.** v1 provade ett absolut kWh-golv storleksatt från Solcasts dag 3-6-prognos (`_drought_reserve_kwh`, nu borttagen) — verifierad mot handbyggda scenarier, men gav en **regression** i backtest (-3,2 %, sämre än inget batteri alls) mot riktig data: husets uppvärmningsdominerade dygnslast (30-70+ kWh) vida överstiger det ~30 kWh stora batteriet, så ett absolut flerdygnsunderskottsgolv mättade 98-99 % av alla vinterdagar, inte bara vid genuina torkor.
+- **Grundorsaksomtolkning, förankrad i riktig data.** Användaren identifierade att januaris 11 nolldagar berodde på snötäckta paneler, inte moln — bekräftat mot historisk väderdata (Open-Meteo archive-api): 10-11 januari hade bara 23-25 % molntäckning men ändå 0,0 kWh sol, vilket molntäckning ensam inte kan förklara. Snöns fysik (klibbar mellan -5 och +5°C, glider av när dygnsmax korsar ~0-2°C, kyla i sig återtäcker aldrig en redan fri panel) matchade datan väl. `weather.smhi_home` (redan installerad) ger en 10-dygns dygnsprognos via `weather.get_forecasts` med allt som behövs — ingen ny sensor krävs.
+- **v2**: `_simulate_drought_days()` simulerar paneltillstånd (täckt/fri) framåt utifrån en väderprognoslista; `_drought_markup()` höjer V, kapat vid samma 3,0×-tak `_uncertainty_markup()` redan använder (`max()`, inte `+`, så de två signalerna aldrig kan stapla förbi ett redan verifierat säkert tak). Ett kalibreringssvep (7 tröskel-/lutningskombinationer) visade ett tydligt mönster — mer konservativ (bara reagera på de djupaste, säkraste torkorna) är bättre — men planade ut vid 3,6 %, fortfarande under 3,9 % (referens utan mekanismen).
+- **Slutlig avgränsningsfix**: `V_charge` (regel 1/3, köp-/laddsidan) räknas nu UTAN torkpåslaget — bara `V` (regel 2/4, håll-kvar-/säljsidan) påverkas. Resultat: exakt 3,9 %, byte-identiskt med att inte ha mekanismen alls — verifierat genom att söka i backtestens `reason`-kolumn efter de exakta strängarna regel 2/4 skriver, noll träffar under någondera torkans uppladdningsdagar (nätpriset var redan billigare än V under själva torkan; solöverskottet innan februari-torkan fångades redan av regel 1 innan regel 4 fick chansen att spela roll). Inget bevis på att idén är fel — bara att den inte syns i det här specifika datasetet.
+- Nya testverktyg: `testdata/history_jan_apr2026/weather_oracle.csv` + `_build_weather_oracle.py` (riktig historisk väderdata från Open-Meteo, använd som orakel-ersättning för en perfekt SMHI-prognos — en optimistisk övre gräns, inte en riktig prognossimulering) och en `--drought-oracle`-flagga i `testdata/backtest.py`.
+- **Inte gjort**: `coordinator.py`/`const.py`/`config_flow.py`-inkopplingen (`CONF_WEATHER_ENTITY`, det faktiska `weather.get_forecasts`-anropet) — den avsiktliga stanna-upp-punkten innan skarp uppdateringskod rörs, enligt sessionens standardregel.
+
 ## Nyheter i 0.9.16
 
 Utökade backtest-fönstret mot riktig data från en månad till fyra, på uttrycklig begäran. **Inga kodändringar — bara testdata och dokumentation, ingen funktionell release.**

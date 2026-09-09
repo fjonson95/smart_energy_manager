@@ -464,6 +464,7 @@ def run_backtest(
     overrides: dict,
     date_from: Optional[datetime] = None,
     date_to:   Optional[datetime] = None,
+    drought_oracle: bool = False,
 ):
     s = {**SETTINGS, **overrides}
 
@@ -532,6 +533,31 @@ def run_backtest(
             if sv is not None:
                 hourly_solar_w[ts] = sv
     all_prices.sort()
+
+    # --drought-oracle (testverktyg för v2 av torkrisk-påslaget, docs/
+    # v1_implementation_plan.md "Torkrisk-påslag från SMHI:s väderprognos"):
+    # bygger weather_forecast från riktig HISTORISK väderdata (Open-Meteo
+    # archive-api, se testdata/history_jan_apr2026/_build_weather_oracle.py)
+    # istället för en arkiverad SMHI-prognos (finns inte). Ett orakel för en
+    # perfekt väderprognos — se plandokumentets brasklapp om verifiering.
+    _weather_oracle_path = os.path.join(data_path, "weather_oracle.csv") if is_history_dir else None
+    daily_weather: dict = {}
+    if drought_oracle and _weather_oracle_path and os.path.exists(_weather_oracle_path):
+        with open(_weather_oracle_path, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                daily_weather[datetime.fromisoformat(row["date"]).date()] = (
+                    row["condition"], float(row["temp_max_c"]), float(row["temp_min_c"]),
+                )
+
+    def _oracle_weather_forecast(ts: datetime) -> list[tuple]:
+        day0 = ts.astimezone(timezone.utc).date()
+        out = []
+        for offset in range(1, 7):
+            d = day0 + timedelta(days=offset)
+            if d in daily_weather:
+                condition, tmax, tmin = daily_weather[d]
+                out.append((d, condition, tmax, tmin))
+        return out
 
     # Ackumulatorer för sammanfattning
     total_grid_import_kwh  = 0.0
@@ -628,6 +654,8 @@ def run_backtest(
                         battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
                         yesterday_consumption_kwh=state.yesterday_consumption_kwh,
                         house_load_avg_w=state.house_load_avg_w,
+                        current_outdoor_temp_c=state.outdoor_temp_c if drought_oracle else None,
+                        weather_forecast=_oracle_weather_forecast(ts) if drought_oracle else None,
                     )
                 except Exception as _plan_err:
                     sys.stdout.buffer.write(f"DayPlan-fel vid {ts}: {_plan_err}\n".encode("utf-8"))
@@ -704,6 +732,8 @@ def run_backtest(
                         battery_avg_cost_sek_kwh=sim_avg_cost_sek_kwh,
                         yesterday_consumption_kwh=state.yesterday_consumption_kwh,
                         house_load_avg_w=state.house_load_avg_w,
+                        current_outdoor_temp_c=state.outdoor_temp_c if drought_oracle else None,
+                        weather_forecast=_oracle_weather_forecast(ts) if drought_oracle else None,
                     )
                 except Exception as _sim_plan_err:
                     sys.stdout.buffer.write(f"Sim DayPlan-fel vid {ts}: {_sim_plan_err}\n".encode("utf-8"))
@@ -923,6 +953,17 @@ def main():
     parser.add_argument("--percentile", type=float)
     parser.add_argument("--date-from",  help="YYYY-MM-DD")
     parser.add_argument("--date-to",    help="YYYY-MM-DD")
+    parser.add_argument(
+        "--drought-oracle", action="store_true",
+        help=(
+            "Testverktyg för torkrisk-påslaget v2 (docs/v1_implementation_plan.md, "
+            "\"Torkrisk-påslag från SMHI:s väderprognos\"): bygg weather_forecast "
+            "från RIKTIG historisk väderdata (weather_oracle.csv i katalogen, byggd "
+            "från Open-Meteo archive-api) istället för en arkiverad SMHI-prognos "
+            "(finns inte). Ett orakel, INTE en riktig prognos-simulering — ger en "
+            "optimistisk övre gräns, inte ett förväntat verkligt utfall."
+        ),
+    )
     args = parser.parse_args()
 
     overrides = {}
@@ -932,7 +973,7 @@ def main():
     date_from = datetime.fromisoformat(args.date_from).replace(tzinfo=timezone.utc) if args.date_from else None
     date_to   = datetime.fromisoformat(args.date_to  ).replace(tzinfo=timezone.utc) if args.date_to   else None
 
-    run_backtest(args.input, args.out, overrides, date_from, date_to)
+    run_backtest(args.input, args.out, overrides, date_from, date_to, drought_oracle=args.drought_oracle)
 
 
 if __name__ == "__main__":

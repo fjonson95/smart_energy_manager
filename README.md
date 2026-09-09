@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.16-blue)
+![Version](https://img.shields.io/badge/version-0.9.17-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.16
+## What's New in 0.9.17
 
-> **⚠️ No functional changes in this release.** Testdata and documentation only — see v0.9.15 below for the last functional (and still undeployed) code change. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that in production.
+> **⚠️ Do not deploy this version.** A drought-risk markup on V, driven by SMHI's weather forecast — verified safe (no backtest regression) but net-zero effect on this dataset, not a proven improvement. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that in production.
 
-Extended the real-data backtest window from one month (January 2026) to four (January–April 2026), via three more iSolarCloud solar exports plus matching HA statistics. Step 2 (deployed) still beats step 3+5+6 (undeployed) over the full period — 5.5% vs 3.9% savings — but the gap narrows sharply versus January alone (1.3% vs 0.2% there). See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
+Investigated whether a longer weather forecast (SMHI, 10 days) could help V see past its 48h horizon for multi-day snow-on-panel droughts. First attempt (an absolute kWh floor) caused a backtest regression and was reverted; the revised approach (a bounded, prospective markup on V) is safe but showed no measurable benefit in backtest — grid was already cheaper than V during the actual drought, so the mechanism never got a chance to change a decision. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup, including the snow-cover physics verified against real historical weather data.
 
 See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 

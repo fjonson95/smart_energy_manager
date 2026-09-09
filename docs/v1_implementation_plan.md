@@ -59,7 +59,13 @@ påbörjade. Se "Steg 7 implementerat". **Testdata utökat till
 januari–april 2026 (v0.9.16):** `testdata/history_jan_apr2026/` —
 steg 2 fortfarande före steg 3+5+6 över hela perioden (5,5 % mot 3,9 %),
 men gapet krymper klart jämfört med januari ensamt (1,3 % mot 0,2 %) — se
-"Utökning till januari–april 2026" under "Steg 2 implementerat". Steg 8
+"Utökning till januari–april 2026" under "Steg 2 implementerat".
+**Torkrisk-påslag från SMHI (v0.9.17):** prospektivt V-påslag baserat på
+en snötäckt-panel-simulering (`_simulate_drought_days`/`_drought_markup`)
+— två versioner utredda och kalibrerade, se "Torkrisk-påslag från SMHI:s
+väderprognos" under "Steg 3 implementerat". Slutresultat: säkert
+(ingen regression) men obevisat (3,9 %, identiskt med utan mekanismen)
+i det här datasetet. `coordinator.py`-inkopplingen inte påbörjad. Steg 8
 inte påbörjat.
 
 ---
@@ -664,6 +670,70 @@ batteriet redan fullt (inget annat val för överskottet) eller nära
 brytpunkten. Kvarvarande gap bedöms nu bero mer på den redan
 identifierade horisontbegränsningen (skyddar bara ~2 synliga nätter) än
 på ytterligare trösklfel.
+
+### Torkrisk-påslag från SMHI:s väderprognos (v0.9.17, 2026-09-09)
+
+Uppföljning på 48h-horisontbegränsningen: användaren frågade om Solcasts
+6-dygnsprognos kunde hjälpa V se längre fram. Utredningen gick igenom två
+versioner — se `C:\Users\Fredrik\.claude\plans\whimsical-roaming-dawn.md`
+för hela resonemanget och kalibreringssvepet i detalj, sammanfattat här:
+
+**v1 (absolut kWh-golv från Solcast dag 3-6):** implementerad, verifierad
+mot handbyggda scenarier, men gav en dokumenterad REGRESSION i backtest
+(-3,2 % mot referens, sämre än inget batteri alls). Orsak: husets
+dygnslast (30-70+ kWh, uppvärmningsdominerad) vida överstiger batteriets
+~30 kWh-kapacitet, så ett absolut underskottsgolv över ett rullande
+4-dygnsfönster mättade 98-99 % av alla vinterdagar — inte bara vid
+genuina torkor. Koden är ersatt, inte kvar i något delvis tillstånd.
+
+**Domänkunskap som formade v2:** användaren identifierade att januaris
+elva nolldagar berodde på snötäckta paneler, inte moln — snö klibbar
+fast bara vid temp -5 till +5°C, smälter/glider av vid dygnsmax
+~0-2°C, och kyla i sig återtäcker INTE panelerna (bara ny nederbörd
+gör det). Verifierat mot riktig historisk väderdata (Open-Meteo
+archive-api): 10-11 januari hade bara 23-25 % molntäckning men ändå
+0,0 kWh sol — går bara att förklara med fysisk panelblockering.
+`weather.smhi_home` (redan installerad) ger via `weather.get_forecasts`
+en 10-dygns dygnsprognos (condition/temp_max/temp_min) — allt som
+behövs, ingen ny sensor krävs.
+
+**v2 (prospektivt V-påslag, inte ett golv):** ny funktion
+`_simulate_drought_days()` simulerar paneltillstånd (täckt/fri) framåt
+utifrån en väderprognoslista, och `_drought_markup()` höjer V — begränsat
+av SAMMA tak (3,0×) `_uncertainty_markup()` redan använder (`max()`, inte
+`+`). Kalibreringssvep (sju kombinationer av tröskel/lutning) visade ett
+tydligt mönster: ju mer konservativ (bara reagera på de djupaste,
+säkraste torkorna) desto bättre, men planade ut vid 3,6 % — fortfarande
+under 3,9 % (referens utan mekanismen). Grundorsak: påslaget verkade på
+BÅDA sidor av V samtidigt (regel 1/3 nätladdning OCH regel 2/4
+urladdning/export), vilket gjorde systemet för ivrigt att nätladda
+dagar innan gratis sol ändå var på väg (t.ex. 2-5 feb 2026, 8-27 kWh/dygn
+inför torkan 6-7 feb).
+
+**Slutlig ändring:** `V_charge` (regel 1/3, köpsidan) räknas nu om
+UTAN torkpåslaget — bara `V` (regel 2/4, håll-kvar/sälj-sidan) påverkas.
+Resultat: **exakt 3,9 %, byte-identiskt med att inte ha mekanismen alls.**
+Verifierat genom att söka i backtestens `reason`-kolumn efter de exakta
+textsträngarna regel 2/4 skriver ("köp X>V", "exportera X>max(V...)") —
+noll träffar under vare sig januari- eller februari-torkans
+uppladdningsdagar. Slutsats: under den här vintern/det här huset råkade
+nätpriset redan vara billigare än V under själva torkan (batteriet
+urladdades aldrig för egenförbrukning där) och solöverskottet innan
+februari-torkan fångades redan av regel 1 (opåverkad) innan regel 4 fick
+chansen att spela roll — inte ett bevis på att idén är fel, bara att den
+inte syns i det här specifika datasetet. Koden är säker (verifierat
+ofarlig, ingen regression) men obevisad. Kvar öppet: `coordinator.py`/
+`const.py`/`config_flow.py`-inkopplingen (`CONF_WEATHER_ENTITY`,
+`weather.get_forecasts`-anropet) — den avsiktliga stanna-upp-punkten,
+inte påbörjad.
+
+Nya filer: `testdata/history_jan_apr2026/weather_oracle.csv` +
+`_build_weather_oracle.py` (bygger orakel-väderdata från Open-Meteo för
+backtest-verifiering, samma "optimistisk övre gräns"-brasklapp som
+tidigare orakel-verktyg i den här sessionen). Nytt CLI-flagga
+`--drought-oracle` i `testdata/backtest.py`.
+
+---
 
 **Steg 4 pausat (2026-09-09).** Kartläggning inför steg 4 visade att
 `prefer_sell`, `economic_peak`, `sell_solar_min_price` och

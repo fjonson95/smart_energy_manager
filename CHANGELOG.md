@@ -2,6 +2,17 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.17
+
+Drought-risk markup on V, driven by SMHI's weather forecast — an attempt at the horizon problem from a different angle than v0.9.16's data extension. **Not wired to live control, not recommended for deployment. Verified safe (no regression) but unproven (net-zero effect) in backtest.**
+
+- **Two versions investigated, first one reverted.** v1 tried an absolute kWh floor sized from Solcast's day-3–6 forecast (`_drought_reserve_kwh`, since removed) — verified against hand-built scenarios, but caused a backtest **regression** (-3.2%, worse than no battery at all) once tested against real data: the house's heating-dominated daily load (30-70+ kWh) vastly exceeds the ~30 kWh battery, so any absolute multi-day deficit floor saturated 98-99% of winter days, not just genuine droughts.
+- **Root-cause reframing, grounded in real data.** The user identified that January's 11 zero-solar days were snow-covered panels, not cloud cover — confirmed against historical weather data (Open-Meteo archive API): 10-11 January had only 23-25% cloud cover yet still 0.0 kWh solar, which cloud cover alone can't explain. Snow physics (sticks between -5 to +5°C, clears once daily-max crosses ~0-2°C, cold alone never re-covers a clear panel) matched the data well. `weather.smhi_home` (already installed) provides a 10-day daily forecast via `weather.get_forecasts` with everything needed — no new sensor required.
+- **v2**: `_simulate_drought_days()` simulates panel state (covered/clear) forward from a weather forecast list; `_drought_markup()` raises V, capped at the same 3.0× ceiling `_uncertainty_markup()` already uses (`max()`, not `+`, so the two signals can never stack past an already-verified-safe bound). A calibration sweep (7 threshold/slope combinations) showed a consistent pattern — more conservative (react only to the deepest, most certain droughts) is better — but plateaued at 3.6%, still under the 3.9% no-mechanism baseline.
+- **Final scoping fix**: `V_charge` (rules 1/3, the buy/charge side) is now computed WITHOUT the drought markup — only `V` (rules 2/4, the hold/sell side) is affected. Result: exactly 3.9%, byte-identical to having no mechanism at all — verified by grepping the backtest's `reason` column for the exact strings rules 2/4 emit, finding zero hits during either drought's build-up days (grid was already cheaper than V during the drought itself; solar surplus before the February drought was already captured by rule 1 before rule 4 got a chance to matter). Not proof the idea is wrong — just that it doesn't show up in this particular dataset.
+- New test tooling: `testdata/history_jan_apr2026/weather_oracle.csv` + `_build_weather_oracle.py` (real historical weather from Open-Meteo, used as an oracle stand-in for a perfect SMHI forecast — an optimistic upper bound, not a real forecast simulation) and a `--drought-oracle` flag in `testdata/backtest.py`.
+- **Not done**: the `coordinator.py`/`const.py`/`config_flow.py` wiring (`CONF_WEATHER_ENTITY`, the actual `weather.get_forecasts` call) — the deliberate stop point before touching live-update code, per this session's standing rule.
+
 ## What's New in 0.9.16
 
 Extended the real-data backtest window from one month to four, at explicit request. **No code changes — testdata and documentation only, not a functional release.**

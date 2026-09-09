@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.16-blue)
+![Version](https://img.shields.io/badge/version-0.9.17-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.16
+## Nyheter i 0.9.17
 
-> **⚠️ Inga funktionella ändringar i den här releasen.** Bara testdata och dokumentation — se v0.9.15 nedan för den senaste funktionella (och fortfarande odriftsatta) kodändringen. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den i drift.
+> **⚠️ Driftsätt inte den här versionen.** Ett torkrisk-påslag på V, drivet av SMHI:s väderprognos – verifierat säkert (ingen regression i backtest) men nolleffekt på det här datasetet, ingen bevisad förbättring. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den i drift.
 
-Utökade backtest-fönstret mot riktig data från en månad (januari 2026) till fyra (januari–april 2026), via tre nya iSolarCloud-solexporter plus motsvarande HA-statistik. Steg 2 (driftsatt) vinner fortfarande över steg 3+5+6 (odriftsatt) över hela perioden – 5,5 % mot 3,9 % besparing – men gapet krymper kraftigt jämfört med januari ensamt (1,3 % mot 0,2 % där). Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
+Utredde om en längre väderprognos (SMHI, 10 dygn) kunde hjälpa V se bortom sin 48h-horisont för flerdygns snötäckta-paneler-torkor. Första försöket (ett absolut kWh-golv) gav en regression i backtest och plockades bort; den omarbetade ansatsen (ett begränsat, prospektivt påslag på V) är säker men visade ingen mätbar nytta i backtest – nätpriset var redan billigare än V under själva torkan, så mekanismen fick aldrig chansen att ändra ett beslut. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången, inklusive snötäcknings-fysiken verifierad mot riktig historisk väderdata.
 
 Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 

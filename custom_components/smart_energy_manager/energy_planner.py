@@ -30,6 +30,75 @@ _PLAN_HORIZON_H = 48  # v1.0 steg 3, punkt 5: 36-48h. Ingen prisprognos behövs
                        # finns redan på kvällen när kvällsbesluten fattas.
 
 
+_DROUGHT_STICK_TEMP_MIN_C = -5.0  # snö klibbar bara fast inom det här
+_DROUGHT_STICK_TEMP_MAX_C = 5.0   # intervallet (användarens fysik, 2026-09-09)
+                                   # – kallare och snön är lätt/pudrig, blåser
+                                   # bort istället för att lägga sig på panelen.
+_DROUGHT_RECOVERY_TEMP_C = 1.5    # dygnsmax över det här -> redan täckta
+                                   # paneler glider/smälter fria. Uppmätt mot
+                                   # riktig återhämtning (docs/
+                                   # v1_implementation_plan.md): 15 jan 2026,
+                                   # dygnsmax 2,6°C efter att 13-14 jan redan
+                                   # nuddat 1,5-3,1°C.
+_SNOWY_CONDITIONS = frozenset({"snowy", "snowy-rainy"})
+
+
+def _simulate_drought_days(
+    pv_production_ratio: float,
+    current_outdoor_temp_c,
+    weather_forecast,
+) -> int:
+    """Simulerar paneltillstånd (täckt/fri av snö) framåt och returnerar
+    antal kommande dagar som förväntas förbli täckta (docs/
+    v1_implementation_plan.md, "Torkrisk-påslag från SMHI:s väderprognos").
+
+    weather_forecast: [(datum, condition, temp_max_c, temp_min_c), ...] för
+    dagar bortom vad ps.slots redan täcker (SMHI:s dygnsprognos via
+    weather.get_forecasts). Tom lista eller None → bara dagens
+    startbedömning räknas (ingen väderentitet konfigurerad, exakt tidigare
+    beteende om produktionskvoten dessutom är normal).
+
+    Kyla i sig återtäcker ALDRIG panelerna – bara ny nederbörd (condition
+    indikerar snö) inom klibbintervallet gör det. En redan täckt dag blir
+    fri först när dygnsmax korsar återhämtningströskeln.
+    """
+    covered = (
+        pv_production_ratio <= 0.3
+        and current_outdoor_temp_c is not None
+        and current_outdoor_temp_c <= 0.0
+    )
+    if not weather_forecast:
+        return 1 if covered else 0
+
+    drought_days = 1 if covered else 0
+    for _day, condition, temp_max_c, temp_min_c in weather_forecast:
+        if covered:
+            if temp_max_c >= _DROUGHT_RECOVERY_TEMP_C:
+                covered = False
+                continue
+            drought_days += 1
+        else:
+            snowy = condition in _SNOWY_CONDITIONS
+            sticks = temp_min_c <= _DROUGHT_STICK_TEMP_MAX_C and temp_max_c >= _DROUGHT_STICK_TEMP_MIN_C
+            if snowy and sticks:
+                covered = True
+                drought_days += 1
+    return drought_days
+
+
+def _drought_markup(drought_days_ahead: int) -> float:
+    """Prospektivt riskpåslag på V av samma sort och tak som
+    _uncertainty_markup – anropsstället tar max() av de två, aldrig summan,
+    så den nya signalen aldrig kan stapla förbi ett redan verifierat säkert
+    tak (3,0×). Skalningen (0,5/dag) är en startgissning, kalibrerad mot
+    backtest i verifieringssteget, inte huggen i sten (docs/
+    v1_implementation_plan.md).
+    """
+    if drought_days_ahead <= 0:
+        return 0.0
+    return min(3.0, drought_days_ahead * 0.5)
+
+
 def _uncertainty_markup(pv_production_ratio: float) -> float:
     """Riskpåslag på V baserat på produktionskvoten (P3-2).
 
@@ -156,6 +225,8 @@ class EnergyPlanner:
         ev_energy_needed_kwh: float = 0.0,
         ev_deadline: Optional[datetime] = None,
         ev_max_power_kw: float = 0.0,
+        current_outdoor_temp_c: Optional[float] = None,
+        weather_forecast: Optional[list] = None,
     ) -> DayPlan:
         # solar_forecast_tomorrow_kwh och solar_takeover_dt konsumeras inte
         # längre av logiken nedan (v1.0 steg 3): V:s merit-order-allokering
@@ -163,7 +234,9 @@ class EnergyPlanner:
         # signaturen bara för att inte behöva röra coordinator.py:s anrop
         # innan steg 4:s städning. battery_avg_cost_sek_kwh används
         # däremot fortfarande, som en broms mot regel 4 (export) – se
-        # kommentaren där.
+        # kommentaren där. current_outdoor_temp_c/weather_forecast (se
+        # _simulate_drought_days) är fristående från ps.slots/V och valfria
+        # – None/tom lista ger exakt tidigare beteende.
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
 
@@ -353,7 +426,18 @@ class EnergyPlanner:
             _v_raw = 0.0
             _marginal_slot_start = None
 
-        V = _v_raw * (1.0 + _uncertainty_markup(pv_production_ratio))
+        # v2, "Torkrisk-påslag från SMHI:s väderprognos": ett prospektivt
+        # komplement till _uncertainty_markup (som bara reagerar
+        # RETROAKTIVT på redan uppmätt låg produktion). Ersätter v1:s
+        # separata, obundna kWh-golv (`_drought_reserve_kwh`, borttaget) –
+        # det gav en dokumenterad regression eftersom husets dygnslast
+        # (30-70+ kWh) vida överstiger batteriets kapacitet, så ett absolut
+        # underskottsgolv mättade nästan varje vinterdag, inte bara vid
+        # genuina torkor. max(), inte +, håller den nya signalen inom samma
+        # redan verifierat säkra tak (3,0×) _uncertainty_markup redan
+        # använder. Se docs/v1_implementation_plan.md.
+        _drought_days_ahead = _simulate_drought_days(pv_production_ratio, current_outdoor_temp_c, weather_forecast)
+        V = _v_raw * (1.0 + max(_uncertainty_markup(pv_production_ratio), _drought_markup(_drought_days_ahead)))
         # Regel 1 och 3 LADDAR ny energi in i batteriet – bara
         # eta_roundtrip-andelen av det överlever till att kunna användas/
         # säljas senare, så tröskeln för att spara/nätladda måste vara
@@ -365,7 +449,18 @@ class EnergyPlanner:
         # rundgångsförlust, vilket i backtest gav SÄMRE resultat än steg 2
         # (62 % besparing mot 91 %) istället för bättre. Se
         # docs/v1_implementation_plan.md, Steg 3 implementerat.
-        V_charge = V * self.eta_roundtrip
+        #
+        # V_charge bygger MEDVETET INTE på V (med torkpåslaget) utan räknas
+        # om från grunden utan _drought_markup: kalibreringssvepet i docs/
+        # v1_implementation_plan.md visade att torkpåslaget på köpsidan
+        # kostade mer än det sparade även vid den mest konservativa
+        # trösklingen (planade ut på 3,6 % mot 3,9 % utan mekanismen alls)
+        # – systemet nätladdade för ivrigt dagar innan gratis sol ändå var
+        # på väg (t.ex. 2-5 feb 2026, 8-27 kWh/dygn inför torkan 6-7 feb).
+        # Torkrisk-signalen ska bara göra systemet mer obenäget att GÖRA
+        # SIG AV MED energi (regel 2/4, via V), inte mer angeläget att
+        # KÖPA ny (regel 1/3).
+        V_charge = _v_raw * (1.0 + _uncertainty_markup(pv_production_ratio)) * self.eta_roundtrip
 
         evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + _flat_buffer_kwh / battery_capacity_kwh * 100.0)
         exportable_kwh = max(0.0, batt_kwh - _reserved_kwh)
@@ -578,7 +673,8 @@ class EnergyPlanner:
         notes = (
             f"SOC {battery_soc_pct:.0f}% → {final_soc:.0f}% | "
             f"V={V:.2f}kr/kWh (rå {_v_raw:.2f}, pv_kvot={pv_production_ratio:.2f}) "
-            f"satt av {_marginal_slot_start.astimezone().strftime('%d %H:%M') if _marginal_slot_start else 'bästa säljpris'} | "
+            f"satt av {_marginal_slot_start.astimezone().strftime('%d %H:%M') if _marginal_slot_start else 'bästa säljpris'} "
+            f"(torkdagar_fram={_drought_days_ahead}) | "
             f"reserv {_reserved_kwh:.1f}kWh exporterbart {exportable_kwh:.1f}kWh"
         )
 
