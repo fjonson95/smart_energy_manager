@@ -12,13 +12,13 @@ Bygger på granskningen av v0.5.60, förbrukningsanalysen
 
 **Status:** Steg 0 implementerat och verifierat 2026-09-08 (v0.9.2) — se
 `docs/forbrukningsanalys.md` avsnitt "Steg 0 implementerat" för detaljer,
-kodverifiering och acceptanstestresultat. Steg 1 påbörjat (v0.9.3–v0.9.5):
+kodverifiering och acceptanstestresultat. **Steg 1 klart (v0.9.3–v0.9.6):**
 `eta_roundtrip` och `sell_extra_revenue` uppdaterade till uppmätta värden,
 brytpunktsformlerna verifierade (se korrigeringen om merit-order-viktat
 snitt kontra dygnets min/max, nedan), `sem_battery_equivalent_cycles`
-(v0.9.4) och dygnsbudgetens dump-exkludering (steg 1B, v0.9.5)
-implementerade. Kvarstår i steg 1: lastprofilen (steg 1A) — utredd och
-specificerad, inte inkodad än. Steg 2–8 inte påbörjade.
+(v0.9.4), dygnsbudgetens dump-exkludering (steg 1B, v0.9.5) och
+lastprofilen form×nivå (steg 1A, v0.9.6) alla implementerade och
+verifierade. Steg 2–8 inte påbörjade.
 
 ---
 
@@ -97,8 +97,8 @@ arkitekturarbete, men de flyttar alla trösklar.
 1. **Kontrollera att 1,5 kW-klämningen är borta.** Den bröt 74 % av
    dygnen okt–mars; kallaste dygnet låg på 4,10 kW. Om `min(max(...), 1500)`
    finns kvar någonstans ska taket bort och golvet på 0,5 kW behållas.
-2. **Lastprofil i stället för platt takt** — se "Steg 1A" nedan, utredd
-   och inskriven i detalj 2026-09-08.
+2. **Lastprofil i stället för platt takt** — se "Steg 1A" nedan, utredd,
+   inskriven och **implementerad** (v0.9.6).
 3. **Dygnsbudget: dra bort dumpen, behåll desinficeringen** — se
    "Steg 1B" nedan, utredd, inskriven och **implementerad** (v0.9.5).
 4. **Ny sensor: ackumulerade ekvivalenta cykler.** Så att antagandet om
@@ -129,11 +129,23 @@ P50 (median) används för planeringen i allmänhet, **P75 för reserven**
 specifikt — den extra marginalen ("augustinattens premie") är bara
 1–10 % jämfört med P50, en billig försiktighetsmarginal.
 
-**Status:** utredd och specificerad 2026-09-08. Inte implementerad —
-kräver en ny rullande 21-dygns/24-hinkars datastruktur (samma
-Store-mönster som `_daily_consumption_history`/`_pv_ratio_history`) och
-att `hourly_load_kw` i `energy_planner.py` byts från en skalär till en
-per-slot form×nivå-uppslagning.
+**Status: implementerad (v0.9.6).** `coordinator.py` samlar 24 timhinkar
+per dygn (`_update_hourly_shape()`, medelvärde av `house_load_w` inom
+varje timme) i en ny `{DOMAIN}_hourly_shape`-store (samma mönster som
+`_daily_consumption_history`/`_pv_ratio_history`), normaliserar varje
+fullständigt dygn mot sin egen summa och behåller max 21 dygn.
+`_get_load_shape(percentile)` ger P50/P75 per timme över fönstret.
+`energy_planner.py::build_plan()` tar två nya valfria parametrar
+(`load_shape_p50`, `load_shape_p75`) och en `_load_kw_at(dt, shape)`-
+hjälpfunktion som slår upp `predicted_daily_kwh × shape[timme]` när
+formdata finns, annars faller tillbaka till den platta `hourly_load_kw`.
+P75 används för reservberäkningen (`behov_kwh`, `net_solar_tomorrow_kwh`),
+P50 för allmän planering (`is_dark`, `load_kwh`, nätladdningsval).
+Verifierat: utan formdata reproducerar planen exakt samma golv som innan
+ändringen (regressionssäkert); med syntetisk formdata (natt lägre, morgon
+högre) ger golvet ett annat, högre värde som återspeglar den verkliga
+fördelningen i stället för ett dygnssnitt. Formhistoriken byggs upp live
+och tar upp till 21 dygn efter driftsättning innan den är fullt aktiv.
 
 ### Steg 1B — Dygnsbudgeten: bryt den självförstärkande slingan
 

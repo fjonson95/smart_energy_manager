@@ -1,18 +1,17 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.5-blue)
+![Version](https://img.shields.io/badge/version-0.9.6-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.5
+## Nyheter i 0.9.6
 
-Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del tre — dygnsbudgetens "dump"-exkludering omgjord kring riktiga sensorer.
+Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del fyra — den platta lasttakten ersatt med en form×nivå-modell.
 
-- **Ersatte dump-energi-detekteringen**: spårar nu elpatronen direkt (`auxheater_status_entity`/`auxheater_level_entity`, kalibrerad till 8,83 kW märkeffekt) istället för energi som gick åt medan SEM:s egen extra-varmvatten-switch var på – vilket missade pannans egen sol-styrda logik och manuella körningar.
-- **Klassificeringen antar inte längre ett veckovis desinficeringsschema** – elpatronenergi behålls i budgeten bara medan desinficeringsswitchen faktiskt är på (plus 45 minuters eftersläng), aldrig härlett från en konfigurerad veckodag.
-- Oläsbara sensoravläsningar hoppar över redovisningscykeln istället för att feltolkas som noll, och löser oklarhet åt att INTE exkludera energi – den säkrare riktningen.
+- **Lastprojektionen skiljer nu form från nivå**: 24 timhinkar (median/P50, eller P75 för reserven) över ett rullande ≤21-dygnsfönster, varje dygn normaliserat mot sin egen summa – kombinerat med den befintliga gradtimmodellen som nivå, så den fortfarande reagerar på morgondagens prognos direkt istället för att släpa efter ett långt medelfönster.
+- Faller tillbaka till den tidigare platta takten närhelst formhistorik saknas – en rent additiv ändring, verifierad att reproducera det gamla beteendet exakt utan formdata.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, v0.9.2:s executor-veto-fix, och v0.9.1:s golv-skyddsspärr och rullande förbrukningssnitt).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 

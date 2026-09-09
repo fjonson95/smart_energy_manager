@@ -2,6 +2,14 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.6
+
+Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del fyra (steg 1A) — den platta lasttakten ersatt med en form×nivå-modell.
+
+- **Lastprojektionen skiljer nu form från nivå.** Form: 24 timhinkar, median (P50) eller 75:e percentilen (P75) över ett rullande ≤21-dygnsfönster, varje dygn normaliserat mot sin egen dygnssumma (en fraktion, inte ett absolutvärde) – kvartshinkar avfärdades, på den nivån är variationen termostatcykling med en fjärdedel så många observationer per hink. Nivå: den befintliga gradtimmodellen (`predicted_daily_kwh`), MEDVETET inte det rullande förbrukningssnittet, så den reagerar på morgondagens temperaturprognos direkt istället för att släpa efter ett fönster långt nog för att medla ut en köldknäpp.
+- **P50 för allmän planering, P75 för reserven** (golvsumman och morgondagens nettosol-kontroll) – en liten försiktighetsmarginal, ungefär 1–10 % över P50.
+- Faller tillbaka till den tidigare platta takten närhelst formhistorik saknas (en ny installation) eller en enskild timme saknar täckning i fönstret – en rent additiv ändring, verifierad att reproducera det gamla beteendet exakt när ingen formdata finns.
+
 ## Nyheter i 0.9.5
 
 Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del tre (steg 1B) — dygnsbudgetens "dump"-exkludering omgjord kring riktiga sensorer istället för en approximation.

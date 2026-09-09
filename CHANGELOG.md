@@ -2,6 +2,14 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.6
+
+Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part four (step 1A) — the flat hourly load rate replaced with a shape × level model.
+
+- **The load projection now separates shape from level.** Shape: 24 hourly buckets, median (P50) or 75th percentile (P75) over a rolling ≤21-day window, each day normalized against its own daily total (a fraction, not an absolute value) — quarter-hour buckets were rejected, at that resolution the variation is thermostat cycling noise with a quarter as many observations per bucket. Level: the existing degree-day model (`predicted_daily_kwh`), deliberately *not* the rolling-consumption blend, so it reacts to tomorrow's temperature forecast immediately rather than lagging a window long enough to average out a cold snap.
+- **P50 for general planning, P75 for the reserve** (the floor sum and tomorrow's net-solar check) — a small conservative margin, roughly 1–10% above P50.
+- Falls back to the previous flat rate whenever shape history isn't available yet (a fresh install) or a specific hour has no coverage in the window — this is a strictly additive change, verified to reproduce the old behavior exactly when no shape data exists.
+
 ## What's New in 0.9.5
 
 Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part three (step 1B) — the daily-budget "dump" exclusion reworked around real sensors instead of an approximation.

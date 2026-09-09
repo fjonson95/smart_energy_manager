@@ -1,20 +1,19 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.5-blue)
+![Version](https://img.shields.io/badge/version-0.9.6-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.5
+## What's New in 0.9.6
 
-Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part three — the daily-budget "dump" exclusion reworked around real sensors.
+Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part four — the flat hourly load rate replaced with a shape × level model.
 
-- **Replaced the dump-energy detection mechanism**: now tracks the auxiliary electric heater directly (`auxheater_status_entity`/`auxheater_level_entity`, calibrated to 8.83 kW rated power) instead of energy drawn while SEM's own extra-hot-water switch was on — which missed the boiler's own PV-diversion logic and manual runs.
-- **Classification no longer assumes a weekly disinfection schedule** — auxheater energy stays in the budget only while the disinfection switch is actually on (plus a 45-minute grace period), never inferred from a configured weekday.
-- Unavailable sensor readings skip the accounting interval rather than being misread as zero, resolving toward *not* excluding energy when ambiguous — the safer direction.
+- **The load projection now separates shape from level**: 24 hourly buckets (median/P50, or P75 for the reserve) over a rolling ≤21-day window, each day normalized to its own total — combined with the existing degree-day model as the level, so it still reacts to tomorrow's forecast immediately instead of lagging a long averaging window.
+- Falls back to the previous flat rate whenever shape history isn't available yet — a strictly additive change, verified to reproduce the old behavior exactly with no shape data.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, v0.9.2's executor-veto fix, and v0.9.1's floor safety cap and rolling consumption average).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
 ## System Overview
 

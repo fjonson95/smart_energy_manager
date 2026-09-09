@@ -241,6 +241,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._dump_last_update: Optional[datetime] = None
         self._legionella_last_on_time: Optional[datetime] = None
 
+        # Lastprofilens FORM (v1.0 steg 1A, docs/v1_implementation_plan.md):
+        # 24 timhinkar, rullande <=21-dygnsfönster, varje dygn normaliserat mot
+        # sin egen dygnssumma (en fraktion, inte ett absolutvärde). NIVÅN kommer
+        # separat från gradtimmodellen (predicted_daily_kwh) – fönstret får
+        # ALDRIG bära nivån, bara formen. Löser årstidsproblemet utan ett
+        # vinterläge: ett fönster långt nog för stabila hinkar hinner aldrig
+        # med en köldknäpp, men nivån reagerar på morgondagens temperaturprognos
+        # direkt eftersom den kommer från en helt annan källa än formen.
+        # Kvartshinkar avfärdade – på den nivån är variationen termostatcykling.
+        self._hourly_shape_store = Store(hass, 1, f"{DOMAIN}_hourly_shape")
+        self._hourly_shape_history: list[dict] = []  # senaste 21 dygn: [{date, hours: [24 fraktioner/None]}]
+        self._shape_current_date: str = ""
+        self._shape_current_hours: list[Optional[float]] = [None] * 24  # kWh per timme, byggs upp under dygnet
+        self._shape_current_hour: int = -1
+        self._shape_hour_samples: list[float] = []  # house_load_w-avläsningar inom pågående timme
+
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
         chargers = self._get_charger_configs()
@@ -264,6 +280,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         await self._load_takeover_store()
         await self._load_pv_ratio_store()
         await self._load_daily_consumption_store()
+        await self._load_hourly_shape_store()
         await super().async_config_entry_first_refresh()
 
     async def _load_pv_ratio_store(self) -> None:
@@ -355,6 +372,86 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         """7-dygns (eller färre, tills historiken byggts upp) rullande snitt."""
         vals = [d["net_kwh"] for d in self._daily_consumption_history if "net_kwh" in d]
         return sum(vals) / len(vals) if vals else None
+
+    async def _load_hourly_shape_store(self) -> None:
+        data = await self._hourly_shape_store.async_load()
+        if isinstance(data, dict):
+            self._hourly_shape_history = data.get("history", [])
+            self._shape_current_date = data.get("date", "")
+            raw_hours = data.get("current_hours")
+            if isinstance(raw_hours, list) and len(raw_hours) == 24:
+                self._shape_current_hours = raw_hours
+
+    async def _save_hourly_shape_store(self) -> None:
+        await self._hourly_shape_store.async_save({
+            "history": self._hourly_shape_history,
+            "date": self._shape_current_date,
+            "current_hours": self._shape_current_hours,
+        })
+
+    def _finalize_shape_hour(self) -> None:
+        """Skriv in senaste timmens medeleffekt (kWh för den timmen) i
+        _shape_current_hours[timmen]. Anropas när timmen eller dygnet byts."""
+        if self._shape_current_hour < 0 or not self._shape_hour_samples:
+            return
+        mean_w = sum(self._shape_hour_samples) / len(self._shape_hour_samples)
+        self._shape_current_hours[self._shape_current_hour] = mean_w / 1000.0
+
+    def _update_hourly_shape(self, now: datetime, house_load_w: float) -> None:
+        """Ackumulerar house_load_w inom pågående timme; vid timme/dygnsbyte
+        stängs föregående timme av och (vid dygnsbyte) committas hela dygnets
+        24 timvärden som normaliserade fraktioner till _hourly_shape_history
+        (max 21 dygn). Ett ofullständigt dygn (t.ex. efter en omstart mitt på
+        dagen) får None för saknade timmar – de hoppas över i P50/P75-uträkningen,
+        inte tolkade som noll."""
+        today_str = now.strftime("%Y-%m-%d")
+        hour = now.hour
+        day_changed = today_str != self._shape_current_date
+        hour_changed = hour != self._shape_current_hour
+
+        if day_changed or hour_changed:
+            self._finalize_shape_hour()
+
+        if day_changed:
+            if self._shape_current_date and any(h is not None for h in self._shape_current_hours):
+                day_total = sum(h for h in self._shape_current_hours if h is not None)
+                if day_total > 0:
+                    fractions = [
+                        (h / day_total if h is not None else None)
+                        for h in self._shape_current_hours
+                    ]
+                    self._hourly_shape_history.append({"date": self._shape_current_date, "hours": fractions})
+                    self._hourly_shape_history = self._hourly_shape_history[-21:]
+            self._shape_current_hours = [None] * 24
+            self._shape_current_date = today_str
+            self.hass.async_create_task(self._save_hourly_shape_store())
+
+        if day_changed or hour_changed:
+            self._shape_current_hour = hour
+            self._shape_hour_samples = []
+
+        self._shape_hour_samples.append(house_load_w)
+
+    def _get_load_shape(self, percentile: float) -> Optional[list[float]]:
+        """24 värden (fraktion av dygnets totala kWh per timme), given percentil
+        (0.5=P50, 0.75=P75) över det rullande <=21-dygnsfönstret. None om ingen
+        historik finns än – build_plan() faller då tillbaka till den platta takten."""
+        if not self._hourly_shape_history:
+            return None
+        result: list[Optional[float]] = []
+        for hour in range(24):
+            vals = sorted(
+                d["hours"][hour] for d in self._hourly_shape_history
+                if d.get("hours") and len(d["hours"]) == 24 and d["hours"][hour] is not None
+            )
+            if not vals:
+                result.append(None)
+                continue
+            idx = min(int(percentile * len(vals)), len(vals) - 1)
+            result.append(vals[idx])
+        if all(v is None for v in result):
+            return None
+        return result
 
     async def _load_takeover_store(self) -> None:
         data = await self._takeover_store.async_load()
@@ -774,6 +871,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             # Prisschema från Nordpool + Solcast-attributen
             now = dt_util.now()
             house_load_avg_w = self._get_house_load_avg_w(house_load_w, now)
+            self._update_hourly_shape(now, house_load_w)
             nordpool_entity = c.get(CONF_NORDPOOL_ENTITY)
             nordpool_type = c.get(CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS)
             price_schedule = None
@@ -1146,6 +1244,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             house_load_avg_w=state.house_load_avg_w,
                             ev_reserve_margin_kwh=ev_reserve_margin_kwh,
                             rolling_consumption_kwh=state.rolling_consumption_kwh,
+                            load_shape_p50=self._get_load_shape(0.5),
+                            load_shape_p75=self._get_load_shape(0.75),
                         )
                         self._last_plan_ps_sig = ps_sig
                         _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)

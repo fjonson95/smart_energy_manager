@@ -150,6 +150,8 @@ class EnergyPlanner:
         house_load_avg_w: Optional[float] = None,
         ev_reserve_margin_kwh: float = 0.0,
         rolling_consumption_kwh: Optional[float] = None,
+        load_shape_p50: Optional[list] = None,
+        load_shape_p75: Optional[list] = None,
     ) -> DayPlan:
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
@@ -175,6 +177,26 @@ class EnergyPlanner:
         _load_for_projection_w = house_load_avg_w if house_load_avg_w is not None else house_load_w
         hourly_load_kw = max(_eff_daily_kwh / 24.0, _load_for_projection_w / 1000.0, 0.5)
 
+        # v1.0 steg 1A: lastens FORM (24 timhinkar, rullande <=21-dygnssnitt,
+        # normaliserat per dygn – se coordinator._get_load_shape()) skild från
+        # NIVÅN (gradtimmodellen, predicted_daily_kwh – INTE _eff_daily_kwh,
+        # eftersom formen redan är byggd på verklig data och nivån ska kunna
+        # reagera på morgondagens temperaturprognos direkt). P50 för allmän
+        # planering, P75 för reserven (behov_kwh/net_solar_tomorrow_kwh) – en
+        # smalt högre försiktighetsmarginal, "augustinattens premie" är bara
+        # 1–10 % över P50. Faller tillbaka till den platta hourly_load_kw tills
+        # 21 dygns formhistorik hunnit byggas upp, eller för enskilda timmar
+        # utan täckning i fönstret.
+        def _load_kw_at(dt: datetime, shape: Optional[list]) -> float:
+            if shape is not None:
+                h = shape[dt.astimezone().hour]
+                if h is not None:
+                    return predicted_daily_kwh * h
+            return hourly_load_kw
+
+        def _slot_load_kwh(s, shape: Optional[list]) -> float:
+            return _load_kw_at(s.start, shape) * (s.end - s.start).total_seconds() / 3600.0
+
         # Golvformel (prognosreserv): behov_kwh täcker huslasten fram till solen
         # tar över, räknat mot PESSIMISTISK (p10) solprognos – ett underskattat
         # solvärde här gör att golvet blir för lågt och batteriet kan bli tomt.
@@ -188,11 +210,11 @@ class EnergyPlanner:
         _floor_slots = [s for s in (ps.slots or []) if s.end > now_a and s.start < takeover_local]
         if _floor_slots:
             behov_kwh = sum(
-                max(0.0, hourly_load_kw * (s.end - s.start).total_seconds() / 3600.0 - s.solar_kwh_p10)
+                max(0.0, _slot_load_kwh(s, load_shape_p75) - s.solar_kwh_p10)
                 for s in _floor_slots
             ) + 2.0
         else:
-            behov_kwh = hourly_load_kw * 9.0 + 2.0
+            behov_kwh = _load_kw_at(now_a, load_shape_p75) * 9.0 + 2.0
         # EV-marginal: flat buffert (inte hela vägen till soc_target – EV-laddning
         # är fortfarande i första hand sol-/opportunistiskt styrd) mot att en vald
         # bil kan behöva ladda under det mörka fönstret utan att golvet räknar
@@ -219,10 +241,10 @@ class EnergyPlanner:
         tomorrow_slots = [s for s in (ps.slots or []) if s.start.astimezone().date() == tomorrow_date]
         net_solar_tomorrow_kwh = (
             sum(
-                max(0.0, s.solar_kwh_p10 - hourly_load_kw * (s.end - s.start).total_seconds() / 3600.0)
+                max(0.0, s.solar_kwh_p10 - _slot_load_kwh(s, load_shape_p75))
                 for s in tomorrow_slots
             ) if tomorrow_slots
-            else max(0.0, solar_forecast_tomorrow_kwh - hourly_load_kw * 13.0)
+            else max(0.0, solar_forecast_tomorrow_kwh - _load_kw_at(now_a, load_shape_p75) * 13.0)
         )
 
         future_slots = [
@@ -258,7 +280,7 @@ class EnergyPlanner:
             s for s in future_slots
             if s.sell_sek >= eff_threshold
             and s.start < window_end
-            and (s.solar_kw < hourly_load_kw if has_solar_data
+            and (s.solar_kw < _load_kw_at(s.start, load_shape_p50) if has_solar_data
                  else s.start.astimezone() < takeover_local)
         ]
 
@@ -323,7 +345,7 @@ class EnergyPlanner:
                 remaining_kwh -= group_kwh
 
         # Billiga nätladdningssots: bland mörka slots, lägsta 25%
-        dark_slots = [s for s in future_slots if s.solar_kw < hourly_load_kw and s.start not in export_plan]
+        dark_slots = [s for s in future_slots if s.solar_kw < _load_kw_at(s.start, load_shape_p50) and s.start not in export_plan]
         buy_prices = sorted(s.buy_sek for s in dark_slots)
         cheap_threshold = buy_prices[max(0, int(self.cheap_charge_buy_percentile * len(buy_prices)) - 1)] if buy_prices else 0.0
         cheap_set = {s.start for s in dark_slots if s.buy_sek <= cheap_threshold}
@@ -340,10 +362,13 @@ class EnergyPlanner:
             soc_est = batt_kwh / battery_capacity_kwh * 100.0
             # "Mörk" = solen täcker inte huslasten, inte ett godtyckligt kW-tak
             # (v1.0 steg 0) – en fast 2 kW-gräns klassade stora delar av
-            # mellansäsongens och vinterns dagsljus som "natt".
-            is_dark = slot.solar_kw < hourly_load_kw
+            # mellansäsongens och vinterns dagsljus som "natt". Lastnivån per
+            # slot kommer nu från form×nivå (v1.0 steg 1A) när formhistorik
+            # finns, annars den platta hourly_load_kw.
+            _slot_load_kw = _load_kw_at(slot.start, load_shape_p50)
+            is_dark = slot.solar_kw < _slot_load_kw
             solar_kwh = slot.solar_kw * slot_h
-            load_kwh  = hourly_load_kw * slot_h
+            load_kwh  = _slot_load_kw * slot_h
 
             action   = "idle"
             power_w  = 0.0
@@ -388,10 +413,10 @@ class EnergyPlanner:
                         batt_kwh -= dis_kwh
                         power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
                         action = "cover_load"
-                        reason = f"sol {slot.solar_kw:.1f}kW < last {hourly_load_kw:.2f}kW → batteri {-power_w:.0f}W"
+                        reason = f"sol {slot.solar_kw:.1f}kW < last {_slot_load_kw:.2f}kW → batteri {-power_w:.0f}W"
                     else:
                         action = "cover_load"
-                        reason = f"sol {slot.solar_kw:.1f}kW < last {hourly_load_kw:.2f}kW → batteri vid golvet, nät"
+                        reason = f"sol {slot.solar_kw:.1f}kW < last {_slot_load_kw:.2f}kW → batteri vid golvet, nät"
 
             elif slot.start in cheap_set and batt_kwh < export_floor_kwh - 0.5:
                 needed = min(export_floor_kwh - batt_kwh, battery_max_power_kw * slot_h)
