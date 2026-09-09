@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.15
+
+Steg 7, punkt 6 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — dump-/desinficeringsschemaläggningen, på uttrycklig begäran. **Fortfarande inte kopplad till skarp styrning, inte rekommenderad för driftsättning.**
+
+- **`should_dump_to_hot_water(marginal_value, sell_price, hot_water_temp_c, min_temp_c)`** — planens `V < sälj_nu` är exakt `energy_planner.py`s regel 1-ELSE-gren (solöverskott batteriet hellre säljer än sparar); det här lägger till ett tredje alternativ där: dumpa till varmvatten istället för att sälja. Temperaturspärren speglar `EnergyController._can_start_extra_hot_water()` exakt (kontrollerad mot den riktiga metoden innan den här skrevs, inte gissad) — samma hysteresis, spärrar vid `min_temp`, inte först vid `max_temp`.
+- **`schedule_cheapest_window(candidate_slots, deadline, duration_minutes)`** — desinficering kräver ett SAMMANHÄNGANDE fönster (pannan kör ett obrutet ~60-minutersprogram), vilket steg 6:s EV-schemaläggare inte ger (den fyller behovet från utspridda billigaste slots). En egen glidande-fönster-implementation istället för att återanvända EV:s. Faller tillbaka på vad som finns kvar istället för att ge upp när fönstret inte får plats fullt ut före deadline — speglar `legionella.py`s egen nödstarts-filosofi (en kortare körning är bättre än ingen).
+- Båda verifierade mot handbyggda scenarier (5 för dump-regeln, 4 för fönsterschemaläggaren) — alla stämde.
+- **Avgränsningen utökad medvetet**: `legionella.py` lämnades avsiktligt orörd också, inte bara `coordinator.py`/`energy_controller.py` — den är en stateful klass med riktiga sidoeffekter (styr en switch, persisterar körningsstatus, har hygien-/säkerhetsimplikationer om den går fel), lika mycket "skarp styrning" som `apply_plan_executor()` trots det andra filnamnet. Samma försiktighet som steg 4 och 6, tillämpad på rätt fil oavsett namn.
+
 ## Nyheter i 0.9.14
 
 Steg 7 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — huset som värmelager — bara punkt 4 (COP-lönsamhetsregeln), på uttrycklig begäran. Punkt 1 och 3 (rumsvis termisk regression/strategi) är parkerade: en kontroll mot skarp data visade att rumstemperaturgivarna bara har data sedan ~2026-07-25 (~6 veckor), inte sedan oktober 2025 som planen antog — en meningsfull regression kräver en uppvärmningssäsong. **Inte kopplad till någon skarp styrning, inte rekommenderad för driftsättning.**

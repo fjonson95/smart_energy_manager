@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.15
+
+Step 7, point 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the dump/disinfection scheduling rules, by explicit request. **Still not wired to live control, not recommended for deployment.**
+
+- **`should_dump_to_hot_water(marginal_value, sell_price, hot_water_temp_c, min_temp_c)`** — the plan's `V < sell_now` is exactly `energy_planner.py`'s rule 1 else-branch (surplus solar the battery would rather sell than store); this adds a third option there: dump to hot water instead of selling. The temperature gate mirrors `EnergyController._can_start_extra_hot_water()` exactly (checked against the real method before writing this, not guessed) — same hysteresis, blocking at `min_temp` rather than only at `max_temp`.
+- **`schedule_cheapest_window(candidate_slots, deadline, duration_minutes)`** — disinfection needs a *contiguous* window (the boiler runs one unbroken ~60-minute program), which step 6's EV scheduler doesn't provide (it fills need from scattered cheapest slots). A separate sliding-window implementation instead of reusing the EV one. Falls back to using whatever time remains rather than giving up when the window can't fully fit before deadline — mirrors `legionella.py`'s own emergency-start philosophy (a shorter run beats none).
+- Both verified with hand-built scenarios (5 for the dump rule, 4 for the window scheduler) — all passed.
+- **Scope boundary extended on purpose**: `legionella.py` was deliberately left untouched too, not just `coordinator.py`/`energy_controller.py` — it's a stateful class with real side effects (drives a switch, persists run state, has hygiene/safety implications if it misbehaves), just as much "live control" as `apply_plan_executor()` despite the different filename. Same caution as steps 4 and 6, applied to the right file regardless of its name.
+
 ## What's New in 0.9.14
 
 Step 7 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the house as thermal storage — point 4 only (the COP profitability rule), by explicit request. Points 1 and 3 (room-level thermal regression/strategy) are parked: a live-data check found the room temperature sensors only have data since ~2026-07-25 (~6 weeks), not since October 2025 as the plan assumed — a meaningful regression needs a heating season. **Not wired to any live control, not recommended for deployment.**

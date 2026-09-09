@@ -49,8 +49,12 @@ har bara ~6 veckors historik (sedan ~2026-07-25), inte de ~11 månader
 planen antog; meningsfull regression kräver en vintersäsong. **Punkt 4
 (COP-lönsamhetsregel) klar (v0.9.14):** ny fil `heat_planner.py`,
 `is_preheat_profitable()` — ren funktion, inte kopplad till något
-faktiskt förvärmningsbeslut än. Punkt 2, 5, 6 inte påbörjade. Se
-"Steg 7 implementerat". Steg 8 inte påbörjat.
+faktiskt förvärmningsbeslut än. **Punkt 6 (dump/desinficering som
+schemalagda laster) klar (v0.9.15):** `should_dump_to_hot_water()` och
+`schedule_cheapest_window()`, samma sak — rena funktioner, `legionella.py`
+avsiktligt orörd (stateful, skarp styrning trots att den inte heter
+coordinator/energy_controller). Punkt 2, 5 inte påbörjade. Se "Steg 7
+implementerat". Steg 8 inte påbörjat.
 
 ---
 
@@ -856,11 +860,12 @@ tidskonstant/kWh-per-grad-underlag) behövs innan rumsdata finns.
 5. **Soldrift via pannans egen väg.** `number.boiler_pvmaxcomp` (0–25 kW,
    står på 0) är kompressorns maxeffekt vid PV-överskott — pannans
    inbyggda soldriftläge, oanvänt idag.
-6. **Dumpen och desinficeringen blir schemalagda laster.** Dumpa till
-   varmvatten när V < sälj_nu — samma jämförelse som avgör om batteriet
-   ska laddas. Desinficeringen är en bunden last med deadline, som
-   planeras in i den billigaste sloten inom sitt sjudygnsfönster i
-   stället för att starta på ett tröskelvillkor.
+6. **Dumpen och desinficeringen blir schemalagda laster – klart, se
+   "Steg 7 implementerat" nedan.** Dumpa till varmvatten när V < sälj_nu
+   — samma jämförelse som avgör om batteriet ska laddas. Desinficeringen
+   är en bunden last med deadline, som planeras in i den billigaste
+   sloten inom sitt sjudygnsfönster i stället för att starta på ett
+   tröskelvillkor.
 
 **Acceptans:** Under en vintervecka minskar andelen
 uppvärmningsenergi som köps under dygnets dyraste fyra timmar, mot en
@@ -904,8 +909,53 @@ olönsamt) – alla stämde.
 slot som är "förvärmning" respektive "topp", var COP-värdena kommer
 ifrån i praktiken, och själva styrningen av `number.boiler_tempparmode`
 eller motsvarande) – kräver `coordinator.py`/`energy_controller.py`,
-samma avgränsning som steg 4/6. Punkt 2, 5, 6 inte påbörjade, punkt 1/3
-parkerade (se ovan).
+samma avgränsning som steg 4/6. Punkt 1/3 parkerade (se ovan).
+
+### Steg 7, punkt 6 (v0.9.15, 2026-09-09)
+
+Två fristående, testade funktioner tillagda i `heat_planner.py`, på
+uttrycklig begäran ("kör 7.6"). Fortfarande INGEN koppling till skarp
+styrning – varken `coordinator.py`/`energy_controller.py` ELLER
+`legionella.py` rörda, trots att desinficeringsdelen konceptuellt hör
+hemma i den senare. Avgränsningen utökad dit medvetet: `legionella.py`
+är en egen, stateful klass med riktiga sidoeffekter (styr en switch,
+persisterar körningsstatus, har hygien-/säkerhetsimplikationer om den
+går fel) – lika mycket "skarp styrning" som `apply_plan_executor()`, även
+om filen inte heter `coordinator`/`energy_controller`. Samma försiktighet
+som steg 4/6, tillämpad på rätt fil oavsett namn.
+
+1. **`should_dump_to_hot_water(marginal_value, sell_price,
+   hot_water_temp_c, min_temp_c) -> bool`.** Planens `V < sälj_nu` är
+   exakt regel 1:s (`energy_planner.py`) ELSE-gren – tillfällen batteriet
+   hellre säljer överskottet direkt än sparar det. Funktionen lägger till
+   ett tredje alternativ i just den grenen: dumpa till varmvatten istället
+   för att sälja. Temperaturspärren speglar
+   `EnergyController._can_start_extra_hot_water()` EXAKT (samma
+   hysteresis: spärrar redan vid `min_temp`, inte först vid `max_temp` –
+   verifierad mot den befintliga metoden innan implementation, inte
+   gissad). Verifierat mot fem scenarier (V<sälj+kall tank → dumpa,
+   V>sälj → inte, tank vid min_temp → inte pga hysteresis, tank över
+   max → inte, ingen sensor → tillåt) – alla stämde.
+2. **`schedule_cheapest_window(candidate_slots, deadline,
+   duration_minutes) -> Optional[datetime]`.** EV-schemaläggningen
+   (steg 6) passar INTE här – legionella kräver ett SAMMANHÄNGANDE
+   fönster (pannan kör ett obrutet ~60-minutersprogram,
+   `DEFAULT_LEGIONELLA_DURATION_MINUTES`), inte utspridda kvartar som
+   EV:s egen-energi-behöver-inte-vara-sammanhängande-modell tillåter.
+   Egen glidande-medel-implementation istället för att återanvända EV:s.
+   Verifierat mot fyra scenarier: hittade rätt det billigaste 60-
+   minutersfönstret bland 24h data, föll tillbaka korrekt när deadline
+   uteslöt det billiga fönstret, körde med bara halva tiden kvar istället
+   för att ge upp (speglar `legionella.py`s egen nödstarts-princip: hellre
+   en kortare körning än ingen alls), returnerade `None` för tomma
+   kandidatlistor.
+
+**Inte gjort:** faktisk koppling till `legionella.py` (dess
+`should_run_now()` använder fortfarande sin egna, redan ganska
+sofistikerade P5-4-logik – "billigaste tredjedelen inom fönstret",
+inte en strikt merit-order-mot-deadline) eller till
+`EnergyController`s riktiga extra-varmvatten-beslut. Ingen anropare av
+de nya funktionerna finns än.
 
 ---
 

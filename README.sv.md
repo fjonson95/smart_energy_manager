@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.14-blue)
+![Version](https://img.shields.io/badge/version-0.9.15-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.14
+## Nyheter i 0.9.15
 
 > **⚠️ Driftsätt inte den här versionen.** Det är ett pågående försök på steg 3, 5, 6 och del av 7 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), sparat i källkoden som referens. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den.
 
-Steg 7 (huset som värmelager), bara punkt 4: en ny `heat_planner.py` med `is_preheat_profitable()`, en ren funktion som implementerar planens COP-lönsamhetsregel för att flytta uppvärmningsenergi till en billigare men mindre effektiv tidsslot. Rumsvis värmereglering (punkt 1 och 3) är parkerad – en kontroll mot skarp data visade att rumsgivarna bara har ~6 veckors historik, inte de ~11 månader som antogs; det kräver en uppvärmningssäsong för att bli meningsfullt. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
+Steg 7, punkt 6: två till rena funktioner i `heat_planner.py` – `should_dump_to_hot_water()` (dumpa solöverskott batteriet inte vill ha, istället för att sälja det) och `schedule_cheapest_window()` (hitta det billigaste sammanhängande tidsfönstret för en bunden last med deadline, t.ex. legionella-desinficering). Ingen av dem kopplad till skarp styrning – `legionella.py` lämnades avsiktligt orörd också, eftersom den är stateful styrkod med riktiga säkerhetsimplikationer, samma försiktighet som `coordinator.py`/`energy_controller.py`. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
 
 Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
