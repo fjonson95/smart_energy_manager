@@ -23,12 +23,13 @@ verifierade. **Steg 2 klart (v0.9.7):** golvet är nu en avtagande
 (`_FLOOR_SAFETY_CAP_FRACTION`) borttagen, prisspärren ("Option B") behållen
 i väntan på en riktig vinterbacktest — se avsnitt "Steg 2 implementerat"
 nedan för detaljer och verifieringsresultat. **Steg 3 försökt men INTE
-klart (v0.9.8) — regression i backtest (45 % besparing mot steg 2:s 91 %),
-INTE driftsatt.** `energy_planner.py` innehåller för närvarande steg 3:s
-kod (`reserve_at(t)` är borttagen ur filen, ersatt), men v0.9.7
-(commit `a57cea2`) är den senast verifierade, säkra versionen att köra —
-se avsnitt "Steg 3 implementerat" nedan för grundorsaksanalysen innan
-arbetet återupptas. Steg 4–8 inte påbörjade.
+klart (v0.9.8–v0.9.9) — förbättrad men fortfarande under steg 2 i
+backtest (55 % besparing mot steg 2:s 91 %, upp från 45 % i v0.9.8 sedan
+en fjärde bugg hittad och fixad), INTE driftsatt.** `energy_planner.py`
+innehåller för närvarande steg 3:s kod (`reserve_at(t)` är borttagen ur
+filen, ersatt), men v0.9.7 (commit `a57cea2`) är den senast verifierade,
+säkra versionen att köra — se avsnitt "Steg 3 implementerat" nedan för
+grundorsaksanalysen innan arbetet återupptas. Steg 5–8 inte påbörjade.
 
 ---
 
@@ -401,27 +402,63 @@ nätexport från 16,2 till 172,4 kWh, batteriladdningen från sol sjönk från
 inför kvällen exporterades direkt istället, upprepade gånger, trots tre
 buggfixar avsedda att förhindra just det.
 
-**Grundorsak (fjärde, strukturell — inte ytterligare ett specialfall att
-lappa):** V:s merit-order-allokering ser bara `_PLAN_HORIZON_H` (48 h)
-framåt. På en solig dag täcker nuvarande SOC plus dagens sol gott och väl
-både ikvällens och (inom 48 h) morgondagens kvälls underskott, med
-åtskillig kapacitet kvar över. Den kapaciteten rankas då mot VAD SOM HELST
-för säljmöjlighet inom horisonten — även riktigt dåliga priser (0,07–0,11
-kr/kWh mitt på dagen) — eftersom modellen inte har något begrepp om att
-skydda kapacitet mot ett tredje, fjärde... dygns behov bortom vad 48
-timmar råkar visa. Steg 2:s enklare "spara alltid solöverskott, bestäm
-export separat"-golv gav det skyddet gratis, just genom att aldrig behöva
-se längre än så. En korrekt V-modell för den här tariffen (köp ≥1,17 kr
-högre än sälj, praktiskt taget alltid, se steg 1:s brytpunktsformel) borde
-i praktiken nästan aldrig välja att sälja istället för att skydda
-självkonsumtion — att den gör det upprepat är just symtomet på att
-horisontgränsen, inte en enskild jämförelse, är fel.
+**Ursprunglig grundorsaksteori (2026-09-09, senare bara delvis
+bekräftad):** V:s merit-order-allokering sågs bara se `_PLAN_HORIZON_H`
+(48 h) framåt, vilket antogs vara den strukturella boven — se punkt 4
+nedan för vad den faktiska dominerande orsaken visade sig vara.
+
+#### Fjärde buggen (v0.9.9): fel bearbetningsordning i tilldelningen
+
+Hittad via användarens kodgranskning, som misstänkte ett fjärde
+strukturellt fel bakom regressionen (rätt instinkt, delvis annan
+mekanism än den ursprungliga hypotesen). Verifierat med tillfällig
+instrumentering: total accepterad volym i merit-order-tilldelningen låg
+på **62–70 kWh mot fysiskt tillgängliga ~22 kWh** (batt_max minus
+reserverat) — batterikapacitet räknades om och om igen.
+
+Orsaken: `_opportunities` rankas efter VÄRDE (pris), men den ursprungliga
+genomförbarhetskontrollen (`_used_before_t = sum(... if a_s.start <
+s.start)`) drog bara ifrån redan accepterade tilldelningar med
+KRONOLOGISKT tidigare starttid. Eftersom acceptans sker i värdeordning,
+inte tidsordning, kunde en högvärderad möjlighet SENT i horisonten
+accepteras INNAN en lågvärderad men kronologiskt TIDIGARE möjlighet ens
+prövats — och reserverade då inget utrymme åt den. Ett konkret
+motexempel (tre möjligheter A@t5, B@t10, C@t3, processade i den
+ordningen eftersom deras VÄRDEN råkar rankas så) visar att den kumulativa
+gränsen vid den SENASTE tidpunkten (t10) kan överskridas trots att varje
+enskild kontroll "lokalt" såg ut att hålla sig inom gränsen.
+
+**Fix:** ersatte engångskontrollen (`_cap_at_t - _used_before_t`) med en
+riktig minsta-marginal-beräkning (`_slack_min_from(t_i)`) över HELA den
+återstående horisonten från `t_i` och framåt, dynamiskt uppdaterad
+(`_withdrawn_at`) efter varje accepterad tilldelning — samma princip som
+steg 2:s `reserve_at(t)`-suffixsumma redan använder, fast här måste den
+räknas om efter varje nytt accepterat uttag eftersom genomgången inte är
+kronologisk.
+
+**Resultat:** accepterad volym föll till fysiskt rimliga ~14–15 kWh.
+Beteendet blev kvalitativt mycket bättre — batteriet laddas mot 100 %
+under förmiddagen (`V·η > sälj` håller kvar solen istället för att sälja
+den till bottenpris) och kvällens/nattens last täcks konsekvent från
+batteri istället för nät (`köp 2,3–2,6 kr > V 1,3 kr → batteri`).
+Besparingen steg från 45 % till **55 %** i samma backtest — fortfarande
+under steg 2:s 91 %.
+
+**Reviderad bedömning av "grundorsaken":** den ursprungliga
+48-timmarshorisont-teorin var inte fel i sig (den kan fortfarande bidra
+till återstående gap), men den var INTE den dominerande förklaringen till
+45 %-siffran — den fjärde buggen (tilldelningsordningen) var det. Kvar
+att förklara i det återstående gapet mot steg 2:s 91 %: modellen har
+blivit betydligt mer aktiv med opportunistisk nätladdning (47
+`grid_charge`-tillfällen mot steg 2:s 5) vars nettolönsamhet efter
+rundgångsförlust inte är fullt verifierad, plus att horisontbegränsningen
+fortfarande är oåtgärdad.
 
 **Beslut (2026-09-09):** `energy_planner.py` lämnas i sitt nuvarande skick
 (steg 3:s kod, `reserve_at(t)` borttagen) i git-historiken som
 dokumenterat, overifierat arbete — **INTE driftsatt**. v0.9.7
 (commit `a57cea2`) är den senast backtest-verifierade och säkra versionen.
-Steg 3 kräver en ny design innan vidare arbete, troligen en av:
+Steg 3 kräver mer arbete innan det slår steg 2, troligen en av:
 - Mycket längre planeringshorisont (kräver längre testdata än de ~10 dygn
   som finns idag, se `testdata/history/Series info.txt` — samma
   datalucka som blockerar steg 2:s fulla vinterverifiering).

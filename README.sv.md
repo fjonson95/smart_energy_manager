@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.8-blue)
+![Version](https://img.shields.io/badge/version-0.9.9-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.8
+## Nyheter i 0.9.9
 
 > **⚠️ Driftsätt inte den här versionen.** Det är ett pågående, backtest-regressat försök på steg 3 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), sparat i källkoden som referens. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den.
 
-Steg 3 ("marginalvärdet V") ersatte steg 0–2:s flera trösklar med ett enda merit-order-härlett tal och skrev om batteriets dispatch-loop kring fyra prisregler. Backtest mot samma fönster som verifierade steg 0–2 hittade och fixade tre riktiga buggar under vägs, men resultatet är ändå en regression – 45 % besparing mot steg 2:s 91 % på identisk data. Grundorsak: modellen skyddar bara mot underskott synliga inom sin 48-timmarshorisont, så en solig dag behandlar den kapacitet bortom ~2 nätters synligt behov som ledig för lågvärdig samma-dags-export – ett skydd steg 2:s enklare "spara alltid solöverskott"-golv gav gratis. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
+En fjärde bugg i steg 3:s marginalvärdesberäkning (V), hittad via användarens kodgranskning: merit-order-tilldelningen rankade möjligheter efter värde men kontrollerade bara genomförbarhet mot en enda tidpunkt, så en högvärderad möjlighet sent i horisonten kunde accepteras innan en tidigare, lågvärderad möjlighet hunnit reservera sin andel – accepterad volym nådde 62–70 kWh mot fysiskt tillgängliga ~22 kWh. Fixat med en riktig minsta-marginal-kontroll över hela den återstående horisonten. Resultat: besparingen i backtest steg från 45 % till 55 %, fortfarande under steg 2:s 91 %. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
 
 Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 

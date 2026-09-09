@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.8-blue)
+![Version](https://img.shields.io/badge/version-0.9.9-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.8
+## What's New in 0.9.9
 
 > **⚠️ Do not deploy this version.** It's an in-progress, backtest-regressed attempt at step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), kept in source control for reference. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that.
 
-Step 3 ("marginal value V") replaced steps 0–2's several thresholds with a single merit-order-derived number and rewrote the battery dispatch loop around four price rules. Backtesting against the same window that verified steps 0–2 found and fixed three real bugs along the way, but the result is still a regression — 45% savings vs. step 2's 91% on identical data. Root cause: the model only protects against deficits visible within its 48h horizon, so on a sunny day it treats capacity beyond ~2 nights of visible need as available for low-value same-day export — a protection step 2's simpler "always store surplus" floor provided for free. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
+A fourth bug in step 3's "marginal value V" computation, found via user code review: the merit-order acceptance loop ranked opportunities by value but only checked feasibility against a single point in time, letting a high-value opportunity late in the horizon get accepted before an earlier, lower-value one reserved its share — accepted volume reached 62–70 kWh against a physically available ~22 kWh. Fixed with a true minimum-slack check across the whole remaining horizon. Result: backtest savings improved from 45% to 55%, still short of step 2's 91%. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
 
 See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 

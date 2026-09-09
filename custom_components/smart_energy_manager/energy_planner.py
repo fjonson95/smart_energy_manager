@@ -300,13 +300,37 @@ class EnergyPlanner:
             if rest_kwh > 0.01:
                 _opportunities.append((s, s.sell_sek, rest_kwh))
 
+        # Kronologisk marginal-tracker: en kandidat vid t_i tas bara emot om
+        # den ryms UNDER TAKET VID VARJE framtida tidpunkt >= t_i, inte bara
+        # vid t_i självt. En tidigare version jämförde bara mot summan av
+        # REDAN accepterade möjligheter med start < t_i – men genomgången
+        # sker i VÄRDEORDNING, inte kronologisk ordning, så en senare (i
+        # tiden) hög-värderad möjlighet kunde accepteras FÖRE en tidigare
+        # lågvärderad möjlighet ens prövats, utan att reservera utrymme åt
+        # den – battericap räknades då flera gånger om. Verifierat i
+        # backtest: total accepterad volym låg på 62–70 kWh mot fysiskt
+        # tillgängliga ~22 kWh (batt_max−reserverat) innan den här fixen.
+        _slot_starts_sorted = sorted({s.start for s in future_slots})
+        _withdrawn_at: dict[datetime, float] = {t: 0.0 for t in _slot_starts_sorted}
+
+        def _slack_min_from(t_i: datetime) -> float:
+            running = sum(_withdrawn_at[t] for t in _slot_starts_sorted if t < t_i)
+            min_slack = float("inf")
+            for t in _slot_starts_sorted:
+                if t < t_i:
+                    continue
+                running += _withdrawn_at[t]
+                slack = _cap_by_time.get(t, batt_kwh) - _reserved_kwh - running
+                if slack < min_slack:
+                    min_slack = slack
+            return min_slack if min_slack != float("inf") else 0.0
+
         _accepted: list[tuple] = []  # (slot, värde, kwh)
         for s, value, cap_kwh in sorted(_opportunities, key=lambda x: x[1], reverse=True):
-            _cap_at_t = _cap_by_time.get(s.start, batt_kwh) - _reserved_kwh
-            _used_before_t = sum(kwh for (a_s, _, kwh) in _accepted if a_s.start < s.start)
-            _avail_at_t = max(0.0, _cap_at_t - _used_before_t)
+            _avail_at_t = max(0.0, _slack_min_from(s.start))
             _alloc = min(cap_kwh, _avail_at_t)
             if _alloc > 0.01:
+                _withdrawn_at[s.start] += _alloc
                 _accepted.append((s, value, _alloc))
 
         if _accepted:

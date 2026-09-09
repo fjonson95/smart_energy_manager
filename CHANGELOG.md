@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.9
+
+A fourth bug in step 3's V computation, found via user code review — **still not recommended for deployment**, but a substantial improvement (45% → 55% backtest savings, up from v0.9.8, still short of step 2's 91%).
+
+- **Fixed a chronological-ordering bug in the merit-order acceptance loop.** Opportunities are ranked by value (price), not by time, but the old feasibility check only subtracted *already-accepted* allocations with an earlier timestamp than the candidate being checked. Since acceptance happens in value order, a high-value opportunity late in the horizon could be accepted before a lower-value but chronologically-earlier opportunity was even considered — reserving no room for it. Verified in backtest: total accepted volume was 62–70 kWh against a physically available ~22 kWh (battery capacity minus reserve) — the algorithm was effectively counting battery capacity multiple times over. Replaced the single-timestamp check with a true minimum-slack calculation across the *entire* remaining horizon (dynamically updated after each acceptance), matching the pattern already used by step 2's `reserve_at(t)` suffix sum.
+- With accepted volume now correctly bounded, behavior is qualitatively much better: the battery charges toward full over the morning (solar is kept instead of sold at rock-bottom midday prices) and consistently covers evening/night load from the battery instead of buying at 2–3× the price.
+- **Still short of step 2.** The model has become considerably more active with opportunistic grid-charging (47 charge events vs. step 2's 5) whose net profitability after round-trip loss hasn't been fully verified, and the previously-identified 48h-horizon limitation (protection only for ~2 nights ahead) is untouched by this fix. `docs/v1_implementation_plan.md` updated with the finding.
+- `energy_planner.py` still contains only step 3's code. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance.
+
 ## What's New in 0.9.8
 
 Step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — attempted, **not recommended for deployment**. Kept in source control as documented in-progress work, not a working release.

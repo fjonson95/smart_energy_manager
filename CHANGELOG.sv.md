@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.9
+
+En fjärde bugg i steg 3:s V-beräkning, hittad via användarens kodgranskning – **fortfarande inte rekommenderad för driftsättning**, men en väsentlig förbättring (45 % → 55 % besparing i backtest, upp från v0.9.8, ändå under steg 2:s 91 %).
+
+- **Fixade ett fel i kronologisk ordning i merit-order-tilldelningen.** Möjligheter rankas efter värde (pris), inte tid, men den gamla genomförbarhetskontrollen drog bara ifrån REDAN accepterade tilldelningar med tidigare tidsstämpel än kandidaten som prövades. Eftersom acceptans sker i värdeordning kunde en högvärderad möjlighet sent i horisonten accepteras innan en lågvärderad men kronologiskt tidigare möjlighet ens övervägts – och reserverade då inget utrymme åt den. Verifierat i backtest: total accepterad volym låg på 62–70 kWh mot fysiskt tillgängliga ~22 kWh (batterikapacitet minus reserv) – algoritmen räknade i praktiken batterikapacitet flera gånger om. Ersatte den enkla engångskontrollen med en riktig minsta-marginal-beräkning över HELA den återstående horisonten (dynamiskt uppdaterad efter varje accepterad tilldelning), samma princip som steg 2:s `reserve_at(t)`-suffixsumma redan använder.
+- Med accepterad volym nu korrekt begränsad är beteendet kvalitativt mycket bättre: batteriet laddas mot fullt under förmiddagen (solen behålls istället för att säljas till bottenpriser mitt på dagen), och kvällens/nattens last täcks konsekvent från batteriet istället för att köpas till 2–3× priset.
+- **Fortfarande under steg 2.** Modellen har blivit betydligt mer aktiv med opportunistisk nätladdning (47 laddtillfällen mot steg 2:s 5) vars nettolönsamhet efter rundgångsförlust inte är fullt verifierad, och den tidigare identifierade 48-timmarshorisont-begränsningen (skydd bara ~2 nätter framåt) är opåverkad av den här fixen. `docs/v1_implementation_plan.md` uppdaterad med fyndet.
+- `energy_planner.py` innehåller fortfarande bara steg 3:s kod. v0.9.7 (commit `a57cea2`) förblir den senast backtest-verifierade och säkra versionen att köra mot den riktiga HA-instansen.
+
 ## Nyheter i 0.9.8
 
 Steg 3 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — försökt, **rekommenderas INTE för driftsättning**. Sparad i källkoden som dokumenterat pågående arbete, inte en fungerande release.
