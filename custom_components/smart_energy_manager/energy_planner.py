@@ -56,6 +56,7 @@ class PlannedSlot:
     target_power_w: float       # Positiv = laddning, negativ = urladdning
     battery_soc_est_pct: float  # Estimerad SOC vid slottens START
     reason: str
+    ev_charge_w: float = 0.0    # v1.0 steg 6: schemalagd EV-laddeffekt denna slot, 0 = ingen
 
 
 @dataclass
@@ -152,6 +153,9 @@ class EnergyPlanner:
         rolling_consumption_kwh: Optional[float] = None,
         load_shape_p50: Optional[list] = None,
         load_shape_p75: Optional[list] = None,
+        ev_energy_needed_kwh: float = 0.0,
+        ev_deadline: Optional[datetime] = None,
+        ev_max_power_kw: float = 0.0,
     ) -> DayPlan:
         # solar_forecast_tomorrow_kwh och solar_takeover_dt konsumeras inte
         # längre av logiken nedan (v1.0 steg 3): V:s merit-order-allokering
@@ -523,6 +527,52 @@ class EnergyPlanner:
                 battery_soc_est_pct=round(soc_est, 1),
                 reason=reason,
             ))
+
+        # v1.0 steg 6, punkt 1: bilen som schemalagd last. Ett fristående
+        # merit-order-schema (INTE kopplat till batteriets V eller
+        # _opportunities – EV-energin drar inte på batteriets kapacitet,
+        # det är en oberoende nät-/soldragning med sin egen deadline):
+        # rangordna slots fram till deadline efter köppris STIGANDE, fyll
+        # behovet från de billigaste först, begränsat av bilens maxeffekt.
+        #
+        # Punkt 2 (fas-1-samordning) hanteras här bara som en enkel, säker
+        # regel: undvik att lägga EV-laddning i samma slot som batteriets
+        # egen grid_charge (den enda batteriåtgärden som aktivt drar NY
+        # nätkraft samtidigt – 8 kW batteri + 3,7 kW bil är exakt den
+        # kombination Steg 6 själv varnar för). Ingen fullständig per-fas-
+        # modell finns ännu i planeraren (bara en skalär batterieffekt, ingen
+        # fasuppdelning) – det kräver mer indata (max_current_per_phase,
+        # spänning, bilens effektiva faser) än vad build_plan() tar emot
+        # idag. Se docs/v1_implementation_plan.md, Steg 6 implementerat.
+        #
+        # Punkt 3 (invarianten "bilen laddas bara ur solöverskott eller
+        # uttryckligt schemalagda slots") är en EXEKVERINGSregel, inte en
+        # planeringsregel – kräver att coordinator.py/energy_controller.py
+        # faktiskt läser och respekterar det här schemat, vilket INTE görs
+        # här (se stoppet inför att röra levande styrlogik, samma skäl som
+        # steg 4 pausades).
+        if ev_energy_needed_kwh > 0.01 and ev_max_power_kw > 0.01:
+            _buy_by_start = {s.start: s.buy_sek for s in future_slots}
+            _ev_deadline_dt = ev_deadline if (ev_deadline and ev_deadline > now_a) else horizon_end
+            _ev_candidates = [
+                p for p in planned
+                if p.start < _ev_deadline_dt and p.action != "grid_charge"
+            ]
+            _ev_remaining_kwh = ev_energy_needed_kwh
+            _ev_charge_kwh: dict[datetime, float] = {}
+            for p in sorted(_ev_candidates, key=lambda p: _buy_by_start.get(p.start, float("inf"))):
+                if _ev_remaining_kwh <= 0.01:
+                    break
+                p_h = (p.end - p.start).total_seconds() / 3600.0
+                if p_h <= 0:
+                    continue
+                _alloc_kwh = min(ev_max_power_kw * p_h, _ev_remaining_kwh)
+                if _alloc_kwh > 0.01:
+                    _ev_charge_kwh[p.start] = _alloc_kwh / p_h * 1000.0  # → W
+                    _ev_remaining_kwh -= _alloc_kwh
+            for p in planned:
+                if p.start in _ev_charge_kwh:
+                    p.ev_charge_w = _ev_charge_kwh[p.start]
 
         final_soc = batt_kwh / battery_capacity_kwh * 100.0
         notes = (

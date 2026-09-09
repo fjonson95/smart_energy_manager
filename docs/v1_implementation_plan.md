@@ -39,7 +39,12 @@ steg 3 slår steg 2 i backtest — se motivering i "Steg 3 implementerat".
 solöverskottsladdning tillagd i `energy_planner.py`; punkt 2–4 visade
 sig redan vara emergenta av steg 3:s V-arkitektur. INTE driftsatt (del
 av samma odriftsatta fil som steg 3). Se avsnitt "Steg 5 implementerat".
-Steg 6–8 inte påbörjade.
+**Steg 6 delvis klart (v0.9.13):** `build_plan()` kan schemalägga EV-
+laddning (merit-order mot deadline, undviker batteriets nätladdningsslots)
+— men BARA planering. Ingen koppling till skarp laddarstyrning eller
+punkt 3-invarianten; kräver `coordinator.py`/`energy_controller.py`,
+medvetet stoppat inför den ändringen. Se "Steg 6 implementerat".
+Steg 7–8 inte påbörjade.
 
 ---
 
@@ -740,6 +745,49 @@ batteriets nattladdning om samma fas.
 
 **Acceptans:** En vinternatt med både billaddning och batteriladdning
 håller alla tre faserna under 20 A, utan att fasskyddet behöver ingripa.
+
+### Steg 6 implementerat, delvis (v0.9.13, 2026-09-09)
+
+Bara planeringsdelen (punkt 1, del av punkt 2). Explicit avgränsat på
+användarens instruktion: "stanna upp innan du rör coordinator/
+energy_controller" — samma försiktighet som steg 4:s paus, eftersom
+faktisk laddarstyrning i skarp drift sker i just de filerna.
+
+1. **Bilen som schemalagd last – klart.** `build_plan()` fick tre nya
+   valfria parametrar (`ev_energy_needed_kwh`, `ev_deadline`,
+   `ev_max_power_kw`) och varje `PlannedSlot` ett nytt `ev_charge_w`-fält.
+   En fristående merit-order-genomgång (INTE kopplad till batteriets V
+   eller `_opportunities` – EV-energin drar inte på batteriets kapacitet)
+   rangordnar kandidatslots fram till deadline efter köppris stigande och
+   fyller behovet från de billigaste först. Verifierat med ett syntetiskt
+   prisscenario (varierande nattpriser, deadline före en morgontopp):
+   valde korrekt 0,85–1,00 kr-slotsen, hoppade över 1,20–1,80 kr-slotsen,
+   respekterade deadline.
+2. **Fas 1-samordning – enkel, säker delversion.** Ingen fullständig
+   per-fas-modell finns i planeraren (bara en skalär batterieffekt, ingen
+   fasuppdelning – skulle kräva `max_current_per_phase`, spänning och
+   bilens `effective_phases` som nya indata). Som en säker approximation
+   utesluts istället slots där batteriet aktivt nätladdar
+   (`action=="grid_charge"`) från EV-kandidaterna – den enda batteri-
+   åtgärden som aktivt drar NY nätkraft samtidigt, och exakt den
+   kombination (8 kW batteri + 3,7 kW bil) planen varnar för. `cover_load`
+   (batteriet urladdar för egenförbrukning) utesluts INTE – det minskar
+   nätimporten snarare än att lägga till den, inget fasrisktillskott att
+   undvika där.
+3. **Punkt 3 (invarianten) och full fas-1-samordning – inte gjort.** Kräver
+   att `coordinator.py`/`energy_controller.py` faktiskt läser och
+   respekterar EV-schemat samt en riktig per-fas-effektmodell. Ingen
+   koppling till faktisk laddarstyrning gjord alls i det här steget –
+   `build_plan()`s nya EV-parametrar skickas inte in någonstans idag
+   (varken från `coordinator.py` eller `testdata/backtest.py`), så
+   funktionen är oanvänd tills nästa steg kopplar in den.
+
+**Verifiering:** ingen regression i den riktiga 10-dagars backtesten
+(byte-identiskt resultat eftersom inget EV-behov skickas in där idag).
+Den nya logiken verifierad separat med syntetisk data (se punkt 1 ovan) –
+`testdata/backtest.py` har verklig EV-historik (`ev_soc`, `ev_status`,
+`charger_power_kw`) men den är inte kopplad till `build_plan()`s nya
+parametrar än; en rimlig nästa deluppgift innan resten av steg 6.
 
 ---
 

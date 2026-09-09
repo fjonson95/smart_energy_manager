@@ -2,6 +2,16 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.13
+
+Steg 6 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — bilen som schemalagd last. **Bara planering, inte kopplad till skarp styrning, fortfarande inte rekommenderad för driftsättning.**
+
+- **`build_plan()` fick tre nya valfria parametrar** (`ev_energy_needed_kwh`, `ev_deadline`, `ev_max_power_kw`) och varje `PlannedSlot` ett nytt `ev_charge_w`-fält. När ett behov anges rangordnar en fristående merit-order-genomgång kandidatslots fram till deadline efter köppris stigande och fyller behovet från de billigaste först, begränsat av bilens maxeffekt – oberoende av batteriets egen V/`_opportunities`-bokföring, eftersom EV-energin inte drar på batteriets kapacitet alls.
+- **Fas-samordning (planens punkt 2) hanterad som en enkel, säker regel tills vidare**: slots där batteriet aktivt nätladdar utesluts från EV-kandidaterna, vilket undviker just den kombination planen varnar för (8 kW batteri + 3,7 kW bil). Ingen fullständig per-fas-modell finns i planeraren ännu (`build_plan()` spårar bara en skalär batterieffekt, ingen fasuppdelning) – noterat som en känd uppföljning i `docs/v1_implementation_plan.md`.
+- Verifierat med ett syntetiskt prisscenario (varierande nattpriser, en deadline före en morgontopp): schemat fyllde korrekt från de billigaste slotten först och respekterade deadline. Ingen regression i den riktiga 10-dagars backtesten (byte-identiskt resultat när inget EV-behov skickas in, vilket är vad `testdata/backtest.py` gör idag).
+- **Uttryckligen utanför omfattningen för den här ändringen, enligt användarens instruktion**: att koppla in schemat i faktisk laddarstyrning (`coordinator.py`/`energy_controller.py`s skarpa EV-styrning) samt planens punkt 3-invariant ("bilen laddas bara ur solöverskott eller uttryckligt schemalagda slots") – båda kräver att röra skarp styrlogik, avvaktar samma genomgång som steg 4:s paus.
+- `energy_planner.py` innehåller fortfarande bara steg 3+5+6:s kod, inte rekommenderad för driftsättning. v0.9.7 (commit `a57cea2`) förblir den senast verifierade, säkra versionen att köra mot den riktiga HA-instansen.
+
 ## Nyheter i 0.9.12
 
 Steg 5 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — sommarens laddningstiming. **Fortfarande inte rekommenderad för driftsättning** (del av steg 3:s odriftsatta omskrivning).

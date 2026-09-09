@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.12-blue)
+![Version](https://img.shields.io/badge/version-0.9.13-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.12
+## Nyheter i 0.9.13
 
-> **⚠️ Driftsätt inte den här versionen.** Det är ett pågående försök på steg 3 och 5 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), sparat i källkoden som referens. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den.
+> **⚠️ Driftsätt inte den här versionen.** Det är ett pågående försök på steg 3, 5 och 6 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), sparat i källkoden som referens. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den.
 
-Steg 5 (sommarens laddningstiming): lade till merit-order-prioritet så att dagens billigaste solöverskottstimmar får laddningsprioritet när batteriutrymme är den bindande begränsningen, istället för vilken timme som råkar komma först kronologiskt. "Extracykeln" (urladda lagrad energi under en samma-dags-pristopp) och morgon-framför-kväll-preferensen visade sig redan vara emergent beteende hos steg 3:s V/fyra-regel-arkitektur. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
+Steg 6 (bilen som schemalagd last) – bara planering, inte kopplad till skarp styrning: `build_plan()` kan nu ta emot ett EV-energibehov, en deadline och en maxeffekt, och producera ett merit-order-laddschema (billigaste slots först, undviker batteriets egna nätladdningsslots). Verifierat med ett syntetiskt prisscenario. Att koppla in schemat i faktisk laddarstyrning är medvetet uppskjutet. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
 
 Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 

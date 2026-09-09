@@ -2,6 +2,16 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.13
+
+Step 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the car as a schedulable load. **Planning-only, not wired to live control, still not recommended for deployment.**
+
+- **`build_plan()` gained three new optional parameters** (`ev_energy_needed_kwh`, `ev_deadline`, `ev_max_power_kw`) and each `PlannedSlot` a new `ev_charge_w` field. When a need is given, a standalone merit-order pass ranks candidate slots up to the deadline by buy price ascending and fills the need from the cheapest first, capped by the car's max power — independent of the battery's own V/`_opportunities` accounting, since EV energy doesn't draw on battery capacity at all.
+- **Phase coordination (plan's point 2) handled as a simple, safe rule for now**: slots where the battery is actively grid-charging are excluded from EV candidates, avoiding the specific stacking risk the plan calls out (8 kW battery + 3.7 kW car). A full per-phase model isn't in the planner yet (`build_plan()` only tracks a single scalar battery power, no phase breakdown) — noted as a known follow-up in `docs/v1_implementation_plan.md`.
+- Verified with a synthetic price scenario (varying overnight prices, a deadline before a morning price peak): the schedule correctly filled from the cheapest slots first and respected the deadline. No regression in the real 10-day backtest (byte-identical result when no EV need is passed, which is what `testdata/backtest.py` currently does).
+- **Explicitly out of scope for this change, per user instruction**: wiring this schedule into actual charger dispatch (`coordinator.py`/`energy_controller.py`'s live EV control) and the plan's point 3 invariant ("the car only charges from solar surplus or explicitly scheduled slots") — both require touching live control code, held off pending the same review as step 4's pause.
+- `energy_planner.py` still contains only step 3+5+6's code, not recommended for deployment. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance.
+
 ## What's New in 0.9.12
 
 Step 5 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — summer charging timing. **Still not recommended for deployment** (part of step 3's undeployed rewrite).
