@@ -1,0 +1,59 @@
+P7-1-utökning — januari 2026, extraherad 2026-09-09
+====================================================
+
+Byggd för att äntligen kunna köra planens eget, sedan v0.9.2 upprepat
+blockerade acceptanstest: "Backtest på en januarivecka" (steg 2, steg 8).
+Se docs/v1_implementation_plan.md, avsnitten "Steg 2 implementerat" och
+"STEG 8 — Validering" för bakgrunden till varför testdata/history/
+(2026-08-26–2026-09-05) inte räckte.
+
+Täcker: 2025-12-31 23:00 UTC – 2026-01-31 22:45 UTC (31 dygn, matchar
+kalendermånaden i lokal tid Europe/Stockholm).
+
+Fil                          Storhet                 Källa                                                        Upplösning
+------------------------------------------------------------------------------------------------------------------------------
+solar_hourly.csv             Solproduktion (W)       iSolarCloud "Curve"-export (Inverter1, kW->W konverterat)    1h
+house_load_hourly.csv        Huslast (W)             sensor.el_forbruk_power_power (HA statistics)                1h
+outdoor_temp_hourly.csv      Utomhustemp (°C)        sensor.boiler_outdoortemp (HA statistics)                    1h
+battery_soc_hourly.csv       Batteri-SOC (%)         sensor.sonnenbatterie_271100_..._percentage_real             1h
+grid_l1/l2/l3_hourly.csv     Nätfas L1/L2/L3 (kW)    sensor.elmatare_active_power_l1/l2/l3                        1h
+battery_inout_hourly.csv     Batteri in/ut (W)       sensor.sonnenbatterie_271100_state_battery_inout             1h
+heat_pump_power_hourly.csv   Värmepump IVT (W)       sensor.ivt_total_active_power                                1h
+price_quarterhour.csv        Spotpris (SEK/kWh)      sensor.nordpool_kwh_se3_sek_3_10_0_2 (HA statistics)         1h, replikerad 4x/h
+
+VIKTIGT: price_quarterhour.csv är bara SKENBART kvartsupplöst. Den
+riktiga rå-historiken (~10 dygns retention i recordern) är sedan länge
+borta för januari 2026 — HA:s långtidsstatistik för den här sensorn
+har bara `state`/`sum`/`change`, inget `mean` (state_class=total, inte
+measurement — se kommentar i _import_from_ha.py). Varje timmes `state`-
+värde (sensorns faktiska avläsning vid timmens slut) har replikerats till
+4 identiska kvartsrader, så att load_history_dir()s antagande om 15-
+minutersupplösning håller strukturellt, men den verkliga prisupplösningen
+här är alltså 1h, i linje med hur alla andra serier redan är hourly-
+forward-fillade i samma pipeline.
+
+Solfilen (iSolarCloud) är i lokal tid (Europe/Stockholm, UTC+1 i
+januari, ingen sommartid) — konverterad till UTC i _build_solar.py.
+
+Återskapa/utöka
+-----------------
+_import_from_ha.py: läser sparade JSON-svar från ha_get_history
+(source=statistics, period=hour) och skriver om till samma format som
+testdata/history/*.csv. Kräver att JSON-svaren redan finns på disk
+(för stora för att processas direkt i modellens kontext) — se
+kommentarerna i skriptet för vilka HA MCP-anrop som genererade dem.
+_build_price.py: bygger price_quarterhour.csv från _price_state.json
+(samma orsak som ovan — prissensorns statistik måste hämtas separat
+med statistic_types=["state"], inte ["mean"]).
+_build_solar.py: konverterar iSolarCloud-exporten (Downloads-mappen,
+inte incheckad här) till solar_hourly.csv.
+
+Kör backtest mot den här mappen:
+  python testdata/backtest.py testdata/history_jan2026 --out resultat.csv
+
+Känd datalucka som INTE är löst av det här: bara januari 2026 än, inte
+en hel vinter eller flera januarimånader. sensor.sg_total_active_power
+(soldata i HA) är fortfarande bara ~1 månad gammal (sedan ~2026-08-06) —
+januaris soldata kommer uteslutande från iSolarCloud-exporten, inte HA.
+Om fler vintermånader/år behövs: samma mönster, byt bara datumintervallet
+i HA-frågorna och exportera motsvarande iSolarCloud-kurva.

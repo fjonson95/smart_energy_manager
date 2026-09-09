@@ -349,6 +349,49 @@ testdata ännu). Resultat:
   uppfylld; den kvantitativa delen (botten nära min_soc en verklig
   vinternatt) kan först verifieras när en januarivecka finns i testdata.
 
+### Datagapet löst — riktig januari 2026-backtest (2026-09-09)
+
+Användaren extraherade solproduktion januari 2026 direkt ur iSolarCloud
+("Curve"-export, timupplöst) — HA:s egen solsensor
+(`sensor.sg_total_active_power`) är bara ~1 månad gammal, men de flesta
+andra nyckelserier visade sig ha MYCKET längre historik än vad
+`testdata/history/` (byggd för att matcha solsensorns korta liv) någonsin
+utnyttjat: huslast/utomhustemp/batteri-SOC/batteri-in-ut sedan
+**2024-01-01**, nätfaser och värmepumpseffekt sedan ~2025-01-01,
+spotpris sedan ~2025-11-01 (permanent HA-långtidsstatistik, inte den
+~10-dagars rå-historiken `price_quarterhour.csv` normalt bygger på).
+Kombinerat: en riktig januari 2026-backtest, `testdata/history_jan2026/`
+(se den mappens egen `Series info.txt` för detaljer och återskapande-
+instruktioner) — planens EGET, sedan v0.9.2 upprepat blockerade
+acceptanstest, äntligen körbart.
+
+**Bekräftar** det redan dokumenterade fyndet i
+`docs/forbrukningsanalys.md` avsnitt 8: 4–14 januari 2026 är exakt
+0,0 kW sol VARJE timme, 11 dygn i följd.
+
+**Resultat, steg 2 (`a57cea2`, säker/driftsatt) mot hela januari:**
+1,3 % besparing mot referens (59,60 kr/månad). Lågt i absoluta tal, men
+väntat — batteriet är enligt planens egen inledning till steg 7 "för
+litet för vintern" (räcker en dryg tredjedel av en januarinatt); det är
+värmepumpen/huset (steg 7) som är rätt storleksordning, inte batteriet.
+
+**Resultat, steg 3+5+6 (nuvarande, ODRIFTSATT kod) mot samma data:**
+bara **0,2 %** (8,91 kr/månad) — en tydlig, kvantifierad bekräftelse av
+den redan misstänkta 48h-horisont-svagheten (se "Steg 3 implementerat"),
+nu mot riktig vinterdata istället för antaganden. Sommartestet visade
+~90 % av steg 2:s vinst; januari visar ~15 %. Horisontbegränsningen väger
+alltså mycket tyngre på vintern, där bristen på sol i flera dygn i sträck
+gör att V:s 48h-fönster aldrig ser tillräckligt långt fram för att skydda
+rätt.
+
+**Oväntat bifynd:** BÅDA versionerna ger ovanligt många
+fasgränskorrigeringar i backtestens `_apply_phase_limits`-loop under
+januari (steg 2: ~4300, steg 3+5+6: ~5970, över hela månaden) — betydligt
+mer än sommarkörningarna någonsin visat, eftersom vinterlasterna
+(värmepump + elpatron) är mycket högre. Inte utrett vidare än; flaggat
+som en möjlig separat brist att undersöka oavsett vilken planerarversion
+som används.
+
 ---
 
 ## STEG 3 — Marginalvärdet V
@@ -977,10 +1020,23 @@ temp/SOC/nätfaser täcker fortfarande bara samma korta fönster. Steg 8:s
 serierna innan den går att uppfylla fullt ut — se
 `testdata/history/Series info.txt`.
 
+**Uppdatering (2026-09-09): januari-delen av luckan är löst.** Se
+"Datagapet löst" under "Steg 2 implementerat" ovan — `testdata/
+history_jan2026/` ger en riktig, hel januarimånad (inte bara en vecka)
+med alla nyckelserier, inklusive sol via en iSolarCloud-export. Juli
+(maximal export, steg 5:s eget acceptanstest) är fortfarande olöst –
+samma mönster (HA-långtidsstatistik + en motsvarande iSolarCloud-
+export) skulle lösa det, bara inte gjort än. "Kör mot hela året" i
+bemärkelsen sammanhängande, är fortfarande inte uppfyllt.
+
 1. **Två syratester.** Januari 2026 med de nolldygnen (15 dygn med exakt
    0,0 kWh, 11 i följd 4–14 jan — bekräftat, se
-   `docs/forbrukningsanalys.md` avsnitt 8), och juli 2026 med maximal
-   export. Ett system som klarar båda utan specialfall är klart.
+   `docs/forbrukningsanalys.md` avsnitt 8, och nu även direkt i
+   `testdata/history_jan2026/solar_hourly.csv`), och juli 2026 med
+   maximal export. Ett system som klarar båda utan specialfall är klart.
+   **Januaridelen kan nu köras** (se ovan) — resultatet (steg 2: 1,3 %,
+   steg 3+5+6: 0,2 % besparing) redovisas under "Steg 2 implementerat".
+   Julidelen fortfarande olöst.
 2. **Mätetal i kronor** mot en referens utan batteri och utan styrning.
    Kör varje steg mot samma period så att vinsten per ändring blir
    synlig.
