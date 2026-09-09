@@ -1,20 +1,18 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.7-blue)
+![Version](https://img.shields.io/badge/version-0.9.8-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.7
+## What's New in 0.9.8
 
-Step 2 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the export/discharge floor becomes a trajectory instead of a single scalar.
+> **⚠️ Do not deploy this version.** It's an in-progress, backtest-regressed attempt at step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), kept in source control for reference. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that.
 
-- **`export_floor_kwh` replaced with `reserve_at(t)`, a per-slot decaying reserve curve.** The old scalar floor was compared against every dark slot through the whole night, so it never shrank as the battery covered the load it was sized for. `reserve_at(t)` sums the real remaining deficit between `t` and solar takeover, so headroom stays positive through the night instead of hitting zero early. Verified against a real 10-day backtest: the reported floor now decays smoothly overnight and SOC tracks it down without plateauing.
-- **Removed the 85% safety cap** (`_FLOOR_SAFETY_CAP_FRACTION`) — it only existed to bound the old scalar floor; a trajectory built from real per-slot deficits, clamped to battery capacity, can't structurally exceed the usable range.
-- The interim price-gate relaxation ("Option B") stays in place until the reserve curve is verified against a real winter backtest.
+Step 3 ("marginal value V") replaced steps 0–2's several thresholds with a single merit-order-derived number and rewrote the battery dispatch loop around four price rules. Backtesting against the same window that verified steps 0–2 found and fixed three real bugs along the way, but the result is still a regression — 45% savings vs. step 2's 91% on identical data. Root cause: the model only protects against deficits visible within its 48h horizon, so on a sunny day it treats capacity beyond ~2 nights of visible need as available for low-value same-day export — a protection step 2's simpler "always store surplus" floor provided for free. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
 ## System Overview
 

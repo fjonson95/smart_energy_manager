@@ -1,18 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.7-blue)
+![Version](https://img.shields.io/badge/version-0.9.8-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.7
+## Nyheter i 0.9.8
 
-Steg 2 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — export-/urladdningsgolvet blir en bana istället för ett skalärt tal.
+> **⚠️ Driftsätt inte den här versionen.** Det är ett pågående, backtest-regressat försök på steg 3 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), sparat i källkoden som referens. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den.
 
-- **`export_floor_kwh` ersatt av `reserve_at(t)`, en per-slot avtagande reservkurva.** Det gamla skalära golvet jämfördes mot VARJE mörk slot genom hela natten och krympte aldrig i takt med att batteriet täckte lasten det var dimensionerat för. `reserve_at(t)` summerar det verkliga återstående underskottet mellan `t` och solens övertagande, så marginalen förblir positiv genom hela natten istället för att nå noll för tidigt. Verifierat mot en riktig 10-dagars backtest: golvet avtar nu mjukt över natten och SOC följer nedåt utan platå.
-- **Tog bort 85 %-skyddsspärren** (`_FLOOR_SAFETY_CAP_FRACTION`) – den fanns bara för att begränsa det gamla skalära golvet; en bana byggd av riktiga per-slot-underskott, klämd mot batterikapaciteten, kan strukturellt inte överstiga spannet.
-- Den interimistiska prisspärren ("Option B") ligger kvar tills reservkurvan är verifierad mot en riktig vinterbacktest.
+Steg 3 ("marginalvärdet V") ersatte steg 0–2:s flera trösklar med ett enda merit-order-härlett tal och skrev om batteriets dispatch-loop kring fyra prisregler. Backtest mot samma fönster som verifierade steg 0–2 hittade och fixade tre riktiga buggar under vägs, men resultatet är ändå en regression – 45 % besparing mot steg 2:s 91 % på identisk data. Grundorsak: modellen skyddar bara mot underskott synliga inom sin 48-timmarshorisont, så en solig dag behandlar den kapacitet bortom ~2 nätters synligt behov som ledig för lågvärdig samma-dags-export – ett skydd steg 2:s enklare "spara alltid solöverskott"-golv gav gratis. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 

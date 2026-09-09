@@ -5,11 +5,14 @@ Producerar ett DayPlan med tidsindexerade planslottar som körs PARALLELLT
 med befintlig EnergyController – inga faktiska beslut ändras. Planeraren
 loggar sin plan och varje avvikelse mot kontrollarens faktiska beslut.
 
-Algoritm (tvåpass):
-  1. Beräkna nyckeltal: exportgolv, kvällsmål, exporterbara kWh
-  2. Fördela export prisväktat över mörka höga prisslots (kväll + morgon)
-  3. Identifiera billiga nätladdningsstillfällen om batteri hamnar under mål
-  4. Framåtsimulera batteri-SOC slot för slot
+Algoritm (v1.0 steg 3, "marginalvärdet V" – docs/v1_implementation_plan.md):
+  1. Beräkna V: marginalvärdet av en kWh i batteriet just nu, från en
+     merit-order-allokering av tillgänglig batterienergi mot framtida
+     underskottsslots (dyrast pris först, begränsat av effekt och av vad
+     solen hinner fylla på innan respektive slot).
+  2. Framåtsimulera batteri-SOC slot för slot. Varje slot avgörs av fyra
+     ömsesidigt uteslutande regler som alla jämför mot samma V – se
+     _decide_slot().
 """
 from __future__ import annotations
 
@@ -22,30 +25,19 @@ from .price_scheduler import PriceSchedule
 
 _LOGGER = logging.getLogger(__name__)
 
-_PLAN_HORIZON_H  = 28    # Timmar framåt att planera
-_HARD_FLOOR_FRACTION = 0.10  # Hårt golv: andel av batterikapaciteten som aldrig underskrids
-
-# --- Interimslösning ("Option B", docs/forbrukningsanalys.md) -------------
-# Prisspärren nedan är MEDVETET en enkel första version, inte den slutgiltiga
-# lösningen. Den öppnar golvet rakt av mot hard_floor_kwh varje gång villkoret
-# slår till, utan gräns för hur mycket av marginalen som spenderas – testat
-# mot ett "0 sol imorgon"-scenario visade att den kan tömma batteriet till
-# hard_floor timmar innan nästa kvällstopp om solprognosen slår fel. Två
-# säkrare varianter (dynamisk percentiltröskel; smalare relaxation) är
-# skisserade men inte implementerade. Håll koll på det här avsnittet när den
-# riktiga lösningen bestäms. Osäkerheten i solprognosen väger INTE in här
-# längre (v1.0 steg 0) – den hanteras redan av _uncertainty_markup() som
-# höjer själva golvet; att dessutom stänga prisspärren vid låg pv_kvot
-# slog igen den precis de dygn (snötäckta paneler) reserven finns till för.
+_PLAN_HORIZON_H = 48  # v1.0 steg 3, punkt 5: 36-48h. Ingen prisprognos behövs
+                       # utöver vad ps.slots redan har – morgondagens priser
+                       # finns redan på kvällen när kvällsbesluten fattas.
 
 
 def _uncertainty_markup(pv_production_ratio: float) -> float:
-    """Osäkerhetspåslag på golvreserven baserat på produktionskvoten (P3-2).
+    """Riskpåslag på V baserat på produktionskvoten (P3-2).
 
     Kvot ~1.0 (normal produktion mot prognos) → litet baspåslag.
-    Kvot ≤0.3 (snötäckta paneler etc.) → stort påslag, golvet mättas mot
-    batteriets maxkapacitet ("full nattautonomi") via min()-klämningen i
-    build_plan().
+    Kvot ≤0.3 (snötäckta paneler etc.) → stort påslag – ett högre V ger
+    mindre export, sparsammare självkonsumtion och nätladdning vid högre
+    priser, alla tre effekterna man vill ha när solprognosen inte går att
+    lita på (v1.0 steg 3, punkt 3 – flyttad hit från golvbanan i steg 2).
     """
     if pv_production_ratio >= 0.9:
         return 0.10
@@ -78,6 +70,8 @@ class DayPlan:
     solar_takeover_dt: Optional[datetime]
     hourly_load_kw: float
     pv_production_ratio: float = 1.0
+    marginal_value_sek_kwh: float = 0.0
+    marginal_slot_start: Optional[datetime] = None
 
     slots: list[PlannedSlot] = field(default_factory=list)
     notes: str = ""
@@ -101,8 +95,8 @@ class DayPlan:
             f"DayPlan@{self.generated_at.strftime('%H:%M')}: "
             f"export={n_exp}×slot/{exp_kwh:.1f}kWh "
             f"sol_laddning={n_sol} nätladdning={n_grid} "
-            f"kvällsmål={self.evening_target_soc_pct:.0f}% "
-            f"golv={self.export_floor_kwh:.1f}kWh "
+            f"V={self.marginal_value_sek_kwh:.2f}kr/kWh "
+            f"reserv={self.export_floor_kwh:.1f}kWh "
             f"intäkt≈{self.expected_revenue_sek:.1f}kr"
         )
 
@@ -124,6 +118,13 @@ class EnergyPlanner:
     ):
         self.battery_min_soc               = battery_min_soc
         self.battery_max_soc               = battery_max_soc
+        # v1.0 steg 3: export_sell_percentile, export_min_sell_price,
+        # export_min_solar_tomorrow_kwh, sell_solar_min_price och
+        # cheap_charge_buy_percentile används inte längre av build_plan() –
+        # de nio konkurrerande trösklarna är ersatta av V och de fyra
+        # beslutsreglerna (_decide_slot). Kvar i konstruktorn bara för att
+        # coordinator.py fortfarande skickar in dem – tas bort i steg 4
+        # tillsammans med motsvarande CONF_*-nycklar (docs/v1_implementation_plan.md).
         self.export_sell_percentile        = export_sell_percentile
         self.export_min_sell_price         = export_min_sell_price_sek_kwh
         self.export_min_solar_tomorrow_kwh = export_min_solar_tomorrow_kwh
@@ -152,6 +153,15 @@ class EnergyPlanner:
         load_shape_p50: Optional[list] = None,
         load_shape_p75: Optional[list] = None,
     ) -> DayPlan:
+        # solar_forecast_tomorrow_kwh, solar_takeover_dt och
+        # battery_avg_cost_sek_kwh konsumeras inte längre av logiken nedan
+        # (v1.0 steg 3): V:s merit-order-allokering ser redan morgondagens
+        # sol_p10 per slot via ps.slots, och exportbeslutet (regel 4) är nu
+        # rent framåtblickande – V representerar redan bästa alternativa
+        # användning av energin, så vad den en gång kostade att lagra
+        # (sunk cost) styr inte längre om den är värd att sälja nu. Kvar i
+        # signaturen bara för att inte behöva röra coordinator.py:s anrop
+        # innan steg 4:s städning.
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
 
@@ -165,13 +175,11 @@ class EnergyPlanner:
         # varmvatten-energi, se coordinator._get_rolling_consumption_kwh())
         # framför en enda dags gårdagssiffra – en enstaka ovanligt hög dag
         # (elpatron, EV, varmvatten) ska inte ensam blåsa upp golvet för hela
-        # natten (docs/forbrukningsanalys.md avsnitt 8: gårdagens 28,76 kWh
-        # låg ~20% över 17-dagarssnittet och drev golvet mot taket på egen
-        # hand). Faller tillbaka till gårdagen ensam tills 7 dygn hunnit
-        # rulla över sedan funktionen driftsattes. Projektionen använder
-        # house_load_avg_w (glidande medel) om den finns, annars momentan
-        # house_load_w – en enstaka kokplatta/dusch ska inte läsas som
-        # "hela natten".
+        # natten (docs/forbrukningsanalys.md avsnitt 8). Faller tillbaka till
+        # gårdagen ensam tills 7 dygn hunnit rulla över sedan funktionen
+        # driftsattes. Projektionen använder house_load_avg_w (glidande
+        # medel) om den finns, annars momentan house_load_w – en enstaka
+        # kokplatta/dusch ska inte läsas som "hela natten".
         _eff_daily_kwh = max(predicted_daily_kwh, rolling_consumption_kwh or yesterday_consumption_kwh or 0.0)
         _load_for_projection_w = house_load_avg_w if house_load_avg_w is not None else house_load_w
         hourly_load_kw = max(_eff_daily_kwh / 24.0, _load_for_projection_w / 1000.0, 0.5)
@@ -181,11 +189,10 @@ class EnergyPlanner:
         # NIVÅN (gradtimmodellen, predicted_daily_kwh – INTE _eff_daily_kwh,
         # eftersom formen redan är byggd på verklig data och nivån ska kunna
         # reagera på morgondagens temperaturprognos direkt). P50 för allmän
-        # planering, P75 för reserven (behov_kwh/net_solar_tomorrow_kwh) – en
-        # smalt högre försiktighetsmarginal, "augustinattens premie" är bara
-        # 1–10 % över P50. Faller tillbaka till den platta hourly_load_kw tills
-        # 21 dygns formhistorik hunnit byggas upp, eller för enskilda timmar
-        # utan täckning i fönstret.
+        # planering, P75 för underskottsprojektionen i V (en smalt högre
+        # försiktighetsmarginal). Faller tillbaka till den platta
+        # hourly_load_kw tills 21 dygns formhistorik hunnit byggas upp, eller
+        # för enskilda timmar utan täckning i fönstret.
         def _load_kw_at(dt: datetime, shape: Optional[list]) -> float:
             if shape is not None:
                 h = shape[dt.astimezone().hour]
@@ -196,200 +203,148 @@ class EnergyPlanner:
         def _slot_load_kwh(s, shape: Optional[list]) -> float:
             return _load_kw_at(s.start, shape) * (s.end - s.start).total_seconds() / 3600.0
 
-        # v1.0 steg 2: golvet blir en BANA, inte ett skalärt tal (docs/
-        # v1_implementation_plan.md). Den gamla versionen räknade en enda
-        # export_floor_kwh en gång och jämförde den mot VARJE mörk slot genom
-        # hela natten – men golvet krympte aldrig i takt med att lasten
-        # faktiskt täcktes, så "avail = batt − min − golv" kunde bli 0 långt
-        # innan solen tog över, trots att batteriet redan hade täckt det
-        # golvet var till för (se docs/forbrukningsanalys.md avsnitt 9, Steg 0
-        # – executorns veto var SYMPTOMET, det här var grundorsaken det lappade).
-        #
-        # reserve_at(t) = summan av (last(s) − sol_p10(s)) för alla floor_slots
-        # med start >= t, plus en icke-avtagande säkerhetsmarginal (+2 kWh,
-        # EV-marginal), × osäkerhetspåslaget. Eftersom både batteriet OCH
-        # reservkravet minskar med samma kWh när en slots last täcks blir
-        # "avail" positivt genom hela natten – det är hela poängen.
-        #
-        # Osäkerhetspåslaget skalas av produktionskvoten (P3-2): slår
-        # prognosen fel (snö, nedsmutsning) höjs reserven, i värsta fall mot
-        # full nattautonomi via min()-klämningen mot batt_max_kwh. Ett hårt
-        # golv (10 % av kapaciteten) gäller alltid.
-        takeover = solar_takeover_dt if (solar_takeover_dt and solar_takeover_dt > now_a) else now_a + timedelta(hours=9)
-        takeover_local = takeover.astimezone()
-        _floor_slots = [s for s in (ps.slots or []) if s.end > now_a and s.start < takeover_local]
-        _floor_slots_sorted = sorted(_floor_slots, key=lambda s: s.start)
-
-        # Suffix-summa (rå, ingen markup/buffert än): för varje floor_slot,
-        # hur mycket underskott återstår FRÅN den sloten till takeover.
-        _reserve_suffix: dict[datetime, float] = {}
-        _running_raw = 0.0
-        for s in reversed(_floor_slots_sorted):
-            _running_raw += max(0.0, _slot_load_kwh(s, load_shape_p75) - s.solar_kwh_p10)
-            _reserve_suffix[s.start] = _running_raw
-
-        # EV-marginal + fast buffert: en icke-avtagande säkerhetsmarginal
-        # (inte hela vägen till soc_target för EV – EV-laddning är
-        # fortfarande i första hand sol-/opportunistiskt styrd), så en vald
-        # bil som kan behöva ladda under det mörka fönstret aldrig glöms bort,
-        # oavsett var i natten vi är.
+        # Icke-avtagande säkerhetsmarginal: alltid utom räckhåll för V:s
+        # allokering och för självkonsumtion, oavsett pris. 2 kWh fast
+        # buffert + EV-marginal (en vald bil som kan behöva ladda under det
+        # mörka fönstret utan att golvet räknar som om bilen inte fanns) –
+        # bevarad från steg 2, den delen av golvbanan V INTE ersätter (V
+        # prisar bara den energi som FÅR spenderas, den här bufferten är
+        # energi som aldrig är till salu, till något pris).
         _flat_buffer_kwh = 2.0 + max(0.0, ev_reserve_margin_kwh)
-        _markup_factor = 1.0 + _uncertainty_markup(pv_production_ratio)
-        hard_floor_kwh = battery_capacity_kwh * _HARD_FLOOR_FRACTION
-        # Skyddsspärren (_FLOOR_SAFETY_CAP_FRACTION) tas bort här (v1.0 steg 2,
-        # punkt 2): den var en lapp mot att det SKALÄRA golvet kunde överstiga
-        # hela det användbara spannet en högförbrukningsdag. En bana som
-        # summerar riktiga per-slot-underskott mot takeover kan strukturellt
-        # inte göra det – klämningen mot batt_max_kwh nedan räcker.
-
-        def reserve_at(t: datetime) -> float:
-            """Reservkrav (kWh, med markup+buffert, klämt mot hård gräns) för
-            allt som återstår från t till takeover. Krymper mot bara
-            bufferten när t närmar sig takeover."""
-            if t >= takeover_local:
-                raw = 0.0
-            elif _floor_slots_sorted:
-                raw = 0.0
-                for s in _floor_slots_sorted:
-                    if s.start >= t:
-                        raw = _reserve_suffix[s.start]
-                        break
-            else:
-                # Inga riktiga prisslots att summera över (t.ex. saknad
-                # Nordpool-data) – uppskatta mot återstående timmar till
-                # takeover istället för en fast siffra, så även fallbacken
-                # krymper naturligt när t närmar sig takeover.
-                _remaining_h = max(0.0, (takeover_local - t).total_seconds() / 3600.0)
-                raw = _load_kw_at(t, load_shape_p75) * _remaining_h
-            reserve = (raw + _flat_buffer_kwh) * _markup_factor
-            return min(batt_max_kwh, max(hard_floor_kwh, reserve))
-
-        # Golvet vid "nu" – samma tal som tidigare (export_floor_kwh),
-        # bevarat för rapportering (DayPlan, sensorer, kvällsmål) och som
-        # startvärde för export-/nätladdningsbesluten som bara utvärderas en
-        # gång per planeringscykel, inte per slot.
-        export_floor_kwh = reserve_at(now_a)
-        evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + export_floor_kwh / battery_capacity_kwh * 100.0)
-        # Användbar energi ovan min_soc – energin under batt_min_kwh kan aldrig nås.
-        exportable_kwh = max(0.0, batt_kwh - batt_min_kwh - export_floor_kwh)
-
-        # Nettosol imorgon slot-för-slot – speglar controllerns nettosolkontroll.
-        tomorrow_date = (now_a + timedelta(days=1)).date()
-        # Exportspärren jämförs mot p10 (pessimistisk), aldrig p50 – den avgör
-        # om vi vågar tömma batteriet ikväll i tillit till morgondagens sol.
-        tomorrow_slots = [s for s in (ps.slots or []) if s.start.astimezone().date() == tomorrow_date]
-        net_solar_tomorrow_kwh = (
-            sum(
-                max(0.0, s.solar_kwh_p10 - _slot_load_kwh(s, load_shape_p75))
-                for s in tomorrow_slots
-            ) if tomorrow_slots
-            else max(0.0, solar_forecast_tomorrow_kwh - _load_kw_at(now_a, load_shape_p75) * 13.0)
-        )
 
         future_slots = [
             s for s in (ps.slots or [])
             if s.end > now_a and s.start < horizon_end
         ]
-        if not future_slots:
+
+        def _empty_plan(notes: str) -> DayPlan:
+            _reserved_kwh = batt_min_kwh + _flat_buffer_kwh
             return DayPlan(
                 generated_at=now_a, valid_until=now_a + timedelta(minutes=15),
-                evening_target_soc_pct=evening_target_soc, export_floor_kwh=export_floor_kwh,
-                total_exportable_kwh=exportable_kwh, expected_revenue_sek=0.0,
+                evening_target_soc_pct=min(self.battery_max_soc, self.battery_min_soc + _flat_buffer_kwh / battery_capacity_kwh * 100.0),
+                export_floor_kwh=_reserved_kwh,
+                total_exportable_kwh=max(0.0, batt_kwh - _reserved_kwh),
+                expected_revenue_sek=0.0,
                 solar_takeover_dt=solar_takeover_dt, hourly_load_kw=hourly_load_kw,
                 pv_production_ratio=pv_production_ratio,
-                notes="Inga prisslots tillgängliga",
+                notes=notes,
             )
 
-        # Exporttröskel: 80:e percentil av dagens säljpriser
-        today_date = now_a.date()
-        today_slots = [s for s in future_slots if s.start.astimezone().date() == today_date]
-        sell_prices_sorted = sorted(s.sell_sek for s in (today_slots or future_slots))
-        export_threshold = sell_prices_sorted[
-            min(int(self.export_sell_percentile * len(sell_prices_sorted)), len(sell_prices_sorted) - 1)
-        ]
-        # Dispatch-fönstret använder alltid percentiltröskeln – abs-minimum är en trigger
-        # för enstaka slots, inte en licens att skapa ett natt-långt billig-pris-fönster.
-        eff_threshold = export_threshold
+        if not future_slots:
+            return _empty_plan("Inga prisslots tillgängliga")
 
-        # Export-slots: mörka, högt pris, inom 20h
-        has_solar_data = any(s.solar_kw > 0 for s in future_slots)
-        takeover_local = takeover.astimezone()
-        window_end = now_a + timedelta(hours=20)
-        high_slots = [
-            s for s in future_slots
-            if s.sell_sek >= eff_threshold
-            and s.start < window_end
-            and (s.solar_kw < _load_kw_at(s.start, load_shape_p50) if has_solar_data
-                 else s.start.astimezone() < takeover_local)
-        ]
+        # --- v1.0 steg 3: marginalvärdet V --------------------------------
+        # "Vattenvärdet" av en kWh i batteriet just nu: allokera den
+        # tillgängliga batterienergin (ovan hård gräns + buffert) mot en
+        # rankad lista av framtida "möjligheter" (täcka ett underskott ELLER
+        # exportera, se _opportunities nedan) i värdeordning, dyrast först,
+        # begränsat av effekt per slot OCH av vad solen hinner fylla på
+        # innan respektive slots tidpunkt (inte en delad pool som kan tas i
+        # fel kronologisk ordning). V = värdet (köp- eller säljpris) i den
+        # billigaste möjlighet som fick tilldelning.
+        #
+        # _cap_by_time: kronologisk, prisfri simulering av hur mycket
+        # batteriet SOM MEST kan innehålla vid varje framtida tidpunkt om
+        # det bara någonsin laddas av sol (aldrig urladdas) – den övre
+        # gränsen "vad solen fyller på däremellan" sätter för en slot sent i
+        # horisonten. Använder PESSIMISTISK sol (p10) och P75-last, samma
+        # försiktighetskonvention som resten av reservlogiken – inte
+        # förväntad (p50) sol. Ett optimistiskt antagande här skapar en
+        # cirkularitet: om capacity-prognosen antar att all sol fångas ser
+        # kvällens underskott lätt-täckt ut redan mitt på dagen, V faller,
+        # regel 1 säljer solen direkt istället för att spara den – vilket
+        # gör antagandet falskt i efterhand. Verifierat i backtest: gav en
+        # tydlig regression (53% besparing mot steg 2:s 91%, mitt-på-dagen-
+        # sol som skulle laddat batteriet för natten exporterades istället
+        # för nästan inget). Se docs/v1_implementation_plan.md, Steg 3
+        # implementerat.
+        _cap_by_time: dict[datetime, float] = {}
+        _running_cap = batt_kwh
+        for s in future_slots:
+            s_h = (s.end - s.start).total_seconds() / 3600.0
+            if s_h <= 0:
+                continue
+            _s_surplus_kwh = max(0.0, s.solar_kwh_p10 - _slot_load_kwh(s, load_shape_p75))
+            _running_cap = min(batt_max_kwh, _running_cap + min(_s_surplus_kwh, battery_max_power_kw * s_h))
+            _cap_by_time[s.start] = _running_cap
 
-        # Marginalvärdesmodell (ersätter det gamla, aldrig-uppfyllbara köpris-filtret):
-        # exportable_kwh är redan energin OVANFÖR golvet – den ersätts gratis av
-        # morgondagens sol och har inget värde i sig självt utöver vad den kostade
-        # att lagra. Sälj bara om säljpriset täcker batteriets faktiska snittpris
-        # plus cykelkostnaden (slitage) – annars är det en förlustaffär.
-        _min_export_value = battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh
-        if _min_export_value > 0:
-            high_slots = [s for s in high_slots if s.sell_sek > _min_export_value]
+        _reserved_kwh = batt_min_kwh + _flat_buffer_kwh
 
-        # Koncentrerad dispatch av exporterbara kWh: dela high_slots i "ikväll"
-        # och "imorgon bitti" (kalenderdag), räkna kWh-viktat snittpris per
-        # grupp, och allokera exportable_kwh till den HÖGST värderade gruppen
-        # först – upp till vad gruppens egna slots kan bära (effekt × tid).
-        # Bara om den gruppen inte kan bära allt spiller resten över till den
-        # andra. Ersätter den tidigare rena linjära prisviktningen över ALLA
-        # high_slots på en gång, som smetade ut exporten proportionellt även
-        # när en av topparna var betydligt mer värd än den andra (t.ex.
-        # imorgon-morgontoppen 155,7 öre mot kvällens 127,3 öre).
-        export_plan: dict[datetime, float] = {}
-        can_export = (
-            exportable_kwh > 0.1
-            and net_solar_tomorrow_kwh >= export_floor_kwh
-            and solar_forecast_tomorrow_kwh >= self.export_min_solar_tomorrow_kwh
-        )
-        export_plan_price_sum: dict[datetime, float] = {}
-        if can_export and high_slots:
-            groups: dict[object, list] = {}
-            for s in high_slots:
-                groups.setdefault(s.start.astimezone().date(), []).append(s)
+        # Merit-order över ALLA framtida "möjligheter" en kWh batteri kan
+        # användas till – inte två separata pass (köpsida/säljsida) som
+        # visade sig kunna falla mellan stolarna och sätta V=0.0 (t.ex. när
+        # batteriet exakt räckte till alla underskott utan någon marginal
+        # kvar för säljsidans egen allokering, eller när batteriet redan låg
+        # UNDER den bevarade reserven vid horisontens start så ingenting
+        # kunde tilldelas alls – båda upptäckta i backtest, se
+        # docs/v1_implementation_plan.md, Steg 3 implementerat).
+        #
+        # Varje slot bidrar med upp till två "möjligheter" efter varandra,
+        # ur samma effektbudget: först att täcka slotens eget underskott
+        # (värde = köppris, det den sparar), sedan – med vad som blir över
+        # av effekten – att exportera (värde = säljpris, det den tjänar).
+        # Rankas dyrast/mest värdefullt först, vilket automatiskt prioriterar
+        # lasttäckning före export när båda konkurrerar om samma kWh (köp>sälj
+        # alltid – matchar CLAUDE.md:s prioritet 2 före 3 utan specialfall).
+        _opportunities: list[tuple] = []  # (slot, värde_sek_kwh, kwh)
+        for s in future_slots:
+            s_h = (s.end - s.start).total_seconds() / 3600.0
+            if s_h <= 0:
+                continue
+            cap_kwh = battery_max_power_kw * s_h
+            deficit = max(0.0, _slot_load_kwh(s, load_shape_p75) - s.solar_kwh_p10)
+            tier1 = min(deficit, cap_kwh)
+            if tier1 > 0.01:
+                _opportunities.append((s, s.buy_sek, tier1))
+            rest_kwh = cap_kwh - tier1
+            if rest_kwh > 0.01:
+                _opportunities.append((s, s.sell_sek, rest_kwh))
 
-            def _group_value(group_slots: list) -> float:
-                total_h = sum((s.end - s.start).total_seconds() / 3600.0 for s in group_slots)
-                if total_h <= 0:
-                    return 0.0
-                return sum(s.sell_sek * (s.end - s.start).total_seconds() / 3600.0 for s in group_slots) / total_h
+        _accepted: list[tuple] = []  # (slot, värde, kwh)
+        for s, value, cap_kwh in sorted(_opportunities, key=lambda x: x[1], reverse=True):
+            _cap_at_t = _cap_by_time.get(s.start, batt_kwh) - _reserved_kwh
+            _used_before_t = sum(kwh for (a_s, _, kwh) in _accepted if a_s.start < s.start)
+            _avail_at_t = max(0.0, _cap_at_t - _used_before_t)
+            _alloc = min(cap_kwh, _avail_at_t)
+            if _alloc > 0.01:
+                _accepted.append((s, value, _alloc))
 
-            def _group_capacity_kwh(group_slots: list) -> float:
-                return sum(
-                    battery_max_power_kw * (s.end - s.start).total_seconds() / 3600.0
-                    for s in group_slots
-                )
+        if _accepted:
+            _cheapest = min(_accepted, key=lambda x: x[1])
+            _v_raw = _cheapest[1]
+            _marginal_slot_start = _cheapest[0].start
+        elif _opportunities:
+            # Möjligheter finns, men INGEN kunde tilldelas – batteriet är
+            # redan under den bevarade reserven (t.ex. en historisk
+            # startpunkt lägre än den konfigurerade reserven) med ingen sol
+            # i sikte för att lyfta taket. Maximal knapphet: V sätts av den
+            # mest värdefulla obetjänade möjligheten, vilket i praktiken
+            # blockerar all vidare urladdning/export och gynnar nätladdning
+            # (regel 3) tills reserven är återställd.
+            _v_raw = max(value for _, value, _ in _opportunities)
+            _marginal_slot_start = None
+        else:
+            _v_raw = 0.0
+            _marginal_slot_start = None
 
-            ordered_groups = sorted(groups.values(), key=_group_value, reverse=True)
-            remaining_kwh = exportable_kwh
-            for group_slots in ordered_groups:
-                if remaining_kwh <= 0.01:
-                    break
-                group_kwh = min(remaining_kwh, _group_capacity_kwh(group_slots))
-                group_price_sum = sum(s.sell_sek for s in group_slots)
-                if group_kwh <= 0 or group_price_sum <= 0:
-                    continue
-                for s in group_slots:
-                    slot_h = (s.end - s.start).total_seconds() / 3600.0
-                    if slot_h <= 0:
-                        continue
-                    w = (s.sell_sek / group_price_sum) * group_kwh / slot_h * 1000.0
-                    export_plan[s.start] = min(w, battery_max_power_kw * 1000.0)
-                    export_plan_price_sum[s.start] = group_price_sum
-                remaining_kwh -= group_kwh
+        V = _v_raw * (1.0 + _uncertainty_markup(pv_production_ratio))
+        # Regel 1 och 3 LADDAR ny energi in i batteriet – bara
+        # eta_roundtrip-andelen av det överlever till att kunna användas/
+        # säljas senare, så tröskeln för att spara/nätladda måste vara
+        # strängare än för att ta UT redan lagrad energi (regel 2/4, ingen
+        # ytterligare förlust där, den skedde redan vid laddningstillfället).
+        # Utan den här faktorn (första implementationsförsöket) blev
+        # regel 3+4 tillsammans en nästan fri arbitrage-loop – 12 öres
+        # marginal räckte för att motivera en hel laddcykel trots ~15 %
+        # rundgångsförlust, vilket i backtest gav SÄMRE resultat än steg 2
+        # (62 % besparing mot 91 %) istället för bättre. Se
+        # docs/v1_implementation_plan.md, Steg 3 implementerat.
+        V_charge = V * self.eta_roundtrip
 
-        # Billiga nätladdningssots: bland mörka slots, lägsta 25%
-        dark_slots = [s for s in future_slots if s.solar_kw < _load_kw_at(s.start, load_shape_p50) and s.start not in export_plan]
-        buy_prices = sorted(s.buy_sek for s in dark_slots)
-        cheap_threshold = buy_prices[max(0, int(self.cheap_charge_buy_percentile * len(buy_prices)) - 1)] if buy_prices else 0.0
-        cheap_set = {s.start for s in dark_slots if s.buy_sek <= cheap_threshold}
+        evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + _flat_buffer_kwh / battery_capacity_kwh * 100.0)
+        exportable_kwh = max(0.0, batt_kwh - _reserved_kwh)
 
-        # Framåtsimulering
+        # --- Framåtsimulering ----------------------------------------------
         planned: list[PlannedSlot] = []
         expected_revenue = 0.0
 
@@ -399,113 +354,73 @@ class EnergyPlanner:
                 continue
 
             soc_est = batt_kwh / battery_capacity_kwh * 100.0
-            # "Mörk" = solen täcker inte huslasten, inte ett godtyckligt kW-tak
-            # (v1.0 steg 0) – en fast 2 kW-gräns klassade stora delar av
-            # mellansäsongens och vinterns dagsljus som "natt". Lastnivån per
-            # slot kommer nu från form×nivå (v1.0 steg 1A) när formhistorik
-            # finns, annars den platta hourly_load_kw.
             _slot_load_kw = _load_kw_at(slot.start, load_shape_p50)
-            is_dark = slot.solar_kw < _slot_load_kw
             solar_kwh = slot.solar_kw * slot_h
             load_kwh  = _slot_load_kw * slot_h
+            surplus_kwh = max(0.0, solar_kwh - load_kwh)
+            deficit_kwh = max(0.0, load_kwh - solar_kwh)
 
-            action   = "idle"
-            power_w  = 0.0
-            reason   = ""
+            action  = "idle"
+            power_w = 0.0
+            reason  = ""
 
-            if slot.start in export_plan:
-                dispatch_w = export_plan[slot.start]
-                avail = max(0.0, batt_kwh - batt_min_kwh)
-                actual_w = min(dispatch_w, avail / slot_h * 1000.0, battery_max_power_kw * 1000.0)
-                discharged = actual_w / 1000.0 * slot_h
-                batt_kwh = max(batt_min_kwh, batt_kwh - discharged)
-                expected_revenue += discharged * slot.sell_sek
-                action  = "export"
-                power_w = -actual_w
-                _grp_sum = export_plan_price_sum.get(slot.start, slot.sell_sek)
-                reason  = f"sälj {slot.sell_sek:.2f} kr/kWh vikt {slot.sell_sek:.2f}/{_grp_sum:.2f}"
-
-            elif not is_dark:
-                surplus = max(0.0, solar_kwh - load_kwh)
-                needs_kwh = max(0.0, export_floor_kwh - batt_kwh)
+            # Regel 1 (V > sälj_nu → spara): bara relevant när det finns
+            # solöverskott att ta ställning till. Annars faller överskottet
+            # rakt igenom till nätet (mätarens egen export), ingen batteri-
+            # åtgärd krävs för att det ska säljas.
+            if surplus_kwh > 0.01:
                 room_kwh = max(0.0, batt_max_kwh - batt_kwh)
-
-                if surplus > 0.01 and room_kwh > 0.1:
-                    charge_kwh = min(surplus * 0.95, room_kwh, battery_max_power_kw * slot_h)
+                if V_charge > slot.sell_sek and room_kwh > 0.1:
+                    charge_kwh = min(surplus_kwh * 0.95, room_kwh, battery_max_power_kw * slot_h)
                     batt_kwh = min(batt_max_kwh, batt_kwh + charge_kwh)
                     power_w = min(charge_kwh / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
                     action = "solar_charge"
-                    reason = (
-                        f"sol {slot.solar_kw:.1f}kW → laddar (kvällsmål {needs_kwh:.1f}kWh kvar)"
-                        if needs_kwh > 0.1
-                        else f"sol {slot.solar_kw:.1f}kW → laddar mot max ({slot.sell_sek:.2f} kr)"
-                    )
-                elif surplus > 0.01:
-                    action = "idle"
-                    reason = f"sol {slot.solar_kw:.1f}kW → batteri fullt, sälj ({slot.sell_sek:.2f} kr)"
+                    reason = f"sol {slot.solar_kw:.1f}kW, V·η {V_charge:.2f}>sälj {slot.sell_sek:.2f} → spara"
                 else:
-                    # Sol täcker inte lasten – självkonsumtion om batteri > golvet.
-                    # Golvet är reserve_at(slot.end) (v1.0 steg 2): kravet EFTER
-                    # den här sloten, inte ett fast dygnstal – annars räknas
-                    # samma reserv en gång per slot hela dagen ut.
-                    deficit_kwh = load_kwh - solar_kwh
-                    avail_kwh = max(0.0, batt_kwh - batt_min_kwh - reserve_at(slot.end))
-                    if avail_kwh > 0.01:
-                        dis_kwh = min(deficit_kwh, avail_kwh, battery_max_power_kw * slot_h)
+                    reason = f"sol {slot.solar_kw:.1f}kW → sälj direkt (V·η {V_charge:.2f}≤sälj {slot.sell_sek:.2f})"
+
+            # Regel 2 (köp_nu > V → täck från batteri): bara relevant när
+            # solen inte räcker till lasten.
+            elif deficit_kwh > 0.01:
+                if slot.buy_sek > V:
+                    avail = max(0.0, batt_kwh - _reserved_kwh)
+                    if avail > 0.01:
+                        dis_kwh = min(deficit_kwh, avail, battery_max_power_kw * slot_h)
                         batt_kwh -= dis_kwh
                         power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
                         action = "cover_load"
-                        reason = f"sol {slot.solar_kw:.1f}kW < last {_slot_load_kw:.2f}kW → batteri {-power_w:.0f}W"
+                        reason = f"köp {slot.buy_sek:.2f}>V {V:.2f} → batteri {-power_w:.0f}W"
                     else:
                         action = "cover_load"
-                        reason = f"sol {slot.solar_kw:.1f}kW < last {_slot_load_kw:.2f}kW → batteri vid golvet, nät"
-
-            elif slot.start in cheap_set and batt_kwh < reserve_at(slot.start) - 0.5:
-                _target_kwh = reserve_at(slot.start)
-                needed = min(_target_kwh - batt_kwh, battery_max_power_kw * slot_h)
-                batt_kwh = min(batt_max_kwh, batt_kwh + needed)
-                power_w = min(needed / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
-                action = "grid_charge"
-                reason = f"nätladda {slot.buy_sek:.2f} kr/kWh (gräns {cheap_threshold:.2f}, mål {_target_kwh:.1f}kWh)"
-
-            else:
-                # Mörk slot utan export/nätladdning – självkonsumtion om batteri > golvet.
-                # Golvet är reserve_at(slot.end) (v1.0 steg 2) – en bana som redan
-                # drar av sol_p10 per slot i floor_slots-summan, så den gamla
-                # 80%-av-kommande-2h-solen-hacken (_eff_floor) behövs inte längre;
-                # den dubbelräknade samma sol som reserven redan tagit hänsyn till.
-                deficit_kwh = max(0.0, load_kwh - solar_kwh)
-                avail_kwh = max(0.0, batt_kwh - batt_min_kwh - reserve_at(slot.end))
-                # Interimslösning ("Option B", se konstant-kommentaren ovan): vid
-                # golvet men köppriset överstiger vad energin i batteriet redan
-                # kostat (+ cykelkostnad) – öppna ner mot hard_floor istället för
-                # att köpa nät som är dyrare än batteriets egen sparade energi.
-                # Osäkerheten i solprognosen är INTE ett villkor här (v1.0 steg 0)
-                # – den hanteras redan av _uncertainty_markup() i golvet självt.
-                # Behålls tills reserve_at-banan är verifierad i backtest (v1.0
-                # plan, steg 2) – tas bort då, inte innan.
-                price_gate_used = False
-                if avail_kwh <= 0.01 and deficit_kwh > 0.01:
-                    price_threshold = battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh
-                    if slot.buy_sek > price_threshold:
-                        # hard_floor ÄR det absoluta golvet – ersätter batt_min_kwh
-                        # här, adderas inte till det (annars låser ett golv och en
-                        # min_soc på samma nivå, t.ex. 10%+10%, en spärr på 20%).
-                        avail_kwh_gated = max(0.0, batt_kwh - hard_floor_kwh)
-                        if avail_kwh_gated > 0.01:
-                            avail_kwh = avail_kwh_gated
-                            price_gate_used = True
-                if avail_kwh > 0.01 and deficit_kwh > 0.01:
-                    dis_kwh = min(deficit_kwh, avail_kwh, battery_max_power_kw * slot_h)
-                    batt_kwh -= dis_kwh
-                    power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
-                    action = "cover_load"
-                    if price_gate_used:
-                        reason = f"mörk: prisspärr under golvet {-power_w:.0f}W (köp {slot.buy_sek:.2f} > batteri {battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh:.2f}) batteri kvar {batt_kwh:.1f}kWh"
-                    else:
-                        reason = f"mörk: självkonsumtion {-power_w:.0f}W batteri kvar {batt_kwh:.1f}kWh"
+                        reason = f"köp {slot.buy_sek:.2f}>V {V:.2f} men batteri vid reserven → nät"
                 else:
-                    reason = f"mörk idle: batteri vid golvet, nät täcker → sälj={slot.sell_sek:.2f}"
+                    reason = f"köp {slot.buy_sek:.2f}≤V {V:.2f} → nät billigare, spara batteriet"
+            else:
+                reason = "balans: sol täcker last"
+
+            # Regel 3 (köp_nu + cykel < V → nätladda) och regel 4 (sälj_nu >
+            # V + cykel → exportera): rena arbitragebeslut, oberoende av om
+            # sloten redan har sol/last-obalans – gäller bara om regel 1/2
+            # inte redan avgjorde sloten. Regel 4 kräver dessutom att det
+            # inte finns ett obetalt underskott den här sloten (annars säljs
+            # och köps samtidigt, alltid en förlustaffär eftersom köp>sälj).
+            if action == "idle":
+                room_kwh = max(0.0, batt_max_kwh - batt_kwh)
+                if slot.buy_sek + self.cycle_cost_sek_kwh < V_charge and room_kwh > 0.1:
+                    charge_kwh = min(room_kwh, battery_max_power_kw * slot_h)
+                    batt_kwh = min(batt_max_kwh, batt_kwh + charge_kwh)
+                    power_w = min(charge_kwh / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
+                    action = "grid_charge"
+                    reason = f"nätladda {slot.buy_sek:.2f}+cykel<V·η {V_charge:.2f}"
+                elif deficit_kwh <= 0.01 and slot.sell_sek > V + self.cycle_cost_sek_kwh:
+                    avail = max(0.0, batt_kwh - _reserved_kwh)
+                    if avail > 0.01:
+                        dis_kwh = min(avail, battery_max_power_kw * slot_h)
+                        batt_kwh -= dis_kwh
+                        power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
+                        action = "export"
+                        expected_revenue += dis_kwh * slot.sell_sek
+                        reason = f"exportera {slot.sell_sek:.2f}>V {V:.2f}+cykel"
 
             planned.append(PlannedSlot(
                 start=slot.start.astimezone(),
@@ -517,25 +432,25 @@ class EnergyPlanner:
             ))
 
         final_soc = batt_kwh / battery_capacity_kwh * 100.0
-        morning_export = [s for s in planned if s.action == "export" and s.start.astimezone().date() > today_date]
         notes = (
             f"SOC {battery_soc_pct:.0f}% → {final_soc:.0f}% | "
-            f"golv {export_floor_kwh:.1f}kWh netsol_imorgon {net_solar_tomorrow_kwh:.1f}kWh "
-            f"pv_kvot={pv_production_ratio:.2f} | "
-            f"trösklar export≥{eff_threshold:.2f} nätladdning≤{cheap_threshold:.2f} | "
-            f"morgonexport: {len(morning_export)} slots"
+            f"V={V:.2f}kr/kWh (rå {_v_raw:.2f}, pv_kvot={pv_production_ratio:.2f}) "
+            f"satt av {_marginal_slot_start.astimezone().strftime('%d %H:%M') if _marginal_slot_start else 'bästa säljpris'} | "
+            f"reserv {_reserved_kwh:.1f}kWh exporterbart {exportable_kwh:.1f}kWh"
         )
 
         return DayPlan(
             generated_at=now_a,
             valid_until=now_a + timedelta(minutes=15),
             evening_target_soc_pct=evening_target_soc,
-            export_floor_kwh=export_floor_kwh,
+            export_floor_kwh=_reserved_kwh,
             total_exportable_kwh=exportable_kwh,
             expected_revenue_sek=expected_revenue,
             solar_takeover_dt=solar_takeover_dt,
             hourly_load_kw=hourly_load_kw,
             pv_production_ratio=pv_production_ratio,
+            marginal_value_sek_kwh=V,
+            marginal_slot_start=_marginal_slot_start,
             slots=planned,
             notes=notes,
         )

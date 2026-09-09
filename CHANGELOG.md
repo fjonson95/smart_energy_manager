@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.8
+
+Step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — attempted, **not recommended for deployment**. Kept in source control as documented in-progress work, not a working release.
+
+- Implemented "marginal value V" (a single merit-order-derived threshold intended to replace the nine competing thresholds from steps 0–2) and rewrote the slot simulation loop around four price-comparison rules per the plan's own algorithm.
+- Backtesting against the same 10-day window used to verify steps 0–2 found and fixed three real bugs along the way (missing round-trip efficiency in the charge-side comparison; a scarce/abundant classification that collapsed V to 0.00 exactly when the battery was most depleted; a circularity where an optimistic solar-recharge assumption made V collapse mid-day, selling battery-bound solar directly instead of storing it for the evening).
+- **Even after those fixes, the result is a regression, not an improvement**: 45% savings in backtest vs. step 2's 91% on the same data. Root cause: the model only protects against deficits visible within its 48h horizon, so on a sunny day it treats capacity beyond ~2 nights of visible need as available for low-value same-day export, discarding a protection that step 2's simpler "always store surplus" floor provided for free by never needing to see that far ahead. This is a structural limitation of the current design, not a fixable edge case — documented in full in `docs/v1_implementation_plan.md` under "Steg 3 implementerat" for whoever picks this back up.
+- **`energy_planner.py` now contains only step 3's code — step 2's verified `reserve_at(t)` mechanism is gone from this file, replaced, not kept alongside.** Do not deploy this version to the live HA instance; step 2 (v0.9.7, commit `a57cea2`) is the last version verified against backtest and safe to run. Anyone picking step 3 back up should start from a fresh design for the "protect capacity beyond the visible horizon" problem described above, not from patching this file further.
+
 ## What's New in 0.9.7
 
 Step 2 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the export/discharge floor becomes a trajectory instead of a single scalar.

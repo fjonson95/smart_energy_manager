@@ -22,7 +22,13 @@ verifierade. **Steg 2 klart (v0.9.7):** golvet är nu en avtagande
 `reserve_at(t)`-bana istället för ett skalärt tal, skyddsspärren
 (`_FLOOR_SAFETY_CAP_FRACTION`) borttagen, prisspärren ("Option B") behållen
 i väntan på en riktig vinterbacktest — se avsnitt "Steg 2 implementerat"
-nedan för detaljer och verifieringsresultat. Steg 3–8 inte påbörjade.
+nedan för detaljer och verifieringsresultat. **Steg 3 försökt men INTE
+klart (v0.9.8) — regression i backtest (45 % besparing mot steg 2:s 91 %),
+INTE driftsatt.** `energy_planner.py` innehåller för närvarande steg 3:s
+kod (`reserve_at(t)` är borttagen ur filen, ersatt), men v0.9.7
+(commit `a57cea2`) är den senast verifierade, säkra versionen att köra —
+se avsnitt "Steg 3 implementerat" nedan för grundorsaksanalysen innan
+arbetet återupptas. Steg 4–8 inte påbörjade.
 
 ---
 
@@ -356,6 +362,76 @@ blir jämförelser mot det talet.
 **Acceptans:** V-sensorn ligger mellan bästa framtida säljpris och
 dyraste framtida köppris i alla lägen. Backtest över ett år ger lägre
 total kostnad än steg 2 — och januari fungerar utan specialfall.
+
+### Steg 3 implementerat, INTE klart (v0.9.8, 2026-09-09)
+
+`energy_planner.py::build_plan()` skrevs om: `reserve_at(t)` (steg 2) togs
+bort, ersatt av en marginalvärdesfunktion V och fyra beslutsregler i
+simuleringsloopen, exakt enligt punkterna ovan. Tre riktiga buggar
+hittades och fixades under vägs (dokumenterade i kodkommentarer på
+respektive plats):
+
+1. **Rundgångsverkningsgrad saknades i laddningsjämförelsen.** Regel 1/3
+   (V > sälj_nu / köp_nu+cykel < V) jämförde rakt mot V utan att ta hänsyn
+   till att bara `eta_roundtrip`-andelen av en laddad kWh överlever till
+   att kunna användas/säljas senare — en ~12 öres marginal räckte då för
+   att motivera en hel laddcykel trots ~15 % förlust. Fixat genom
+   `V_charge = V * eta_roundtrip`, bara på laddningssidans regler (2/4 tar
+   UT redan lagrad energi, ingen ytterligare förlust där).
+2. **Scarce/abundant-förväxling satte V=0,00.** Den ursprungliga
+   tvågrensmodellen (köpsida vs säljsida) föll igenom till en
+   initialiserad standard på 0,0 i flera edge-cases — bland annat exakt
+   när batteriet låg UNDER sin egen bevarade reserv (en historisk
+   startpunkt lägre än konfigurerat), det motsatta av "inget är knappt".
+3. **Cirkularitet i solprognosen.** `_cap_by_time` (den kronologiska
+   uppskattningen av hur mycket batteriet kan innehålla vid en framtida
+   tidpunkt om det bara laddas av sol) använde optimistisk (p50) sol,
+   vilket fick förmiddagens underskott att se lätt-täckta ut redan innan
+   solen faktiskt kommit in — V kollapsade, och regel 1 sålde solöverskott
+   direkt istället för att spara det till kvällen, vilket i efterhand
+   gjorde antagandet falskt. Bytt till pessimistisk (p10/P75), samma
+   konvention som resten av reservlogiken.
+
+**Även efter alla tre fixarna: regression, inte förbättring.** Backtest
+mot samma ~10-dagarsfönster som verifierade steg 0–2
+(2026-08-26–2026-09-05): 45 % besparing mot referens, jämfört med steg
+2:s 91 % på identisk data. Nätimport steg från 9,3 till 62,2 kWh,
+nätexport från 16,2 till 172,4 kWh, batteriladdningen från sol sjönk från
+293 till ~130–185 kWh — mitt-på-dagen-sol som borde laddat batteriet
+inför kvällen exporterades direkt istället, upprepade gånger, trots tre
+buggfixar avsedda att förhindra just det.
+
+**Grundorsak (fjärde, strukturell — inte ytterligare ett specialfall att
+lappa):** V:s merit-order-allokering ser bara `_PLAN_HORIZON_H` (48 h)
+framåt. På en solig dag täcker nuvarande SOC plus dagens sol gott och väl
+både ikvällens och (inom 48 h) morgondagens kvälls underskott, med
+åtskillig kapacitet kvar över. Den kapaciteten rankas då mot VAD SOM HELST
+för säljmöjlighet inom horisonten — även riktigt dåliga priser (0,07–0,11
+kr/kWh mitt på dagen) — eftersom modellen inte har något begrepp om att
+skydda kapacitet mot ett tredje, fjärde... dygns behov bortom vad 48
+timmar råkar visa. Steg 2:s enklare "spara alltid solöverskott, bestäm
+export separat"-golv gav det skyddet gratis, just genom att aldrig behöva
+se längre än så. En korrekt V-modell för den här tariffen (köp ≥1,17 kr
+högre än sälj, praktiskt taget alltid, se steg 1:s brytpunktsformel) borde
+i praktiken nästan aldrig välja att sälja istället för att skydda
+självkonsumtion — att den gör det upprepat är just symtomet på att
+horisontgränsen, inte en enskild jämförelse, är fel.
+
+**Beslut (2026-09-09):** `energy_planner.py` lämnas i sitt nuvarande skick
+(steg 3:s kod, `reserve_at(t)` borttagen) i git-historiken som
+dokumenterat, overifierat arbete — **INTE driftsatt**. v0.9.7
+(commit `a57cea2`) är den senast backtest-verifierade och säkra versionen.
+Steg 3 kräver en ny design innan vidare arbete, troligen en av:
+- Mycket längre planeringshorisont (kräver längre testdata än de ~10 dygn
+  som finns idag, se `testdata/history/Series info.txt` — samma
+  datalucka som blockerar steg 2:s fulla vinterverifiering).
+- En separat mekanism för "skydda kapacitet bortom synhåll", t.ex. ett
+  golv liknande steg 2:s `reserve_at(t)` som ALLTID gäller som ett golv
+  under V (inte ersatt av V, utan V verkar OVANPÅ en bottennivå) —
+  kombinerar båda stegens styrkor istället för att välja mellan dem.
+- Eller en omprövning av om en enda skalär V per planeringscykel
+  verkligen är rätt abstraktion för den här tariffstrukturen, givet hur
+  stor köp/sälj-spreaden är.
 
 ---
 

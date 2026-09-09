@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.8
+
+Steg 3 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — försökt, **rekommenderas INTE för driftsättning**. Sparad i källkoden som dokumenterat pågående arbete, inte en fungerande release.
+
+- Implementerade "marginalvärdet V" (ett enda merit-order-härlett tal tänkt att ersätta de nio konkurrerande trösklarna från steg 0–2) och skrev om slot-simuleringsloopen kring planens fyra prisjämförelseregler.
+- Backtest mot samma 10-dagarsfönster som verifierade steg 0–2 hittade och fixade tre riktiga buggar under vägs: saknad rundgångsverkningsgrad i laddningssidans jämförelse; en scarce/abundant-klassificering som kollapsade V till 0,00 exakt när batteriet var som tommast; en cirkularitet där ett optimistiskt antagande om solåterladdning fick V att kollapsa mitt på dagen och sälja batteribunden sol direkt istället för att spara den till kvällen.
+- **Även efter de fixarna är resultatet en regression, inte en förbättring**: 45 % besparing i backtest mot steg 2:s 91 % på samma data. Grundorsak: modellen skyddar bara mot underskott synliga inom sin 48-timmarshorisont, så en solig dag behandlar den kapacitet bortom ~2 nätters synligt behov som ledig för lågvärdig samma-dags-export – ett skydd steg 2:s enklare "spara alltid solöverskott"-golv gav gratis genom att aldrig behöva se så långt fram. Det här är en strukturell begränsning i den nuvarande designen, inte ett fixbart specialfall – dokumenterat i sin helhet i `docs/v1_implementation_plan.md` under "Steg 3 implementerat" för den som tar upp det här igen.
+- **`energy_planner.py` innehåller nu bara steg 3:s kod – steg 2:s verifierade `reserve_at(t)`-mekanism är borta ur den här filen, ersatt, inte kvar parallellt.** Driftsätt inte den här versionen mot den riktiga HA-instansen; steg 2 (v0.9.7, commit `a57cea2`) är den senast backtest-verifierade och säkra versionen att köra. Den som tar upp steg 3 igen bör börja om från en ny design för "skydda kapacitet bortom synhåll"-problemet ovan, inte patcha den här filen vidare.
+
 ## Nyheter i 0.9.7
 
 Steg 2 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — export-/urladdningsgolvet blir en bana istället för ett skalärt tal.
