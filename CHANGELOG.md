@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.12
+
+Step 5 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — summer charging timing. **Still not recommended for deployment** (part of step 3's undeployed rewrite).
+
+- **Merit-order priority for today's solar-surplus charging.** Rule 1's forward simulation processed slots chronologically, greedily charging any surplus slot that cleared the `V·η > sell` bar as long as room remained — which could fill the battery from a mediocre-price morning slot and then have no room left for a cheaper (more worth storing) afternoon slot that happened to come later in time. Added a same-day-window merit-order pass: rank today's qualifying surplus slots by sell price ascending, allocate available room to the cheapest first, and cap each slot's actual charge to its allocated share in the main simulation. Verified in backtest: the mechanism engages (135 slots re-prioritized over the 10-day window) with no regression, though no measurable net-cost change on this dataset — expected, since the plan's own acceptance test calls for a July window (peak solar) that isn't in `testdata/history/` yet.
+- Points 2–4 of step 5 (an "extra cycle" — discharging stored energy during a same-day price peak even while solar surplus exists; preferring to sell in the morning rather than the evening; requiring p10 solar coverage before committing to the extra cycle) turned out to already be emergent properties of step 3's V/four-rule architecture, verified directly in the backtest logs (e.g. `export` actions firing during genuine 5–8 kW solar surplus slots) rather than needing separate new logic.
+- Phase protection (`_apply_phase_limits`) is unaffected — it already runs unconditionally at the end of `apply_plan_executor()` for every decision, so the more active exporting this step can produce is already clamped by existing, deployed protection.
+- `energy_planner.py` still contains only step 3's code (plus this step 5 addition), not recommended for deployment. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance.
+
 ## What's New in 0.9.11
 
 Closed part of the remaining step 3 gap by re-enabling `battery_avg_cost_sek_kwh` as a floor under rule 4 (export) — **still not recommended for deployment**, but the gap to step 2 narrowed further.

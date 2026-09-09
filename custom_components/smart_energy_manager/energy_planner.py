@@ -366,6 +366,57 @@ class EnergyPlanner:
         evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + _flat_buffer_kwh / battery_capacity_kwh * 100.0)
         exportable_kwh = max(0.0, batt_kwh - _reserved_kwh)
 
+        # v1.0 steg 5, punkt 1+3: merit-order på säljsidan för dagens
+        # solöverskott. Regel 1:s huvudloop nedan går igenom future_slots
+        # KRONOLOGISKT och fyller batteriet giriga – så länge V_charge>sälj
+        # och rum finns. Det kan fylla från en förmiddagsslot med
+        # medelmåttigt säljpris och sedan sakna rum för en billigare (mer
+        # värd att spara, t.ex. mitt på dagen vid solöverskott) slot som
+        # råkar komma senare kronologiskt. Förbered istället en
+        # prioritetsordning: rangordna alla överskottsslots som klarar
+        # V-tröskeln efter säljpris STIGANDE (billigast/mest värt att spara
+        # först) och dela ut det tillgängliga rummet (batt_max − nuvarande
+        # batt_kwh) i den ordningen. Huvudloopen använder sedan
+        # min(verkligt rum just då, denna prioritetsandel) som tak – aldrig
+        # mer generöst än endera, men respekterar rangordningen när rummet
+        # är den bindande begränsningen. Samma mekanism ger effektivt även
+        # punkt 3 ("morgontoppen före kvällstoppen") gratis: en dyrare
+        # förmiddagsslot som konkurrerar om samma rum med en billigare
+        # eftermiddagsslot förlorar prioritetsordningen, exporteras direkt
+        # istället – vilket lämnar rum kvar åt den billigare eftermiddags-
+        # solen att fylla batteriet med.
+        # Rummet delas bara mellan slots i SAMMA sammanhängande dagsljus-
+        # fönster – inte hela 48h-horisonten. Annars kan en billigare slot
+        # imorgon felaktigt reservera bort rum från en dyrare men ändå
+        # värd-att-spara slot idag, trots att natten emellan (regel 2:s
+        # egenförbrukning) redan hinner frigöra nytt rum. Kandidatlistan
+        # avbryts vid första genuina mörka underskottsslot efter nu.
+        _charge_priority_kwh: dict[datetime, float] = {}
+        _charge_candidates = []
+        _seen_surplus = False
+        for s in future_slots:
+            s_h = (s.end - s.start).total_seconds() / 3600.0
+            if s_h <= 0:
+                continue
+            _s_load_kw = _load_kw_at(s.start, load_shape_p50)
+            _s_surplus_kwh = max(0.0, s.solar_kw * s_h - _s_load_kw * s_h)
+            _s_deficit_kwh = max(0.0, _s_load_kw * s_h - s.solar_kw * s_h)
+            if _s_surplus_kwh > 0.01:
+                _seen_surplus = True
+                if V_charge > s.sell_sek:
+                    _charge_candidates.append((s, _s_surplus_kwh, s_h))
+            elif _s_deficit_kwh > 0.01 and _seen_surplus:
+                # Natten efter dagens fönster – stoppa här, inte förrän hit
+                # (leden ovanför hoppar bara över eventuella mörka slots
+                # INNAN dagens fönster hunnit börja, t.ex. om det är natt nu).
+                break
+        _room_remaining_kwh = max(0.0, batt_max_kwh - batt_kwh)
+        for s, _surplus_kwh, s_h in sorted(_charge_candidates, key=lambda x: x[0].sell_sek):
+            _cap_kwh = min(_surplus_kwh * 0.95, battery_max_power_kw * s_h, _room_remaining_kwh)
+            if _cap_kwh > 0.01:
+                _charge_priority_kwh[s.start] = _cap_kwh
+                _room_remaining_kwh -= _cap_kwh
+
         # --- Framåtsimulering ----------------------------------------------
         planned: list[PlannedSlot] = []
         expected_revenue = 0.0
@@ -392,12 +443,15 @@ class EnergyPlanner:
             # åtgärd krävs för att det ska säljas.
             if surplus_kwh > 0.01:
                 room_kwh = max(0.0, batt_max_kwh - batt_kwh)
-                if V_charge > slot.sell_sek and room_kwh > 0.1:
-                    charge_kwh = min(surplus_kwh * 0.95, room_kwh, battery_max_power_kw * slot_h)
+                _priority_kwh = _charge_priority_kwh.get(slot.start, 0.0)
+                if V_charge > slot.sell_sek and room_kwh > 0.1 and _priority_kwh > 0.01:
+                    charge_kwh = min(surplus_kwh * 0.95, room_kwh, battery_max_power_kw * slot_h, _priority_kwh)
                     batt_kwh = min(batt_max_kwh, batt_kwh + charge_kwh)
                     power_w = min(charge_kwh / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
                     action = "solar_charge"
-                    reason = f"sol {slot.solar_kw:.1f}kW, V·η {V_charge:.2f}>sälj {slot.sell_sek:.2f} → spara"
+                    reason = f"sol {slot.solar_kw:.1f}kW, V·η {V_charge:.2f}>sälj {slot.sell_sek:.2f} → spara (prio {_priority_kwh:.1f}kWh)"
+                elif V_charge > slot.sell_sek and room_kwh > 0.1:
+                    reason = f"sol {slot.solar_kw:.1f}kW → sälj direkt (rummet prioriterat åt billigare timmar)"
                 else:
                     reason = f"sol {slot.solar_kw:.1f}kW → sälj direkt (V·η {V_charge:.2f}≤sälj {slot.sell_sek:.2f})"
 

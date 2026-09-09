@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.12
+
+Steg 5 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — sommarens laddningstiming. **Fortfarande inte rekommenderad för driftsättning** (del av steg 3:s odriftsatta omskrivning).
+
+- **Merit-order-prioritet för dagens solöverskottsladdning.** Regel 1:s framåtsimulering gick igenom slots kronologiskt och laddade giriga varje överskottsslot som klarade `V·η > sälj`-tröskeln så länge rum fanns – vilket kunde fylla batteriet från en medelmåttig förmiddagsslot och sedan sakna rum för en billigare (mer värd att spara) eftermiddagsslot som råkade komma senare i tiden. Lade till en merit-order-genomgång inom samma dagsljusfönster: rangordna dagens kvalificerande överskottsslots efter säljpris stigande, dela ut tillgängligt rum till de billigaste först, och begränsa varje slots faktiska laddning till dess tilldelade andel i huvudsimuleringen. Verifierat i backtest: mekanismen triggar (135 slots omprioriterade över 10-dagarsfönstret) utan regression, men ingen mätbar nettokostnadsförändring på den här datan – väntat, eftersom planens eget acceptanskrav gäller ett julifönster (maximal sol) som inte finns i `testdata/history/` ännu.
+- Punkt 2–4 i steg 5 (en "extracykel" – urladda lagrad energi under en samma-dags-pristopp trots att solöverskott finns; föredra att sälja på morgonen framför kvällen; kräva p10-soltäckning innan extracykeln startas) visade sig redan vara emergenta egenskaper hos steg 3:s V/fyra-regel-arkitektur, verifierat direkt i backtest-loggarna (t.ex. `export`-beslut som triggar under genuina 5–8 kW solöverskottsslots) istället för att behöva separat ny logik.
+- Fasskyddet (`_apply_phase_limits`) är opåverkat – det körs redan ovillkorligt i slutet av `apply_plan_executor()` för varje beslut, så den mer aktiva exporten det här steget kan ge klipps redan av befintligt, driftsatt skydd.
+- `energy_planner.py` innehåller fortfarande bara steg 3:s kod (plus det här steg 5-tillägget), inte rekommenderad för driftsättning. v0.9.7 (commit `a57cea2`) förblir den senast verifierade, säkra versionen att köra mot den riktiga HA-instansen.
+
 ## Nyheter i 0.9.11
 
 Stängde en del av det kvarvarande steg 3-gapet genom att återinföra `battery_avg_cost_sek_kwh` som en golv-broms under regel 4 (export) – **fortfarande inte rekommenderad för driftsättning**, men gapet till steg 2 krympte ytterligare.

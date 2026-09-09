@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.11-blue)
+![Version](https://img.shields.io/badge/version-0.9.12-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.11
+## What's New in 0.9.12
 
-> **⚠️ Do not deploy this version.** It's an in-progress attempt at step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), kept in source control for reference. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that.
+> **⚠️ Do not deploy this version.** It's an in-progress attempt at steps 3 and 5 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), kept in source control for reference. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that.
 
-Re-enabled `battery_avg_cost_sek_kwh` as a floor under the export rule, so a trade that looked profitable when energy was charged can't clear on a since-drifted-down V alone — it must also beat what the energy actually cost. Also added the matching cost-basis tracker to `testdata/backtest.py`'s simulation (previously hardcoded to 0, so this couldn't be tested at all). Result: export average price rose from 1.43 to 1.72 SEK/kWh, net cost improved to −102.87 SEK — step 3 now reaches ~90% of step 2's profit, up from ~86%. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
+Step 5 (summer charging timing): added merit-order priority so today's cheapest solar-surplus hours get charging priority when battery room is the binding constraint, rather than whichever hour happens to come first chronologically. The "extra cycle" (discharging stored energy during a same-day price peak) and morning-over-evening preference turned out to already be emergent behavior of step 3's V/four-rule architecture. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
 
 See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 

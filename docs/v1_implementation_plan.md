@@ -35,7 +35,11 @@ se avsnitt "Steg 3 implementerat" nedan, särskilt "Femte" och "Sjätte
 fyndet", för
 grundorsaksanalysen innan arbetet återupptas. **Steg 4 pausat** tills
 steg 3 slår steg 2 i backtest — se motivering i "Steg 3 implementerat".
-Steg 5–8 inte påbörjade.
+**Steg 5 delvis klart (v0.9.12):** merit-order-prioritet för dagens
+solöverskottsladdning tillagd i `energy_planner.py`; punkt 2–4 visade
+sig redan vara emergenta av steg 3:s V-arkitektur. INTE driftsatt (del
+av samma odriftsatta fil som steg 3). Se avsnitt "Steg 5 implementerat".
+Steg 6–8 inte påbörjade.
 
 ---
 
@@ -649,6 +653,69 @@ aktiveras.
 **Acceptans:** Backtest juli: samma exporterade energi som idag men
 högre intäkt. Ingen fas överstiger 20 A i någon riktning över hela
 sommaren.
+
+### Steg 5 implementerat, delvis (v0.9.12, 2026-09-09)
+
+Punkt 1 "Nu: prefer_sell = sell_price >= 0,80 kr" beskriver samma
+LEVANDE kod i `apply_plan_executor()` (`energy_controller.py`) som steg
+4 pausades inför. Enligt planens egen steg 4-tabell ersätts just den
+mekanismen av Regel 1 i `energy_planner.py` (redan skrivet, INTE
+driftsatt) – så arbetet gjordes i planeraren, inte i executorn, av
+samma skäl som steg 4 pausades: rör inte skarp styrlogik baserat på ett
+ännu overifierat V.
+
+**Genomgång punkt för punkt:**
+
+1. **Merit-order på säljsidan – genuin lucka, åtgärdad.** Regel 1:s
+   framåtsimulering går kronologiskt genom `future_slots` och laddar
+   giriga varje slot som klarar `V·η > sälj`, så länge rum finns. Kunde
+   fylla batteriet från en medelmåttig förmiddagsslot och sakna rum för
+   en billigare eftermiddagsslot som kommer senare i tiden. Lade till en
+   föregående merit-order-genomgång: rangordna dagens kvalificerande
+   överskottsslots (inom samma sammanhängande dagsljusfönster – rummet
+   delas INTE över en hel natt, se kommentaren i koden) efter säljpris
+   stigande, dela ut tillgängligt rum till de billigaste först
+   (`_charge_priority_kwh`). Huvudloopen begränsar sedan varje slots
+   laddning till `min(verkligt rum, effekttak, prioritetsandel)`.
+   Verifierat i backtest: mekanismen triggar (135 av 10 dagars ~960
+   slots fick rummet prioriterat bort), ingen regression (−102,87 →
+   −102,89 kr, oförändrat inom avrundning) men heller ingen mätbar
+   nettovinst på det här fönstret – väntat, se datalucka nedan.
+2. **Extracykeln, villkorad – redan emergent.** Verifierat direkt i
+   backtest-loggen: `export`-beslut (regel 4) triggar även under
+   slots med genuint solöverskott (5–8 kW sol samtidigt som
+   `action="export"` med full effekt) eftersom regel 1:s "sälj
+   direkt"-gren inte sätter `action` bort från `"idle"` – regel 3/4:s
+   `if action == "idle":`-kontroll nedanför körs alltså ändå, och regel
+   4 kan då UTÖVER dagens överskott också tömma redan lagrad energi om
+   `sälj_nu > max(V, snittkostnad) + cykel`. Ingen ny kod behövdes.
+3. **Morgontoppen före kvällstoppen – redan emergent.** V:s egen
+   merit-order (steg 3) rankar redan ikvällens/inattens skydd (köpsida,
+   tier1) mot dagens säljmöjligheter i värdeordning – en dyr
+   kvällsexport som skulle äventyra en ÄNNU dyrare natt-täckning
+   prisas bort av V innan den ens övervägs. Ingen separat "morgon
+   före kväll"-regel bedöms behövas utöver detta.
+4. **Kräv p10-täckning – redan emergent.** `_cap_by_time` (V:s
+   kapacitetsuppskattning) använder redan PESSIMISTISK (p10) sol – se
+   steg 3:s tredje fynd. Energi som räknas som "exporterbar"
+   (`exportable_kwh`/`_opportunities`-listans säljtier) har redan
+   passerat den pessimistiska bedömningen om den behövs för att täcka
+   kommande underskott. Ingen separat gate bedöms behövas.
+
+**Fasskyddet** (`_apply_phase_limits`) är opåverkat av det här steget –
+det körs redan ovillkorligt sist i `apply_plan_executor()` för varje
+beslut, oavsett om det kom från steg 0–2:s befintliga logik eller (när
+det en dag driftsätts) steg 3–5:s V-baserade beslut. Ingen ny
+fasskyddskod bedömdes nödvändig, men är inte specifikt stresstestad mot
+ett scenario med både full batteriexport och hög solproduktion samtidigt
+(kräver just en soligt-fönster i testdata, se nedan).
+
+**Känd datalucka:** planens eget acceptanstest ("Backtest juli: samma
+exporterade energi men högre intäkt") kan inte verifieras fullt ut – det
+tillgängliga testfönstret (`testdata/history/`) täcker bara sen
+augusti/tidig september, inte juli (månaden med som mest sol och flest
+tillfällen då rummet faktiskt är den bindande begränsningen). Samma
+kända lucka som redan blockerar steg 2 och 8:s fulla verifiering.
 
 ---
 
