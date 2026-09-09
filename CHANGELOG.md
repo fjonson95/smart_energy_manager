@@ -2,6 +2,16 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.14
+
+Step 7 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the house as thermal storage — point 4 only (the COP profitability rule), by explicit request. Points 1 and 3 (room-level thermal regression/strategy) are parked: a live-data check found the room temperature sensors only have data since ~2026-07-25 (~6 weeks), not since October 2025 as the plan assumed — a meaningful regression needs a heating season. **Not wired to any live control, not recommended for deployment.**
+
+- **New file `heat_planner.py`** — a separate physical domain (heating, not battery) from `energy_planner.py`, expected to grow with step 7's remaining points.
+- **`is_preheat_profitable(price_peak, price_preheat, cop_preheat, cop_normal) -> bool`**, a pure function implementing the plan's own formula exactly (profit vs. cost of shifting heating energy to a cheaper-but-lower-COP slot, with the shifted-kWh term cancelling out of both sides).
+- **Grounded against live data before writing the formula**: checked `sensor.vp_verkningsgrad` (COP × 100) directly — it's heavily noisy around compressor start/defrost (observed spikes over 10,000% in a single week of history), with a stable range around 470–500% (COP ≈ 4.7–5.0) in between. No calibrated model exists yet for how COP actually depends on flow temperature (`number.boiler_tempparmode`) — that needs real measurement during an actual preheat run, not guessed physics. `cop_preheat`/`cop_normal` are therefore deliberately input parameters, not a raw sensor read inside the function.
+- Verified against six hand-computed scenarios (large price gap/modest COP loss → profitable; small gap/large COP loss → not; equal prices → never; no COP loss → always profitable when peak > preheat; undefined COP → never; preheat pricier than the peak → never) — all passed.
+- **Not done**: wiring this into an actual preheat decision/schedule (which slot is "preheat" vs. "peak", where the COP values come from in practice, actually driving `number.boiler_tempparmode` or equivalent) — requires `coordinator.py`/`energy_controller.py`, same boundary as steps 4 and 6.
+
 ## What's New in 0.9.13
 
 Step 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the car as a schedulable load. **Planning-only, not wired to live control, still not recommended for deployment.**

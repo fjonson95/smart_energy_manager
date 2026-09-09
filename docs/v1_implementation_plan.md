@@ -46,9 +46,11 @@ punkt 3-invarianten; kräver `coordinator.py`/`energy_controller.py`,
 medvetet stoppat inför den ändringen. Se "Steg 6 implementerat".
 **Steg 7:s rumsreglering (punkt 1, 3) parkerad (2026-09-09)** — rumsgivarna
 har bara ~6 veckors historik (sedan ~2026-07-25), inte de ~11 månader
-planen antog; meningsfull regression kräver en vintersäsong. Helhusdelarna
-(punkt 2, 4–6) är öppna. Se "STEG 7"-avsnittets nya notis. Steg 8 inte
-påbörjat.
+planen antog; meningsfull regression kräver en vintersäsong. **Punkt 4
+(COP-lönsamhetsregel) klar (v0.9.14):** ny fil `heat_planner.py`,
+`is_preheat_profitable()` — ren funktion, inte kopplad till något
+faktiskt förvärmningsbeslut än. Punkt 2, 5, 6 inte påbörjade. Se
+"Steg 7 implementerat". Steg 8 inte påbörjat.
 
 ---
 
@@ -844,9 +846,9 @@ tidskonstant/kWh-per-grad-underlag) behövs innan rumsdata finns.
    minst. Förslag att utgå från: ±1 °C i vardagsrum och kök, ±1,5 °C i
    sovrum och sällan använda rum, inget i badrum.~~ **Parkerad – se ovan**,
    bygger på punkt 1:s regression.
-4. **Lönsamhetsregel med COP.** Förvärmning kostar extra eftersom
-   verkningsgraden sjunker vid högre framledning. Du har redan helpern
-   "VP verkningsgrad".
+4. **Lönsamhetsregel med COP – klart, se "Steg 7 implementerat" nedan.**
+   Förvärmning kostar extra eftersom verkningsgraden sjunker vid högre
+   framledning. Du har redan helpern "VP verkningsgrad".
    ```
    vinst   = (pris_topp − pris_förvärm) × kWh_förskjuten
    kostnad = kWh_förskjuten × (1/cop_förvärm − 1/cop_normal) × pris_förvärm
@@ -865,6 +867,45 @@ uppvärmningsenergi som köps under dygnets dyraste fyra timmar, mot en
 jämförbar vecka utan styrning, utan att inomhustemperaturen lämnar det
 tillåtna spannet och utan att Eltillskott aktivt går igång under
 återhämtningen.
+
+### Steg 7 implementerat, delvis (v0.9.14, 2026-09-09)
+
+Bara punkt 4 (COP-lönsamhetsregel), på uttrycklig begäran ("Kör COP-
+lönsamhetsregeln nu, vänta med resten"). Ny fil,
+`custom_components/smart_energy_manager/heat_planner.py` – egen fysisk
+domän (uppvärmning) skild från `energy_planner.py` (batteriet), väntas
+växa med steg 7:s övriga punkter.
+
+**`is_preheat_profitable(price_peak, price_preheat, cop_preheat,
+cop_normal) -> bool`** – ren funktion, exakt planens formel (`vinst >
+kostnad` efter att `kWh_förskjuten` stryks ur båda leden, se
+kodkommentaren för härledningen).
+
+**Grundad mot skarp data innan implementation:** `sensor.vp_verkningsgrad`
+(`(boiler_hppower_kW×1000 / ivt_total_active_power_W) × 100`, dvs. COP×100)
+kontrollerad live. Den råa sensorn är KRAFTIGT brusig kring
+kompressorstart/avfrostning – uppmätta toppar över 10 000 % (COP >100)
+under en enda veckas historik (2026-09-02–09), stabila värden runt
+470–500 % (COP ~4,7–5,0) däremellan. Ingen kalibrerad modell finns för
+hur COP faktiskt beror av framledningstemperaturen
+(`number.boiler_tempparmode`) – det kräver egna mätningar under en
+förvärmningsperiod, inte gissad fysik. Beslut: `cop_preheat`/`cop_normal`
+är MEDVETET indataparametrar till funktionen, inte en direkt utläsning av
+den råa sensorn inifrån – anroparen ansvarar för ett filtrerat/rimligt
+COP-värde. Ingen sådan anropare finns än (se nedan).
+
+**Verifierat** med sex handräknade scenarier (stor prisskillnad/måttligt
+COP-tapp → lönsamt, liten prisskillnad/stort COP-tapp → olönsamt, samma
+pris → aldrig, inget COP-tapp → lönsamt närhelst peak>preheat,
+odefinierad COP → alltid olönsamt, förvärmning dyrare än toppen →
+olönsamt) – alla stämde.
+
+**Inte gjort:** koppling till en faktisk förvärmningsbeslut/schema (vilken
+slot som är "förvärmning" respektive "topp", var COP-värdena kommer
+ifrån i praktiken, och själva styrningen av `number.boiler_tempparmode`
+eller motsvarande) – kräver `coordinator.py`/`energy_controller.py`,
+samma avgränsning som steg 4/6. Punkt 2, 5, 6 inte påbörjade, punkt 1/3
+parkerade (se ovan).
 
 ---
 

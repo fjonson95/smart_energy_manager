@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.13-blue)
+![Version](https://img.shields.io/badge/version-0.9.14-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.13
+## Nyheter i 0.9.14
 
-> **⚠️ Driftsätt inte den här versionen.** Det är ett pågående försök på steg 3, 5 och 6 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), sparat i källkoden som referens. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den.
+> **⚠️ Driftsätt inte den här versionen.** Det är ett pågående försök på steg 3, 5, 6 och del av 7 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), sparat i källkoden som referens. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den.
 
-Steg 6 (bilen som schemalagd last) – bara planering, inte kopplad till skarp styrning: `build_plan()` kan nu ta emot ett EV-energibehov, en deadline och en maxeffekt, och producera ett merit-order-laddschema (billigaste slots först, undviker batteriets egna nätladdningsslots). Verifierat med ett syntetiskt prisscenario. Att koppla in schemat i faktisk laddarstyrning är medvetet uppskjutet. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
+Steg 7 (huset som värmelager), bara punkt 4: en ny `heat_planner.py` med `is_preheat_profitable()`, en ren funktion som implementerar planens COP-lönsamhetsregel för att flytta uppvärmningsenergi till en billigare men mindre effektiv tidsslot. Rumsvis värmereglering (punkt 1 och 3) är parkerad – en kontroll mot skarp data visade att rumsgivarna bara har ~6 veckors historik, inte de ~11 månader som antogs; det kräver en uppvärmningssäsong för att bli meningsfullt. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
 
 Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 

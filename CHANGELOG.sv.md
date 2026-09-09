@@ -2,6 +2,16 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.14
+
+Steg 7 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — huset som värmelager — bara punkt 4 (COP-lönsamhetsregeln), på uttrycklig begäran. Punkt 1 och 3 (rumsvis termisk regression/strategi) är parkerade: en kontroll mot skarp data visade att rumstemperaturgivarna bara har data sedan ~2026-07-25 (~6 veckor), inte sedan oktober 2025 som planen antog — en meningsfull regression kräver en uppvärmningssäsong. **Inte kopplad till någon skarp styrning, inte rekommenderad för driftsättning.**
+
+- **Ny fil `heat_planner.py`** — en egen fysisk domän (uppvärmning, inte batteri) skild från `energy_planner.py`, väntas växa med steg 7:s återstående punkter.
+- **`is_preheat_profitable(price_peak, price_preheat, cop_preheat, cop_normal) -> bool`**, en ren funktion som implementerar planens egen formel exakt (vinst mot kostnad av att flytta uppvärmningsenergi till en billigare men lägre-COP-slot, där den förskjutna kWh-termen stryks ur båda leden).
+- **Grundad mot skarp data innan formeln skrevs**: kontrollerade `sensor.vp_verkningsgrad` (COP × 100) direkt — den är kraftigt brusig kring kompressorstart/avfrostning (uppmätta toppar över 10 000 % under en enda veckas historik), med ett stabilt intervall runt 470–500 % (COP ≈ 4,7–5,0) däremellan. Ingen kalibrerad modell finns ännu för hur COP faktiskt beror av framledningstemperaturen (`number.boiler_tempparmode`) — det kräver riktig mätning under en verklig förvärmningskörning, inte gissad fysik. `cop_preheat`/`cop_normal` är därför medvetet indataparametrar, inte en rå sensorutläsning inuti funktionen.
+- Verifierat mot sex handräknade scenarier (stor prisskillnad/måttligt COP-tapp → lönsamt; liten skillnad/stort COP-tapp → inte; samma pris → aldrig; inget COP-tapp → alltid lönsamt när peak > preheat; odefinierad COP → aldrig; förvärmning dyrare än toppen → aldrig) — alla stämde.
+- **Inte gjort**: att koppla in det här i ett faktiskt förvärmningsbeslut/schema (vilken slot som är "förvärmning" respektive "topp", var COP-värdena kommer ifrån i praktiken, att faktiskt styra `number.boiler_tempparmode` eller motsvarande) — kräver `coordinator.py`/`energy_controller.py`, samma avgränsning som steg 4 och 6.
+
 ## Nyheter i 0.9.13
 
 Steg 6 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — bilen som schemalagd last. **Bara planering, inte kopplad till skarp styrning, fortfarande inte rekommenderad för driftsättning.**

@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.13-blue)
+![Version](https://img.shields.io/badge/version-0.9.14-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.13
+## What's New in 0.9.14
 
-> **⚠️ Do not deploy this version.** It's an in-progress attempt at steps 3, 5, and 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), kept in source control for reference. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that.
+> **⚠️ Do not deploy this version.** It's an in-progress attempt at steps 3, 5, 6, and part of 7 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), kept in source control for reference. v0.9.7 (commit `a57cea2`) is the last version verified against backtest — use that.
 
-Step 6 (car as schedulable load) — planning only, not wired to live control: `build_plan()` can now take an EV energy need, deadline, and max power, and produce a merit-order charging schedule (cheapest slots first, avoiding the battery's own grid-charging slots). Verified with a synthetic price scenario. Wiring this into actual charger dispatch is deliberately deferred. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
+Step 7 (house as thermal storage), point 4 only: a new `heat_planner.py` with `is_preheat_profitable()`, a pure function implementing the plan's COP profitability rule for shifting heating energy to a cheaper-but-lower-efficiency time slot. Room-level thermal regulation (points 1 and 3) is parked — a live-data check found the room sensors only have ~6 weeks of history, not the ~11 months assumed; that needs a heating season to be meaningful. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
 
 See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
