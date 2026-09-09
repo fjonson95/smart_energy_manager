@@ -24,7 +24,6 @@ _LOGGER = logging.getLogger(__name__)
 
 _PLAN_HORIZON_H  = 28    # Timmar framåt att planera
 _HARD_FLOOR_FRACTION = 0.10  # Hårt golv: andel av batterikapaciteten som aldrig underskrids
-_FLOOR_SAFETY_CAP_FRACTION = 0.85  # Skyddsspärr: golvet äter aldrig mer än denna andel av användbart SOC-spann
 
 # --- Interimslösning ("Option B", docs/forbrukningsanalys.md) -------------
 # Prisspärren nedan är MEDVETET en enkel första version, inte den slutgiltiga
@@ -197,39 +196,79 @@ class EnergyPlanner:
         def _slot_load_kwh(s, shape: Optional[list]) -> float:
             return _load_kw_at(s.start, shape) * (s.end - s.start).total_seconds() / 3600.0
 
-        # Golvformel (prognosreserv): behov_kwh täcker huslasten fram till solen
-        # tar över, räknat mot PESSIMISTISK (p10) solprognos – ett underskattat
-        # solvärde här gör att golvet blir för lågt och batteriet kan bli tomt.
-        # Osäkerhetspåslaget skalas av produktionskvoten (P3-2): slår prognosen
-        # fel (snö, nedsmutsning) höjs reserven, i värsta fall mot full
-        # nattautonomi via min()-klämningen mot batt_max_kwh. Ett hårt golv
-        # (10 % av kapaciteten) gäller alltid, oavsett hur liten reserven blir
-        # en solig sommardag.
+        # v1.0 steg 2: golvet blir en BANA, inte ett skalärt tal (docs/
+        # v1_implementation_plan.md). Den gamla versionen räknade en enda
+        # export_floor_kwh en gång och jämförde den mot VARJE mörk slot genom
+        # hela natten – men golvet krympte aldrig i takt med att lasten
+        # faktiskt täcktes, så "avail = batt − min − golv" kunde bli 0 långt
+        # innan solen tog över, trots att batteriet redan hade täckt det
+        # golvet var till för (se docs/forbrukningsanalys.md avsnitt 9, Steg 0
+        # – executorns veto var SYMPTOMET, det här var grundorsaken det lappade).
+        #
+        # reserve_at(t) = summan av (last(s) − sol_p10(s)) för alla floor_slots
+        # med start >= t, plus en icke-avtagande säkerhetsmarginal (+2 kWh,
+        # EV-marginal), × osäkerhetspåslaget. Eftersom både batteriet OCH
+        # reservkravet minskar med samma kWh när en slots last täcks blir
+        # "avail" positivt genom hela natten – det är hela poängen.
+        #
+        # Osäkerhetspåslaget skalas av produktionskvoten (P3-2): slår
+        # prognosen fel (snö, nedsmutsning) höjs reserven, i värsta fall mot
+        # full nattautonomi via min()-klämningen mot batt_max_kwh. Ett hårt
+        # golv (10 % av kapaciteten) gäller alltid.
         takeover = solar_takeover_dt if (solar_takeover_dt and solar_takeover_dt > now_a) else now_a + timedelta(hours=9)
         takeover_local = takeover.astimezone()
         _floor_slots = [s for s in (ps.slots or []) if s.end > now_a and s.start < takeover_local]
-        if _floor_slots:
-            behov_kwh = sum(
-                max(0.0, _slot_load_kwh(s, load_shape_p75) - s.solar_kwh_p10)
-                for s in _floor_slots
-            ) + 2.0
-        else:
-            behov_kwh = _load_kw_at(now_a, load_shape_p75) * 9.0 + 2.0
-        # EV-marginal: flat buffert (inte hela vägen till soc_target – EV-laddning
-        # är fortfarande i första hand sol-/opportunistiskt styrd) mot att en vald
-        # bil kan behöva ladda under det mörka fönstret utan att golvet räknar
-        # som om bilen inte fanns.
-        behov_kwh += max(0.0, ev_reserve_margin_kwh)
-        reserv_kwh = behov_kwh * (1.0 + _uncertainty_markup(pv_production_ratio))
+        _floor_slots_sorted = sorted(_floor_slots, key=lambda s: s.start)
+
+        # Suffix-summa (rå, ingen markup/buffert än): för varje floor_slot,
+        # hur mycket underskott återstår FRÅN den sloten till takeover.
+        _reserve_suffix: dict[datetime, float] = {}
+        _running_raw = 0.0
+        for s in reversed(_floor_slots_sorted):
+            _running_raw += max(0.0, _slot_load_kwh(s, load_shape_p75) - s.solar_kwh_p10)
+            _reserve_suffix[s.start] = _running_raw
+
+        # EV-marginal + fast buffert: en icke-avtagande säkerhetsmarginal
+        # (inte hela vägen till soc_target för EV – EV-laddning är
+        # fortfarande i första hand sol-/opportunistiskt styrd), så en vald
+        # bil som kan behöva ladda under det mörka fönstret aldrig glöms bort,
+        # oavsett var i natten vi är.
+        _flat_buffer_kwh = 2.0 + max(0.0, ev_reserve_margin_kwh)
+        _markup_factor = 1.0 + _uncertainty_markup(pv_production_ratio)
         hard_floor_kwh = battery_capacity_kwh * _HARD_FLOOR_FRACTION
-        # Skyddsspärr: golvet får aldrig äta mer än _FLOOR_SAFETY_CAP_FRACTION av
-        # spannet mellan min_soc och max_soc. Utan den kan reserv_kwh (dygnssnitt
-        # ×mörkt fönster, ×upp till 300% osäkerhetspåslag) bli STÖRRE än hela det
-        # användbara spannet på ett högförbrukningsdygn – evening_target_soc
-        # klämmer då mot max_soc och blockerar både export och vanlig
-        # självkonsumtion (se docs/forbrukningsanalys.md avsnitt 8).
-        floor_safety_cap_kwh = (batt_max_kwh - batt_min_kwh) * _FLOOR_SAFETY_CAP_FRACTION
-        export_floor_kwh = min(batt_max_kwh, floor_safety_cap_kwh, max(hard_floor_kwh, reserv_kwh))
+        # Skyddsspärren (_FLOOR_SAFETY_CAP_FRACTION) tas bort här (v1.0 steg 2,
+        # punkt 2): den var en lapp mot att det SKALÄRA golvet kunde överstiga
+        # hela det användbara spannet en högförbrukningsdag. En bana som
+        # summerar riktiga per-slot-underskott mot takeover kan strukturellt
+        # inte göra det – klämningen mot batt_max_kwh nedan räcker.
+
+        def reserve_at(t: datetime) -> float:
+            """Reservkrav (kWh, med markup+buffert, klämt mot hård gräns) för
+            allt som återstår från t till takeover. Krymper mot bara
+            bufferten när t närmar sig takeover."""
+            if t >= takeover_local:
+                raw = 0.0
+            elif _floor_slots_sorted:
+                raw = 0.0
+                for s in _floor_slots_sorted:
+                    if s.start >= t:
+                        raw = _reserve_suffix[s.start]
+                        break
+            else:
+                # Inga riktiga prisslots att summera över (t.ex. saknad
+                # Nordpool-data) – uppskatta mot återstående timmar till
+                # takeover istället för en fast siffra, så även fallbacken
+                # krymper naturligt när t närmar sig takeover.
+                _remaining_h = max(0.0, (takeover_local - t).total_seconds() / 3600.0)
+                raw = _load_kw_at(t, load_shape_p75) * _remaining_h
+            reserve = (raw + _flat_buffer_kwh) * _markup_factor
+            return min(batt_max_kwh, max(hard_floor_kwh, reserve))
+
+        # Golvet vid "nu" – samma tal som tidigare (export_floor_kwh),
+        # bevarat för rapportering (DayPlan, sensorer, kvällsmål) och som
+        # startvärde för export-/nätladdningsbesluten som bara utvärderas en
+        # gång per planeringscykel, inte per slot.
+        export_floor_kwh = reserve_at(now_a)
         evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + export_floor_kwh / battery_capacity_kwh * 100.0)
         # Användbar energi ovan min_soc – energin under batt_min_kwh kan aldrig nås.
         exportable_kwh = max(0.0, batt_kwh - batt_min_kwh - export_floor_kwh)
@@ -406,8 +445,11 @@ class EnergyPlanner:
                     reason = f"sol {slot.solar_kw:.1f}kW → batteri fullt, sälj ({slot.sell_sek:.2f} kr)"
                 else:
                     # Sol täcker inte lasten – självkonsumtion om batteri > golvet.
+                    # Golvet är reserve_at(slot.end) (v1.0 steg 2): kravet EFTER
+                    # den här sloten, inte ett fast dygnstal – annars räknas
+                    # samma reserv en gång per slot hela dagen ut.
                     deficit_kwh = load_kwh - solar_kwh
-                    avail_kwh = max(0.0, batt_kwh - batt_min_kwh - export_floor_kwh)
+                    avail_kwh = max(0.0, batt_kwh - batt_min_kwh - reserve_at(slot.end))
                     if avail_kwh > 0.01:
                         dis_kwh = min(deficit_kwh, avail_kwh, battery_max_power_kw * slot_h)
                         batt_kwh -= dis_kwh
@@ -418,30 +460,30 @@ class EnergyPlanner:
                         action = "cover_load"
                         reason = f"sol {slot.solar_kw:.1f}kW < last {_slot_load_kw:.2f}kW → batteri vid golvet, nät"
 
-            elif slot.start in cheap_set and batt_kwh < export_floor_kwh - 0.5:
-                needed = min(export_floor_kwh - batt_kwh, battery_max_power_kw * slot_h)
+            elif slot.start in cheap_set and batt_kwh < reserve_at(slot.start) - 0.5:
+                _target_kwh = reserve_at(slot.start)
+                needed = min(_target_kwh - batt_kwh, battery_max_power_kw * slot_h)
                 batt_kwh = min(batt_max_kwh, batt_kwh + needed)
                 power_w = min(needed / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
                 action = "grid_charge"
-                reason = f"nätladda {slot.buy_sek:.2f} kr/kWh (gräns {cheap_threshold:.2f})"
+                reason = f"nätladda {slot.buy_sek:.2f} kr/kWh (gräns {cheap_threshold:.2f}, mål {_target_kwh:.1f}kWh)"
 
             else:
                 # Mörk slot utan export/nätladdning – självkonsumtion om batteri > golvet.
-                # Speglar controllerns morgonlogik: sänk effektivt golv med 80% av sol inom 2h.
+                # Golvet är reserve_at(slot.end) (v1.0 steg 2) – en bana som redan
+                # drar av sol_p10 per slot i floor_slots-summan, så den gamla
+                # 80%-av-kommande-2h-solen-hacken (_eff_floor) behövs inte längre;
+                # den dubbelräknade samma sol som reserven redan tagit hänsyn till.
                 deficit_kwh = max(0.0, load_kwh - solar_kwh)
-                _next_2h_solar_kwh = sum(
-                    s.solar_kw * (s.end - s.start).total_seconds() / 3600.0
-                    for s in future_slots
-                    if s.start >= slot.start and s.end <= slot.start + timedelta(hours=2) and s.solar_kw > 0
-                )
-                _eff_floor = max(0.0, export_floor_kwh - 0.8 * _next_2h_solar_kwh)
-                avail_kwh = max(0.0, batt_kwh - batt_min_kwh - _eff_floor)
+                avail_kwh = max(0.0, batt_kwh - batt_min_kwh - reserve_at(slot.end))
                 # Interimslösning ("Option B", se konstant-kommentaren ovan): vid
                 # golvet men köppriset överstiger vad energin i batteriet redan
                 # kostat (+ cykelkostnad) – öppna ner mot hard_floor istället för
                 # att köpa nät som är dyrare än batteriets egen sparade energi.
                 # Osäkerheten i solprognosen är INTE ett villkor här (v1.0 steg 0)
                 # – den hanteras redan av _uncertainty_markup() i golvet självt.
+                # Behålls tills reserve_at-banan är verifierad i backtest (v1.0
+                # plan, steg 2) – tas bort då, inte innan.
                 price_gate_used = False
                 if avail_kwh <= 0.01 and deficit_kwh > 0.01:
                     price_threshold = battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh
@@ -458,11 +500,10 @@ class EnergyPlanner:
                     batt_kwh -= dis_kwh
                     power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
                     action = "cover_load"
-                    solar_note = f" (sol {_next_2h_solar_kwh:.1f}kWh/2h)" if _next_2h_solar_kwh > 0.1 else ""
                     if price_gate_used:
                         reason = f"mörk: prisspärr under golvet {-power_w:.0f}W (köp {slot.buy_sek:.2f} > batteri {battery_avg_cost_sek_kwh + self.cycle_cost_sek_kwh:.2f}) batteri kvar {batt_kwh:.1f}kWh"
                     else:
-                        reason = f"mörk: självkonsumtion {-power_w:.0f}W batteri kvar {batt_kwh:.1f}kWh{solar_note}"
+                        reason = f"mörk: självkonsumtion {-power_w:.0f}W batteri kvar {batt_kwh:.1f}kWh"
                 else:
                     reason = f"mörk idle: batteri vid golvet, nät täcker → sälj={slot.sell_sek:.2f}"
 

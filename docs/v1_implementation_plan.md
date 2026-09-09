@@ -18,7 +18,11 @@ brytpunktsformlerna verifierade (se korrigeringen om merit-order-viktat
 snitt kontra dygnets min/max, nedan), `sem_battery_equivalent_cycles`
 (v0.9.4), dygnsbudgetens dump-exkludering (steg 1B, v0.9.5) och
 lastprofilen form×nivå (steg 1A, v0.9.6) alla implementerade och
-verifierade. Steg 2–8 inte påbörjade.
+verifierade. **Steg 2 klart (v0.9.7):** golvet är nu en avtagande
+`reserve_at(t)`-bana istället för ett skalärt tal, skyddsspärren
+(`_FLOOR_SAFETY_CAP_FRACTION`) borttagen, prisspärren ("Option B") behållen
+i väntan på en riktig vinterbacktest — se avsnitt "Steg 2 implementerat"
+nedan för detaljer och verifieringsresultat. Steg 3–8 inte påbörjade.
 
 ---
 
@@ -259,6 +263,58 @@ solen tar över.
 natten och bottnar nära min_soc vid soluppgång, i stället för att stanna
 på 26 kWh. Ingen natt slutar med batteriet över 50 % och nätimport under
 pristoppen.
+
+### Steg 2 implementerat (v0.9.7, 2026-09-09)
+
+`energy_planner.py::build_plan()`:
+
+- **`reserve_at(t)`** – ny lokal funktion. Bygger en suffix-summa
+  (`_reserve_suffix`, en dict nyckel per floor_slot-start) av
+  `max(0, last_kwh(s) − sol_p10_kwh(s))` för alla floor_slots, beräknad en
+  gång per planeringscykel (O(n)). `reserve_at(t)` slår upp summan för
+  första floor_slot med `start >= t` (linjärsökning, O(n) per anrop — trivialt
+  vid ~112 slots/28h-horisont), adderar den icke-avtagande bufferten
+  (2 kWh + `ev_reserve_margin_kwh`), multiplicerar med
+  `_uncertainty_markup(pv_production_ratio)`, och klämmer mot
+  `[hard_floor_kwh, batt_max_kwh]`. Faller tillbaka till en tidsproportionell
+  uppskattning (`_load_kw_at(t, load_shape_p75) × återstående_timmar`) om
+  `ps.slots` saknas.
+- **`export_floor_kwh` = `reserve_at(now_a)`** – bevarat som externt kontrakt
+  (DayPlan-fält, kvällsmåls-SOC, sensorer) men är nu en ÖGONBLICKSBILD av
+  banan vid planeringstillfället, inte en konstant genom hela simuleringen.
+- **Simuleringsloopen** använder banan istället för det skalära talet på tre
+  ställen: dagtida självkonsumtion (`reserve_at(slot.end)`), nätladdningens
+  mål (`reserve_at(slot.start)`), och mörk-grenens självkonsumtion
+  (`reserve_at(slot.end)`, ersätter den gamla `_eff_floor`/"80 % av kommande
+  2h sol"-hacken — redundant nu när `reserve_at` redan drar av `sol_p10_kwh`
+  per slot i suffix-summan).
+- **`_FLOOR_SAFETY_CAP_FRACTION` borttagen** (konstant + användning) enligt
+  planens punkt 2 — motiveringen (en bana klämd mot `batt_max_kwh` kan inte
+  strukturellt överstiga spannet) höll i backtest: högsta observerade
+  golvvärde landade exakt på `batt_max_kwh` (30,38 kWh vid `battery_max_soc`
+  99 %, `battery_capacity_kwh` 30,69 kWh i backtest-konfigurationen), aldrig
+  över.
+- **Option B (prisspärren) oförändrad** — kvar enligt planens punkt 3, tas
+  bort när banan är verifierad mot en riktig vinterbacktest.
+
+**Verifiering:** `testdata/backtest.py testdata/history` (samma ~10-dagars
+fönster 2026-08-26–2026-09-05 som tidigare steg, se känd begränsning i
+`testdata/history/Series info.txt` — en riktig januarivecka finns inte i
+testdata ännu). Resultat:
+
+- Ingen krasch, 91,3 % besparing mot referens utan batteri/styrning
+  (jämförbart med tidigare stegs 93,4 % — skillnaden förväntad, olika
+  fönster/kod, inte en regression i sig).
+- **Golvet avtar mjukt över natten** i stället för att stå still: natten
+  28–29/8 sjunker det rapporterade `export_floor_kwh` 5,24 → 3,07 kWh
+  (00:00–06:00), natten 29–30/8 7,32 → 3,25 kWh (00:00–07:00) — i takt med
+  batteriets SOC (t.ex. 82,1 % → 65,5 % samma fönster), ingen platå.
+- SOC-spannet över hela perioden: 25,8–100 %. Bottnar INTE nära `min_soc`
+  (20 % i backtestens config) eftersom perioden är sen sommar, inte januari
+  — förväntat givet datagapet ovan, inte ett underkänt acceptanstest. Den
+  kvalitativa delen av acceptanskravet (jämn nedgång, ingen platå) är
+  uppfylld; den kvantitativa delen (botten nära min_soc en verklig
+  vinternatt) kan först verifieras när en januarivecka finns i testdata.
 
 ---
 

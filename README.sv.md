@@ -1,17 +1,18 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.6-blue)
+![Version](https://img.shields.io/badge/version-0.9.7-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.6
+## Nyheter i 0.9.7
 
-Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del fyra — den platta lasttakten ersatt med en form×nivå-modell.
+Steg 2 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — export-/urladdningsgolvet blir en bana istället för ett skalärt tal.
 
-- **Lastprojektionen skiljer nu form från nivå**: 24 timhinkar (median/P50, eller P75 för reserven) över ett rullande ≤21-dygnsfönster, varje dygn normaliserat mot sin egen summa – kombinerat med den befintliga gradtimmodellen som nivå, så den fortfarande reagerar på morgondagens prognos direkt istället för att släpa efter ett långt medelfönster.
-- Faller tillbaka till den tidigare platta takten närhelst formhistorik saknas – en rent additiv ändring, verifierad att reproducera det gamla beteendet exakt utan formdata.
+- **`export_floor_kwh` ersatt av `reserve_at(t)`, en per-slot avtagande reservkurva.** Det gamla skalära golvet jämfördes mot VARJE mörk slot genom hela natten och krympte aldrig i takt med att batteriet täckte lasten det var dimensionerat för. `reserve_at(t)` summerar det verkliga återstående underskottet mellan `t` och solens övertagande, så marginalen förblir positiv genom hela natten istället för att nå noll för tidigt. Verifierat mot en riktig 10-dagars backtest: golvet avtar nu mjukt över natten och SOC följer nedåt utan platå.
+- **Tog bort 85 %-skyddsspärren** (`_FLOOR_SAFETY_CAP_FRACTION`) – den fanns bara för att begränsa det gamla skalära golvet; en bana byggd av riktiga per-slot-underskott, klämd mot batterikapaciteten, kan strukturellt inte överstiga spannet.
+- Den interimistiska prisspärren ("Option B") ligger kvar tills reservkurvan är verifierad mot en riktig vinterbacktest.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 

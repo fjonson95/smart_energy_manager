@@ -1,19 +1,20 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.6-blue)
+![Version](https://img.shields.io/badge/version-0.9.7-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.6
+## What's New in 0.9.7
 
-Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part four — the flat hourly load rate replaced with a shape × level model.
+Step 2 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the export/discharge floor becomes a trajectory instead of a single scalar.
 
-- **The load projection now separates shape from level**: 24 hourly buckets (median/P50, or P75 for the reserve) over a rolling ≤21-day window, each day normalized to its own total — combined with the existing degree-day model as the level, so it still reacts to tomorrow's forecast immediately instead of lagging a long averaging window.
-- Falls back to the previous flat rate whenever shape history isn't available yet — a strictly additive change, verified to reproduce the old behavior exactly with no shape data.
+- **`export_floor_kwh` replaced with `reserve_at(t)`, a per-slot decaying reserve curve.** The old scalar floor was compared against every dark slot through the whole night, so it never shrank as the battery covered the load it was sized for. `reserve_at(t)` sums the real remaining deficit between `t` and solar takeover, so headroom stays positive through the night instead of hitting zero early. Verified against a real 10-day backtest: the reported floor now decays smoothly overnight and SOC tracks it down without plateauing.
+- **Removed the 85% safety cap** (`_FLOOR_SAFETY_CAP_FRACTION`) — it only existed to bound the old scalar floor; a trajectory built from real per-slot deficits, clamped to battery capacity, can't structurally exceed the usable range.
+- The interim price-gate relaxation ("Option B") stays in place until the reserve curve is verified against a real winter backtest.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
 ## System Overview
 

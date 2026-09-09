@@ -2,6 +2,16 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.7
+
+Steg 2 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — export-/urladdningsgolvet blir en bana istället för ett skalärt tal.
+
+- **`export_floor_kwh` ersatt av `reserve_at(t)`, en per-slot avtagande reservkurva.** Det gamla skalära golvet räknades fram en gång och jämfördes sedan mot VARJE mörk slot genom hela natten – så när batteriet väl täckte lasten golvet var dimensionerat för stod jämförelsen ändå kvar mot samma ursprungliga tal, och kunde nå noll marginal timmar innan soluppgång, långt innan reserven faktiskt var förbrukad. `reserve_at(t)` summerar det verkliga projicerade underskottet (`last(s) − sol_p10(s)`) bara över de slots som återstår mellan `t` och solens övertagande, så både batteriet och kravet krymper tillsammans och tillgänglig marginal förblir positiv genom hela natten. Verifierat mot en riktig 10-dagars backtest: det rapporterade golvet avtar mjukt över natten (t.ex. 7,3→3,3 kWh under en natt) istället för att ligga stilla, och SOC följer nedåt utan platå.
+- **Tog bort `_FLOOR_SAFETY_CAP_FRACTION` (85 %-skyddsspärren).** Den fanns bara för att hindra det gamla skalära golvet – dimensionerat mot ett helnattssnitt – från att överstiga det användbara SOC-spannet på ett högförbrukningsdygn. En bana byggd av riktiga per-slot-underskott och klämd mot batterikapaciteten kan strukturellt inte göra det, så spärren tas bort istället för att behållas som dödvikt.
+- **Prisspärren ("Option B") behålls tills vidare**, enligt planen – den blir helt överflödig först när reservkurvan är verifierad i en riktig vinterbacktest, inte innan.
+- `DayPlan.export_floor_kwh` och kvällsmåls-SOC rapporteras fortfarande som enskilda tal (nu `reserve_at(nu)`) – det externa kontraktet (sensorer, dashboard) är oförändrat.
+- **Känd lucka, oförändrad av det här steget:** planens eget acceptanskrav gäller en januarivecka; det tillgängliga backtest-fönstret är fortfarande bara ~10 dygn i sen augusti/september (`testdata/history/Series info.txt`), så det djupa vinterbeteendet (bottning nära min_soc) är verifierat genom konstruktion (matematiken), inte ännu genom en riktig kallväders-backtest.
+
 ## Nyheter i 0.9.6
 
 Steg 1 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md), del fyra (steg 1A) — den platta lasttakten ersatt med en form×nivå-modell.

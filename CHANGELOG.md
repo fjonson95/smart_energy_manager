@@ -2,6 +2,16 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.7
+
+Step 2 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the export/discharge floor becomes a trajectory instead of a single scalar.
+
+- **`export_floor_kwh` replaced with `reserve_at(t)`, a per-slot decaying reserve curve.** The old scalar floor was computed once and compared against every dark slot through the whole night — so as the battery correctly covered the load it was sized for, the comparison stayed pinned to the original number and could reach zero headroom hours before sunrise, well before the reserve was actually exhausted. `reserve_at(t)` sums the real projected deficit (`load(s) − solar_p10(s)`) over only the slots still remaining between `t` and solar takeover, so both the battery and the requirement shrink together and available headroom stays positive through the night. Verified against a real 10-day backtest: the reported floor decays smoothly overnight (e.g. 7.3→3.3 kWh across one night) instead of holding flat, and SOC tracks it down without plateauing.
+- **Removed `_FLOOR_SAFETY_CAP_FRACTION` (the 85% safety cap).** It existed only to stop the old scalar floor — sized off a full-night average — from exceeding the usable SOC range on a high-consumption day. A trajectory built from real per-slot deficits and clamped to battery capacity can't structurally do that, so the cap is gone rather than kept as dead weight.
+- **The "Option B" price-gate relaxation is kept for now**, per the plan — it becomes fully redundant once the reserve curve is verified in a real winter backtest, not before.
+- `DayPlan.export_floor_kwh` and the evening-target SOC are still reported as single numbers (now `reserve_at(now)`) — external contract (sensors, dashboard) unchanged.
+- **Known gap, unchanged by this step:** the plan's own acceptance test calls for a January week; the available backtest window is still only ~10 days in late August/September (`testdata/history/Series info.txt`), so the deep-winter, near-min-SOC bottoming behavior is verified by construction (the math), not yet by a full cold-weather backtest.
+
 ## What's New in 0.9.6
 
 Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part four (step 1A) — the flat hourly load rate replaced with a shape × level model.
