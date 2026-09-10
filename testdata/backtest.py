@@ -95,7 +95,9 @@ from custom_components.smart_energy_manager.energy_planner import EnergyPlanner
 from custom_components.smart_energy_manager.price_scheduler import (
     PriceSchedule, PriceSlot,
 )
-from custom_components.smart_energy_manager.const import NO_CAR_SELECTED
+from custom_components.smart_energy_manager.const import (
+    NO_CAR_SELECTED, DEFAULT_HEAT_BALANCE_TEMP, DEFAULT_HEAT_FACTOR_KWH_DD, DEFAULT_BASE_DHW_KWH,
+)
 
 # ── Konfiguration – matchar den faktiska (P1-4-korrigerade) HA-konfigurationen,
 # inte de gamla felaktiga värdena (33 kWh, 0.07, 20A). Se README "What's New"
@@ -534,6 +536,83 @@ def run_backtest(
                 hourly_solar_w[ts] = sv
     all_prices.sort()
 
+    # Steg 1A-verifiering (extern granskning 2026-09-10): build_plan() tar
+    # emot load_shape_p50/p75 (form×nivå, se coordinator._get_load_shape())
+    # i produktion, men fick dem ALDRIG här förut — alla tidigare Steg 0-3-
+    # backtest-siffror kördes mot den platta reservmodellen, inte den
+    # faktiska lastprofilen. Byggd med samma kausalitet som coordinator:
+    # bara FÖREGÅENDE, färdiga dygn (aldrig dagens eget ännu ofullständiga
+    # dygn eller framtida dygn) ingår i percentil-fönstret vid tidpunkt ts.
+    hourly_house_load_w: dict[datetime, float] = {}
+    for ts, row in pivot.items():
+        load_raw = row.get("sensor.el_forbruk_power_power")
+        if load_raw:
+            lv = _safe(load_raw, float)
+            if lv is not None:
+                hourly_house_load_w[ts] = lv
+
+    _day_hour_totals: dict = {}
+    for t, w in hourly_house_load_w.items():
+        d = t.astimezone(timezone.utc).date()
+        h = t.astimezone(timezone.utc).hour
+        _day_hour_totals.setdefault(d, {})[h] = w
+    _daily_load_fractions: dict = {}
+    for d, hours in _day_hour_totals.items():
+        day_total = sum(hours.values())
+        if day_total > 0:
+            _daily_load_fractions[d] = [
+                (hours[h] / day_total) if h in hours else None
+                for h in range(24)
+            ]
+    _sorted_load_days = sorted(_daily_load_fractions.keys())
+
+    # load_shape_p50/p75 (form) multipliceras i build_plan() mot
+    # predicted_daily_kwh (nivån, gradtimmodellen) – INTE mot _eff_daily_kwh
+    # (energy_planner.py:_load_kw_at). backtest.py hårdkodade tidigare
+    # predicted_daily_kwh=0.0 (ingen temperaturmodell fanns), vilket gjort
+    # load_shape helt overksam om den bara kopplats in ensam (form × 0 = 0,
+    # sämre än den platta fallbacken). Byggd här med SAMMA formel/konstanter
+    # som coordinator.py (rad 1051-1059): base + k×max(0, t_bal-temp), med
+    # gårdagens dygnsmedeltemp om den finns, annars slotens egen temp.
+    _daily_temp_avg: dict = {}
+    _day_temp_samples: dict = {}
+    for t, row in pivot.items():
+        temp_raw = row.get("sensor.boiler_outdoortemp")
+        if temp_raw:
+            tv = _safe(temp_raw, float)
+            if tv is not None:
+                _day_temp_samples.setdefault(t.astimezone(timezone.utc).date(), []).append(tv)
+    for d, samples in _day_temp_samples.items():
+        _daily_temp_avg[d] = sum(samples) / len(samples)
+
+    def _predicted_daily_kwh_at(ts: datetime, current_temp_c: Optional[float]) -> float:
+        day0 = ts.astimezone(timezone.utc).date()
+        yesterday_avg = _daily_temp_avg.get(day0 - timedelta(days=1))
+        temp_for_model = yesterday_avg if yesterday_avg is not None else current_temp_c
+        if temp_for_model is None:
+            return 0.0
+        return DEFAULT_BASE_DHW_KWH + DEFAULT_HEAT_FACTOR_KWH_DD * max(0.0, DEFAULT_HEAT_BALANCE_TEMP - temp_for_model)
+
+    def _load_shape_at(ts: datetime, percentile: float) -> Optional[list]:
+        day0 = ts.astimezone(timezone.utc).date()
+        window_days = [d for d in _sorted_load_days if d < day0][-21:]
+        if not window_days:
+            return None
+        result: list = []
+        for hour in range(24):
+            vals = sorted(
+                _daily_load_fractions[d][hour] for d in window_days
+                if _daily_load_fractions[d][hour] is not None
+            )
+            if not vals:
+                result.append(None)
+                continue
+            idx = min(int(percentile * len(vals)), len(vals) - 1)
+            result.append(vals[idx])
+        if all(v is None for v in result):
+            return None
+        return result
+
     # --drought-oracle (testverktyg för v2 av torkrisk-påslaget, docs/
     # v1_implementation_plan.md "Torkrisk-påslag från SMHI:s väderprognos"):
     # bygger weather_forecast från riktig HISTORISK väderdata (Open-Meteo
@@ -647,13 +726,15 @@ def run_backtest(
                         battery_capacity_kwh=state.battery_capacity_kwh,
                         battery_max_power_kw=state.battery_max_power_kw,
                         ps=ps,
-                        predicted_daily_kwh=0.0,
+                        predicted_daily_kwh=_predicted_daily_kwh_at(ts, state.outdoor_temp_c),
                         solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
                         solar_takeover_dt=None,
                         house_load_w=state.house_load_w,
                         battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
                         yesterday_consumption_kwh=state.yesterday_consumption_kwh,
                         house_load_avg_w=state.house_load_avg_w,
+                        load_shape_p50=_load_shape_at(ts, 0.5),
+                        load_shape_p75=_load_shape_at(ts, 0.75),
                         current_outdoor_temp_c=state.outdoor_temp_c if drought_oracle else None,
                         weather_forecast=_oracle_weather_forecast(ts) if drought_oracle else None,
                     )
@@ -725,13 +806,15 @@ def run_backtest(
                         battery_capacity_kwh=state.battery_capacity_kwh,
                         battery_max_power_kw=state.battery_max_power_kw,
                         ps=ps,
-                        predicted_daily_kwh=0.0,
+                        predicted_daily_kwh=_predicted_daily_kwh_at(ts, state.outdoor_temp_c),
                         solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
                         solar_takeover_dt=None,
                         house_load_w=state.house_load_w,
                         battery_avg_cost_sek_kwh=sim_avg_cost_sek_kwh,
                         yesterday_consumption_kwh=state.yesterday_consumption_kwh,
                         house_load_avg_w=state.house_load_avg_w,
+                        load_shape_p50=_load_shape_at(ts, 0.5),
+                        load_shape_p75=_load_shape_at(ts, 0.75),
                         current_outdoor_temp_c=state.outdoor_temp_c if drought_oracle else None,
                         weather_forecast=_oracle_weather_forecast(ts) if drought_oracle else None,
                     )

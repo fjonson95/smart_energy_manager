@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.17-blue)
+![Version](https://img.shields.io/badge/version-0.9.18-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.17
+## Nyheter i 0.9.18
 
-> **⚠️ Driftsätt inte den här versionen.** Ett torkrisk-påslag på V, drivet av SMHI:s väderprognos – verifierat säkert (ingen regression i backtest) men nolleffekt på det här datasetet, ingen bevisad förbättring. v0.9.7 (commit `a57cea2`) är den senast backtest-verifierade versionen – använd den i drift.
+> **⚠️ Driftsätt inte den här versionen.** Rättar en riktig säkerhetsbugg i skarp drift (batteriets börvärdesordning), men avslöjar också en stor lucka i backtest-metodiken: varje besparingssiffra för steg 0-3 som rapporterats hittills har räknats utan produktionens lastmodell inkopplad. Med den rättad kollapsar steg 2:s backtest-resultat till 0,1 % och steg 3 blir jämförelsevis bättre (3,7 %) – overifierat mot riktig hårdvara. v0.9.7 (commit `a57cea2`) är fortfarande den senaste versionen som faktiskt körts i drift; den här releasen ändrar inte den rekommendationen.
 
-Utredde om en längre väderprognos (SMHI, 10 dygn) kunde hjälpa V se bortom sin 48h-horisont för flerdygns snötäckta-paneler-torkor. Första försöket (ett absolut kWh-golv) gav en regression i backtest och plockades bort; den omarbetade ansatsen (ett begränsat, prospektivt påslag på V) är säker men visade ingen mätbar nytta i backtest – nätpriset var redan billigare än V under själva torkan, så mekanismen fick aldrig chansen att ändra ett beslut. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången, inklusive snötäcknings-fysiken verifierad mot riktig historisk väderdata.
+Åtgärdade fynd från en extern kodgranskning av v1.0-planen mot den faktiska koden: en bekräftad motsägelse mellan `coordinator._write_battery_setpoints()`s kod och dess egen dokumenterade avsikt (rättad – riktig säkerhetsrelevans), en föråldrad kalibreringskommentar, och nya konfig-exponerade konstanter för värmemodellen. Det tyngsta fyndet kom dock av att åtgärda granskningens egen metodikfråga – backtesten körde aldrig produktionens lastprofils-/gradtimmodell på riktigt. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
 
 Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 

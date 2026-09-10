@@ -2,6 +2,16 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.18
+
+Svar på en extern kodgranskning (2026-09-10) av v1.0-planen mot den faktiska koden. **Inte kopplad till skarp styrning utöver en säkerhetsfix; fortfarande inte rekommenderad för driftsättning som helhet — se backtest-metodikfyndet nedan, som väger tyngre än någon enskild punkt på granskningens lista.**
+
+- **Rättade en säkerhetsrelevant bugg i skarp batteristyrning**: `coordinator._write_battery_setpoints()` skrev den nya ladd-/urladdningsriktningen INNAN den nollade den motsatta — precis tvärtom mot vad den egna docstringen säger (nolla motsatt riktning FÖRST, blockerande, så att Sonnens delade börvärde aldrig kortvarigt ser båda riktningarna skilda från noll vid ett byte). Bekräftad som en riktig motsägelse, inte bara en felaktig kommentar; ordningen är nu rättad så den matchar den dokumenterade (och korrekta) avsikten.
+- **Rättade en föråldrad kalibreringskommentar** i `PredictedHouseLoadSensor` (`sensor.py`) — docstringen sa `base_dhw=1,33, k=1,275, T_balance=14°C`; `const.py`s faktiska defaultvärden är `1,0/2,39/12,0` (från helårsregressionen). Bara kommentaren var fel, koden läste redan rätt värden.
+- **Exponerade gradtimmodellens konstanter som konfigalternativ** (`heat_balance_temp`, `heat_factor_kwh_dd`, `base_dhw_kwh`) — tidigare osynliga hårdkodade defaultvärden i `const.py`, nu synliga/justerbara i konfigflödet, förifyllda med de redan korrekta kalibrerade värdena. Ingen beteendeändring (inget överskred defaultvärdena tidigare).
+- **Stort fynd i backtest-metodiken**: `testdata/backtest.py` skickade aldrig `load_shape_p50/p75` eller en riktig `predicted_daily_kwh` till `build_plan()` — varenda besparingsprocent som rapporterats för steg 0-3 i hela projektet (inklusive "steg 2 = 5,5 %, steg 3 = 3,9 %"-jämförelsen från v0.9.16/17) har räknats mot en platt/reaktiv lastfallback, inte den lastmodell produktionen faktiskt alltid använt. Kopplade in en trogen rekonstruktion (samma formel som `coordinator.py`, verifierad mot den skarpa konfigurationen — ingen override finns, så defaultvärdena är exakt vad som körs skarpt). Resultat efter fixen: **steg 2 kollapsar till 0,1 % besparing** (batteriet cyklar knappt, ligger nästan fullt större delen av perioden) medan **steg 3 (nuvarande main) blir jämförelsevis bättre, 3,7 %** — motsatsen mot varje tidigare jämförelse den här sessionen. Sammanhängande med det redan dokumenterade "batteriet för litet för en hel vinternatt"-fyndet, inte en uppenbar bugg — men **overifierad mot riktig hårdvara**: integrationen fanns inte förrän slutet av juni 2026, så det finns ingen verklig driftshistorik från backtestens januari–april-fönster att stämma av mot.
+- Nya CLI-närliggande testverktygstillägg i `testdata/backtest.py`: kausal (ingen framåtblick) rullande lastprofil- och gradtimmodell-rekonstruktion, som speglar `coordinator.py`s egen logik exakt.
+
 ## Nyheter i 0.9.17
 
 Torkrisk-påslag på V, drivet av SMHI:s väderprognos — ett försök på horisontproblemet från en annan vinkel än v0.9.16:s datautökning. **Inte kopplad till skarp styrning, inte rekommenderad för driftsättning. Verifierad säker (ingen regression) men obevisad (nolleffekt) i backtest.**

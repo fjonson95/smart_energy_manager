@@ -2,6 +2,16 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.18
+
+Response to an external code review (2026-09-10) of the v1.0 plan against the actual code. **Not wired to live control beyond one live-safety fix; still not recommended for deployment as a whole — see the backtest-methodology finding below, which is more consequential than any single item on the review's list.**
+
+- **Fixed a live battery-safety bug**: `coordinator._write_battery_setpoints()` wrote the new charge/discharge direction *before* zeroing the opposite one — the exact opposite of its own docstring's stated intent (zero the opposite direction first, blocking, so Sonnen's shared setpoint never briefly sees both directions non-zero at a switch). Confirmed as a real contradiction, not just a comment mismatch; reordered to match the documented (and correct) intent.
+- **Fixed a stale calibration comment** in `PredictedHouseLoadSensor` (`sensor.py`) — docstring said `base_dhw=1.33, k=1.275, T_balance=14°C`; `const.py`'s actual defaults are `1.0/2.39/12.0` (from the full-year regression). Comment only, code was already reading the right values.
+- **Exposed the heating degree-day model's constants as config options** (`heat_balance_temp`, `heat_factor_kwh_dd`, `base_dhw_kwh`) — previously invisible hardcoded defaults in `const.py`, now visible/tunable in the config flow, pre-filled with the already-correct calibrated values. No behavior change (nothing was overriding the defaults).
+- **Major backtest-methodology finding**: `testdata/backtest.py` never passed `load_shape_p50/p75` or a real `predicted_daily_kwh` to `build_plan()` — every step 0-3 savings percentage reported this entire project (including the "step 2 = 5.5%, step 3 = 3.9%" comparison from v0.9.16/17) was computed against a flat/reactive load fallback, not the load model production has always actually used. Wired in a faithful reconstruction (same formula as `coordinator.py`, verified against the live config — no override exists, so the defaults are exactly what's live). Result once fixed: **step 2 collapses to 0.1% savings** (battery barely cycles, sits near-full most of the period) while **step 3 (current main) becomes comparatively better at 3.7%** — the opposite of every prior comparison this session. Consistent with the already-documented "battery too small for a full winter night" finding, not an obvious bug — but **unverified against real hardware**: the integration didn't exist before end of June 2026, so there's no real deployment history from the backtest's January–April window to cross-check against.
+- New CLI-adjacent test-only additions in `testdata/backtest.py`: causal (no lookahead) rolling load-shape and degree-day-model reconstruction, mirroring `coordinator.py`'s own logic exactly.
+
 ## What's New in 0.9.17
 
 Drought-risk markup on V, driven by SMHI's weather forecast — an attempt at the horizon problem from a different angle than v0.9.16's data extension. **Not wired to live control, not recommended for deployment. Verified safe (no regression) but unproven (net-zero effect) in backtest.**

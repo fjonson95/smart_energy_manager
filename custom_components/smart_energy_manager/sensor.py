@@ -836,8 +836,10 @@ class PredictedHouseLoadSensor(_BaseEnergySensor):
     """Beräknad daglig husförbrukning (kWh) baserat på utomhustemperatur.
 
     Modell: base_dhw + k × max(0, T_balance − temp)
-    Kalibrerad mot IVT-historik nov 2025–jul 2026:
-      base_dhw = 1.33 kWh, k = 1.275 kWh/gradddag, T_balance = 14 °C
+    Kalibrerad mot helårsdata (docs/forbrukningsanalys.md, avsnitt 7):
+      base_dhw = 1,0 kWh, k = 2,39 kWh/gradddag, T_balance = 12 °C
+    (se DEFAULT_BASE_DHW_KWH/DEFAULT_HEAT_FACTOR_KWH_DD/DEFAULT_HEAT_BALANCE_TEMP
+    i const.py för de faktiska default-värdena koden läser)
     """
 
     _attr_unique_id   = "sem_predicted_house_load"

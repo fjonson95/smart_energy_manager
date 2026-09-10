@@ -733,6 +733,56 @@ backtest-verifiering, samma "optimistisk övre gräns"-brasklapp som
 tidigare orakel-verktyg i den här sessionen). Nytt CLI-flagga
 `--drought-oracle` i `testdata/backtest.py`.
 
+### Extern granskning + backtest-metodikfynd (v0.9.18, 2026-09-10)
+
+En extern kodgranskning av den här planen mot faktisk kod (2026-09-10)
+verifierades punkt för punkt och gav tre kodfixar (börvärdesordningen i
+`coordinator._write_battery_setpoints()` — en bekräftad, säkerhetsrelevant
+motsägelse mellan kod och docstring; en föråldrad kalibreringskommentar i
+`PredictedHouseLoadSensor`; tre tidigare dolda `DEFAULT_*`-konstanter
+exponerade som konfigalternativ) — se CHANGELOG.md/.sv.md för detaljer.
+
+**Det viktigaste fyndet var metodiskt, inte kosmetiskt.** Granskningen
+påpekade att `testdata/backtest.py` aldrig skickade `load_shape_p50/p75`
+eller en riktig `predicted_daily_kwh` till `build_plan()` — trots att
+`coordinator.py` alltid gjort det i skarp drift (rad 1191/1237/1247-1248).
+Varje besparingssiffra för steg 0-3 i den här filen och i CHANGELOG,
+inklusive hela januari–april-jämförelsen i v0.9.16/17 (steg 2: 5,5 %,
+steg 3: 3,9 %), har alltså räknats mot en platt/reaktiv lastfallback, inte
+produktionens riktiga modell.
+
+Kopplade in en trogen rekonstruktion i `testdata/backtest.py` (samma
+formel/konstanter som `coordinator.py`, kausal — bara föregående, färdiga
+dygn, aldrig framtida data). Verifierade dessutom mot den skarpa
+config-entryn att inga overrides finns för `heat_balance_temp`/
+`heat_factor_kwh_dd`/`base_dhw_kwh` — DEFAULT-värdena i `const.py` är
+alltså exakt vad som körs skarpt, så rekonstruktionen är trogen.
+
+**Resultat, samma dataset (`testdata/history_jan_apr2026`):**
+- Steg 2 (`a57cea2`): **5,5 % → 0,1 %** — batteriet slutar på 95,6 % SOC,
+  bara 9,92 fullcykler över 120 dygn (mot verkliga ~26 cykler/månad,
+  se nedan om varför den jämförelsen ändå inte går att lita på).
+- Steg 3 (nuvarande main, v0.9.17): **3,9 % → 3,7 %** — mycket mindre
+  känsligt för fixen.
+
+Steg 2:s kollaps stämmer kvalitativt med det redan dokumenterade
+"batteriet för litet för en hel vinternatt"-fyndet (en korrekt
+lastprognos gör att golvet reserverar nästan hela batteriet flera
+vinternätter) — inte uppenbart en bugg. **Men overifierad**: ett försök
+att stämma av mot verklig batterihistorik (november 2025's/januari 2026's
+SOC-mönster) visade en helt annan bild (26,4 cykler/månad, SOC spritt
+16-100 %) — tills det framkom att integrationen inte fanns förrän slutet
+av juni 2026. Den verkliga januaridatan speglar alltså en helt annan,
+tidigare styrning, inte något som går att jämföra mot Steg 2/3. Ingen
+verklig data finns för att bekräfta ELLER motbevisa det nya fyndet.
+
+**Slutsats:** rekommendationen att tagga `a57cea2` som den enda
+verifierat säkra, installerbara versionen kvarstår oförändrad — det är
+fortfarande den enda versionen som faktiskt körts skarpt. Men "Steg 2 ger
+5,5 %, Steg 3 ger 3,9 %"-jämförelsen från v0.9.16/17 ska INTE längre
+citeras som tillförlitlig; den byggde på en backtest som aldrig testade
+produktionens riktiga lastmodell.
+
 ---
 
 **Steg 4 pausat (2026-09-09).** Kartläggning inför steg 4 visade att

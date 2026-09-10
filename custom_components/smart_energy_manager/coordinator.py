@@ -1492,13 +1492,13 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 self._last_write_times[entity_id] = now
 
         if charge_w > 0:
-            await _write(charge_entity, charge_w, blocking=False)
             if discharge_w <= 0:
                 await _write(discharge_entity, 0, blocking=True, skip_heartbeat=True)
+            await _write(charge_entity, charge_w, blocking=False)
         elif discharge_w > 0:
-            await _write(discharge_entity, discharge_w, blocking=False)
             if charge_w <= 0:
                 await _write(charge_entity, 0, blocking=True, skip_heartbeat=True)
+            await _write(discharge_entity, discharge_w, blocking=False)
         else:
             await _write(charge_entity, 0, blocking=True)
             await _write(discharge_entity, 0, blocking=True)

@@ -51,6 +51,9 @@ from .const import (
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
     CONF_OUTDOOR_TEMP_ENTITY, CONF_DAMPED_OUTDOOR_TEMP_ENTITY,
     CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH,
+    CONF_HEAT_BALANCE_TEMP, DEFAULT_HEAT_BALANCE_TEMP,
+    CONF_HEAT_FACTOR_KWH_DD, DEFAULT_HEAT_FACTOR_KWH_DD,
+    CONF_BASE_DHW_KWH, DEFAULT_BASE_DHW_KWH,
     CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH,
     CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH,
     DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
@@ -128,6 +131,20 @@ def _grid_schema(d: dict) -> vol.Schema:
         vol.Optional(CONF_DAMPED_OUTDOOR_TEMP_ENTITY, default=_d(d, CONF_DAMPED_OUTDOOR_TEMP_ENTITY, "")): _opt_entity_selector(),
         vol.Optional(CONF_DISINFECTING_EXTRA_KWH, default=_d(d, CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH)): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX)
+        ),
+        # Gradtimmodellen (predicted_daily_kwh = base_dhw + k*max(0, t_bal-temp))
+        # var tidigare bara hårdkodade DEFAULT_*-konstanter i const.py, aldrig
+        # exponerade här – gick alltså inte att se eller justera utan att ändra
+        # kod. Kalibrerade mot helårsdata, se docs/forbrukningsanalys.md avsnitt 7
+        # (extern granskning 2026-09-10).
+        vol.Optional(CONF_HEAT_BALANCE_TEMP, default=_d(d, CONF_HEAT_BALANCE_TEMP, DEFAULT_HEAT_BALANCE_TEMP)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=-10, max=25, step=0.5, mode=selector.NumberSelectorMode.BOX)
+        ),
+        vol.Optional(CONF_HEAT_FACTOR_KWH_DD, default=_d(d, CONF_HEAT_FACTOR_KWH_DD, DEFAULT_HEAT_FACTOR_KWH_DD)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=10, step=0.01, mode=selector.NumberSelectorMode.BOX)
+        ),
+        vol.Optional(CONF_BASE_DHW_KWH, default=_d(d, CONF_BASE_DHW_KWH, DEFAULT_BASE_DHW_KWH)): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=20, step=0.1, mode=selector.NumberSelectorMode.BOX)
         ),
     })
 

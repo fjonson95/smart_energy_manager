@@ -26,6 +26,9 @@
           "outdoor_temp_entity": "Outdoor temperature (sensor, optional – enables consumption forecast)",
           "damped_outdoor_temp_entity": "Damped outdoor temperature (sensor, optional – better forecast input than instantaneous temp if available)",
           "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)",
+          "heat_balance_temp": "Heating balance temperature (°C, default 12.0)",
+          "heat_factor_kwh_dd": "Heat factor (kWh per degree-day, default 2.39)",
+          "base_dhw_kwh": "Fixed hot-water base load (kWh/day, default 1.0)",
           "nordpool_type": "Nordpool integration type",
           "nordpool_area": "Nordpool price area (e.g. SE3) – only for official integration"
         }
@@ -171,6 +174,9 @@
           "outdoor_temp_entity": "Outdoor temperature (sensor, optional – enables consumption forecast)",
           "damped_outdoor_temp_entity": "Damped outdoor temperature (sensor, optional – better forecast input than instantaneous temp if available)",
           "disinfecting_extra_kwh": "Extra kWh during disinfection/legionella (default 5.0)",
+          "heat_balance_temp": "Heating balance temperature (°C, default 12.0)",
+          "heat_factor_kwh_dd": "Heat factor (kWh per degree-day, default 2.39)",
+          "base_dhw_kwh": "Fixed hot-water base load (kWh/day, default 1.0)",
           "nordpool_type": "Nordpool integration type",
           "nordpool_area": "Nordpool price area (e.g. SE3) – only for official integration"
         }
