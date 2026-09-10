@@ -65,8 +65,14 @@ en snötäckt-panel-simulering (`_simulate_drought_days`/`_drought_markup`)
 — två versioner utredda och kalibrerade, se "Torkrisk-påslag från SMHI:s
 väderprognos" under "Steg 3 implementerat". Slutresultat: säkert
 (ingen regression) men obevisat (3,9 %, identiskt med utan mekanismen)
-i det här datasetet. `coordinator.py`-inkopplingen inte påbörjad. Steg 8
-inte påbörjat.
+i det här datasetet. `coordinator.py`-inkopplingen inte påbörjad.
+**Regel 3/4-fix efter live-incident (v0.9.19):** main deployades kort
+2026-09-10 och tvångsladdade 8000W från nätet trots 75 kWh sol i
+prognosen — regel 3 och 4 ignorerade redan känd framtida sol/pris i sina
+egna beslut. Båda fixade och verifierade (handbyggda scenarier + riktig
+dygnsdata-uppspelning + backtest, 3,7 %→3,9 %). Se "Live-incident: regel
+3/4 ignorerade redan känd framtida data" under "Steg 2 implementerat".
+Fortfarande inte kopplad till skarp styrning. Steg 8 inte påbörjat.
 
 ---
 
@@ -782,6 +788,48 @@ fortfarande den enda versionen som faktiskt körts skarpt. Men "Steg 2 ger
 5,5 %, Steg 3 ger 3,9 %"-jämförelsen från v0.9.16/17 ska INTE längre
 citeras som tillförlitlig; den byggde på en backtest som aldrig testade
 produktionens riktiga lastmodell.
+
+### Live-incident: regel 3/4 ignorerade redan känd framtida data (v0.9.19, 2026-09-10)
+
+Efter v0.9.18-releasen deployades main kort på användarens begäran och
+körde skarpt. Kl 09:11 tvångsladdade batteriet med 8000 W från nätet
+(köp 1,85 kr/kWh) trots att Solcast samtidigt visade 75,7 kWh sol kvar
+för dagen (p10 50,7 kWh) — batteriet stod bara på 31 % SOC med gott om
+ledigt utrymme. Stoppat akut via `select.smart_energy_manager_operating_mode`
+→ `manual` + nollställd `number...charge`, sedan återgång till `a57cea2`.
+
+**Grundorsak, verifierad i koden (inte gissad):** V beräknas en gång per
+cykel av en merit-order-genomgång som redan ser hela horisonten (inkl.
+eftermiddagens sol via `_cap_by_time`). Men regel 3:s exekvering (rad
+586–605 innan fixen) jämförde bara slotens pris mot det redan fastställda
+V:t och laddade till fullt fysiskt utrymme — ingen referens till
+`_opportunities`/`_cap_by_time`/kommande slots `solar_kw` någonstans i
+regel 3:s egen kod. Kunskapen fanns i samma funktionsanrop, bara i en
+annan del av den.
+
+**Regel 3-fix:** nätladdning begränsas nu till `room_kwh` minus vad
+`_cap_by_time` (redan beräknad, pessimistisk p10-sol) säger fylls gratis
+innan horisontens slut.
+
+**Regel 4 hade samma bugg, på säljsidan** (upptäckt genom att
+systematiskt kontrollera alla fyra regler för samma mönster, på
+användarens begäran): exporterade allt fysiskt tillgängligt ner till
+golvet så fort priset klarade tröskeln, utan att kolla om merit-ordern
+redan reserverat samma kapacitet åt en bättre möjlighet senare samma dag.
+Regel 1 visade sig redan vara skyddad (egen samma-dags-merit-order-
+mekanism sedan Steg 5, `_charge_priority_kwh`); regel 2 är inte exponerad
+(dess mängd är kapad av slotens egna redan existerande underskott, inget
+diskretionärt "hur mycket ska skaffas"-beslut som 3 och 4 båda är).
+Fixad genom att begränsa exporten till vad merit-ordern (`_accepted`)
+faktiskt tilldelade just den sloten.
+
+**Verifiering:**
+- Handbyggda scenarier för båda reglerna (incident-replikering + kontrollfall utan konkurrerande möjlighet) — alla godkända.
+- Hela morgonens (08:00–10:45) och sedan hela dygnets (00:00–23:45) riktiga data (Nordpool, uppmätt sol/last, Solcasts liveprognos) spelades upp genom den fixade koden: ingen `grid_charge` förekommer under hela den riktiga incident-morgonen, mot den faktiska 8000W-tvångsladdningen som verkligen inträffade.
+- Backtest mot `testdata/history_jan_apr2026`: regel 3 ensam gav ingen mätbar skillnad i totalsiffran (datasetet är vinterskevt, felmönstret är vanligare vår/sommar). Regel 4:s fix förbättrade besparingen **3,7 % → 3,9 %** (simulerad export 41,5→11,3 kWh över perioden).
+
+Fortfarande inte kopplad till skarp styrning. `a57cea2` (v0.9.7) är
+fortsatt den enda rekommenderade produktionsversionen.
 
 ---
 

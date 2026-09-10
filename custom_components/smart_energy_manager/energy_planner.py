@@ -408,6 +408,21 @@ class EnergyPlanner:
                 _withdrawn_at[s.start] += _alloc
                 _accepted.append((s, value, _alloc))
 
+        # Regel 4:s motsvarighet till regel 3:s solprognos-fix (docs/
+        # v1_implementation_plan.md): hur mycket av DEN HÄR sloten fick
+        # merit-ordern faktiskt tilldelat som exportmöjlighet (tier2,
+        # värderad till s.sell_sek)? Utan det här slaget tömde regel 4
+        # batteriet ner till golvet varje gång dagens pris klarade
+        # tröskeln, oavsett om merit-ordern redan reserverat samma
+        # kapacitet åt en bättre möjlighet senare i horisonten – exakt
+        # samma sorts blind fläck som regel 3 hade på köpsidan, bara att
+        # merit-ordern här redan VET (via _accepted) hur mycket som är
+        # tryggt att släppa nu, den användes bara inte av exekveringen.
+        _accepted_export_kwh_by_slot: dict[datetime, float] = {}
+        for _s, _value, _kwh in _accepted:
+            if _value == _s.sell_sek:
+                _accepted_export_kwh_by_slot[_s.start] = _accepted_export_kwh_by_slot.get(_s.start, 0.0) + _kwh
+
         if _accepted:
             _cheapest = min(_accepted, key=lambda x: x[1])
             _v_raw = _cheapest[1]
@@ -585,12 +600,24 @@ class EnergyPlanner:
             # och köps samtidigt, alltid en förlustaffär eftersom köp>sälj).
             if action == "idle":
                 room_kwh = max(0.0, batt_max_kwh - batt_kwh)
-                if slot.buy_sek + self.cycle_cost_sek_kwh < V_charge and room_kwh > 0.1:
-                    charge_kwh = min(room_kwh, battery_max_power_kw * slot_h)
+                # Ladda bara den del av room_kwh som solen (pessimistiskt,
+                # p10) INTE redan väntas fylla gratis inom horisonten –
+                # _cap_by_time (rad 336) visar redan hur fullt batteriet
+                # blir av enbart sol vid horisontens slut i värsta fall.
+                # Utan den här spärren nätladdade regel 3 för fullt även
+                # när prognosen samtidigt visade rikligt med sol bara
+                # timmar bort (live-incident 2026-09-10, se
+                # docs/v1_implementation_plan.md) – V-beräkningen VET om
+                # framtida sol (via _cap_by_time/_opportunities), men
+                # regel 3 läste aldrig den kunskapen innan den här fixen.
+                _solar_fills_kwh = max(0.0, _cap_by_time.get(_slot_starts_sorted[-1], batt_kwh) - batt_kwh)
+                _grid_needed_kwh = max(0.0, room_kwh - _solar_fills_kwh)
+                if slot.buy_sek + self.cycle_cost_sek_kwh < V_charge and _grid_needed_kwh > 0.1:
+                    charge_kwh = min(_grid_needed_kwh, battery_max_power_kw * slot_h)
                     batt_kwh = min(batt_max_kwh, batt_kwh + charge_kwh)
                     power_w = min(charge_kwh / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
                     action = "grid_charge"
-                    reason = f"nätladda {slot.buy_sek:.2f}+cykel<V·η {V_charge:.2f}"
+                    reason = f"nätladda {slot.buy_sek:.2f}+cykel<V·η {V_charge:.2f} (sol fyller {_solar_fills_kwh:.1f}/{room_kwh:.1f}kWh)"
                 # Regel 4:s tröskel är max(V, battery_avg_cost) + cykel, inte
                 # bara V. V beräknas om varje planeringscykel mot en 48h-
                 # horisont som vandrar framåt i tiden – en affär som var
@@ -606,13 +633,21 @@ class EnergyPlanner:
                 # tillgängliga bromsen mot just den glidande-horisont-effekten.
                 elif deficit_kwh <= 0.01 and slot.sell_sek > max(V, battery_avg_cost_sek_kwh) + self.cycle_cost_sek_kwh:
                     avail = max(0.0, batt_kwh - _reserved_kwh)
-                    if avail > 0.01:
-                        dis_kwh = min(avail, battery_max_power_kw * slot_h)
+                    # Exportera bara det merit-ordern faktiskt tilldelade
+                    # DEN HÄR sloten som exportmöjlighet (se
+                    # _accepted_export_kwh_by_slot ovan) – inte allt
+                    # fysiskt tillgängligt. Merit-ordern har redan sett
+                    # hela horisonten och kan ha reserverat samma kapacitet
+                    # åt en bättre säljmöjlighet senare (t.ex. kvällstoppen)
+                    # även om dagens pris också klarar tröskeln.
+                    _accepted_kwh = _accepted_export_kwh_by_slot.get(slot.start, 0.0)
+                    dis_kwh = min(avail, battery_max_power_kw * slot_h, _accepted_kwh)
+                    if dis_kwh > 0.01:
                         batt_kwh -= dis_kwh
                         power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
                         action = "export"
                         expected_revenue += dis_kwh * slot.sell_sek
-                        reason = f"exportera {slot.sell_sek:.2f}>max(V {V:.2f}, snittkostnad {battery_avg_cost_sek_kwh:.2f})+cykel"
+                        reason = f"exportera {slot.sell_sek:.2f}>max(V {V:.2f}, snittkostnad {battery_avg_cost_sek_kwh:.2f})+cykel (merit-order {_accepted_kwh:.1f}/{avail:.1f}kWh)"
 
             planned.append(PlannedSlot(
                 start=slot.start.astimezone(),

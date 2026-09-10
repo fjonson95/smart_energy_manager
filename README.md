@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.18-blue)
+![Version](https://img.shields.io/badge/version-0.9.19-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.18
+## What's New in 0.9.19
 
-> **⚠️ Do not deploy this version.** Fixes a real live-safety bug (battery setpoint write order) but also surfaces a major backtest-methodology gap: every step 0-3 savings number reported to date was computed without the production load model wired in. With it fixed, step 2's backtest result collapses to 0.1% and step 3 becomes comparatively better (3.7%) — unverified against real hardware. v0.9.7 (commit `a57cea2`) remains the last version actually run in production; this release does not change that recommendation.
+> **⚠️ Do not deploy this version.** Fixes two real bugs found via a live incident (rules 3 and 4 ignoring already-known future solar/prices when deciding how much to grid-charge/export) — but step 3 as a whole is still unverified against real hardware. v0.9.7 (commit `a57cea2`) remains the only version actually run in production.
 
-Addressed findings from an external code review of the v1.0 plan against the actual code: a confirmed contradiction between `coordinator._write_battery_setpoints()`'s code and its own documented intent (fixed — real safety relevance), a stale calibration comment, and new config-exposed heating-model constants. The most consequential finding, though, came from fixing the review's own methodology question — the backtest never actually exercised the production load-shape/degree-day model. See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
+A live incident on 2026-09-10 (main briefly deployed, force-charged from the grid at full power despite 75 kWh of forecast solar hours away) traced to a real architectural gap: rules 3 and 4 decide grid-charge/export amounts by comparing only the current slot's price against a pre-computed threshold, never checking the already-available future solar/price data in the same planning cycle. Both fixed and verified by replaying the actual incident's real prices and Solcast forecast through the code (no grid-charge anywhere in the real morning after the fix) plus a full backtest (savings improved 3.7% → 3.9%). See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
 
 See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 

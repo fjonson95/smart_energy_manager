@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.18-blue)
+![Version](https://img.shields.io/badge/version-0.9.19-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.18
+## Nyheter i 0.9.19
 
-> **⚠️ Driftsätt inte den här versionen.** Rättar en riktig säkerhetsbugg i skarp drift (batteriets börvärdesordning), men avslöjar också en stor lucka i backtest-metodiken: varje besparingssiffra för steg 0-3 som rapporterats hittills har räknats utan produktionens lastmodell inkopplad. Med den rättad kollapsar steg 2:s backtest-resultat till 0,1 % och steg 3 blir jämförelsevis bättre (3,7 %) – overifierat mot riktig hårdvara. v0.9.7 (commit `a57cea2`) är fortfarande den senaste versionen som faktiskt körts i drift; den här releasen ändrar inte den rekommendationen.
+> **⚠️ Driftsätt inte den här versionen.** Rättar två riktiga buggar hittade via en skarp incident (regel 3 och 4 ignorerade redan känd framtida sol/pris när de bestämde hur mycket som ska nätladdas/exporteras) – men Steg 3 som helhet är fortfarande overifierat mot riktig hårdvara. v0.9.7 (commit `a57cea2`) är fortfarande den enda versionen som faktiskt körts i drift.
 
-Åtgärdade fynd från en extern kodgranskning av v1.0-planen mot den faktiska koden: en bekräftad motsägelse mellan `coordinator._write_battery_setpoints()`s kod och dess egen dokumenterade avsikt (rättad – riktig säkerhetsrelevans), en föråldrad kalibreringskommentar, och nya konfig-exponerade konstanter för värmemodellen. Det tyngsta fyndet kom dock av att åtgärda granskningens egen metodikfråga – backtesten körde aldrig produktionens lastprofils-/gradtimmodell på riktigt. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
+En skarp incident 2026-09-10 (main deployad kort, tvångsladdade från nätet för fullt trots 75 kWh sol i prognosen bara timmar bort) spårades till en riktig arkitektonisk lucka: regel 3 och 4 bestämmer nätladdnings-/exportmängd genom att bara jämföra det aktuella slotens pris mot en förberäknad tröskel, utan att någonsin kolla den redan tillgängliga framtida sol-/prisdatan i samma planeringscykel. Båda rättade och verifierade genom att spela upp incidentens riktiga priser och Solcast-prognos genom koden (ingen nätladdning alls under den riktiga morgonen efter fixen) plus en full backtest (besparingen förbättrades 3,7 % → 3,9 %). Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
 
 Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
