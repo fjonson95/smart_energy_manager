@@ -33,7 +33,7 @@ from .const import (
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
     CONF_NORDPOOL_ENTITY, CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS, NORDPOOL_TYPE_OFFICIAL,
     CONF_NORDPOOL_AREA, DEFAULT_NORDPOOL_AREA,
-    CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW, CONF_ACTUAL_SOLAR_DAILY_ENTITY,
+    CONF_SOLCAST_TODAY, CONF_SOLCAST_TODAY_DETAILED, CONF_SOLCAST_TOMORROW, CONF_ACTUAL_SOLAR_DAILY_ENTITY,
     CONF_GRID_FEES, CONF_ENERGY_TAX, CONF_VAT_RATE, CONF_SELL_EXTRA_REVENUE,
     CONF_MAX_CURRENT_PER_PHASE, CONF_GRID_VOLTAGE, CONF_MAX_EXPORT_W, DEFAULT_MAX_EXPORT_W,
     CONF_BATTERY_MIN_SOC, CONF_BATTERY_MAX_SOC,
@@ -879,7 +879,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 try:
                     solcast_today_attrs = None
                     solcast_tomorrow_attrs = None
-                    sc_today = c.get(CONF_SOLCAST_TODAY)
+                    # solcast_today_entity pekar normalt på en "remaining"-sensor (P3-2
+                    # produktionskvot + låg-sol-EV-marginal vill ha det värdet) som saknar
+                    # detailedForecast - per-slot-prognosen (is_dark, kvällsfyllning,
+                    # reserve_at) behöver därför en egen källa. Faller tillbaka på
+                    # solcast_today_entity om den separata inte är satt.
+                    sc_today = c.get(CONF_SOLCAST_TODAY_DETAILED) or c.get(CONF_SOLCAST_TODAY)
                     sc_tomorrow = c.get(CONF_SOLCAST_TOMORROW)
                     if sc_today:
                         st = self.hass.states.get(sc_today)
@@ -923,7 +928,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             _ref_load_w = (yesterday_kwh / 24.0 * 1000.0) if yesterday_kwh else house_load_w
             solar_takeover_dt = None
             _now_for_takeover = datetime.now(timezone.utc)
-            for _sc_key in (CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW):
+            for _sc_key in (CONF_SOLCAST_TODAY_DETAILED, CONF_SOLCAST_TODAY, CONF_SOLCAST_TOMORROW):
                 _sc_entity = c.get(_sc_key)
                 if not _sc_entity:
                     continue

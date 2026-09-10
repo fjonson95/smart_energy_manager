@@ -1,18 +1,18 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.19-blue)
+![Version](https://img.shields.io/badge/version-0.9.20-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.19
+## What's New in 0.9.20
 
-> **⚠️ Do not deploy this version.** Fixes two real bugs found via a live incident (rules 3 and 4 ignoring already-known future solar/prices when deciding how much to grid-charge/export) — but step 3 as a whole is still unverified against real hardware. v0.9.7 (commit `a57cea2`) remains the only version actually run in production.
+> **⚠️ Requires a new manual setting after deploying.** Set the new **Solcast detailed forecast today (30 min)** option to `sensor.solcast_pv_forecast_forecast_today` (or your instance's equivalent) — otherwise the system keeps believing the sun is done for the day when it isn't.
 
-A live incident on 2026-09-10 (main briefly deployed, force-charged from the grid at full power despite 75 kWh of forecast solar hours away) traced to a real architectural gap: rules 3 and 4 decide grid-charge/export amounts by comparing only the current slot's price against a pre-computed threshold, never checking the already-available future solar/price data in the same planning cycle. Both fixed and verified by replaying the actual incident's real prices and Solcast forecast through the code (no grid-charge anywhere in the real morning after the fix) plus a full backtest (savings improved 3.7% → 3.9%). See [CHANGELOG.md](CHANGELOG.md) and `docs/v1_implementation_plan.md` for the full writeup.
+A fresh live incident report on 2026-09-10 (`a57cea2`/v0.9.7 in production, battery grid-charged to ~98% in the early afternoon on a sunny day with 37+ kWh of solar still forecast) traced to `solcast_today_entity` pointing at Solcast's "remaining" sensor, which structurally lacks the per-slot `detailedForecast` attribute — every remaining slot today was silently classified as "dark" regardless of actual weather. That sensor was deliberately chosen for the production-ratio and low-solar EV margin logic (which wants exactly that "remaining" semantics), so the fix isn't a plain revert but a split: a new optional `solcast_today_detailed_entity` field is now used only for the per-slot forecast, falling back to the old field if left unset. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
 ## System Overview
 

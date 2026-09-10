@@ -12,6 +12,12 @@ CONF_NORDPOOL_AREA = "nordpool_area"
 DEFAULT_NORDPOOL_AREA = "SE3"
 CONF_SOLCAST_TODAY = "solcast_today_entity"
 CONF_SOLCAST_TOMORROW = "solcast_tomorrow_entity"
+# Separat entitet för per-slot-prognosen (detailedForecast/30 min). solcast_today_entity
+# pekar normalt på en "remaining"-sensor (P3-2 produktionskvot + låg-sol-EV-marginal vill
+# ha just det värdet, se coordinator._update_pv_production_ratio) - men Solcasts "remaining"-
+# sensorer saknar strukturellt detailedForecast-attributet, så per-slot-logiken (is_dark,
+# kvällsfyllning, reserve_at) behöver en egen källa, t.ex. Solcasts "Forecast Today"-sensor.
+CONF_SOLCAST_TODAY_DETAILED = "solcast_today_detailed_entity"
 CONF_ACTUAL_SOLAR_DAILY_ENTITY = "actual_solar_daily_entity"
 
 CONF_GRID_POWER_L1 = "grid_power_l1_entity"

@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.19-blue)
+![Version](https://img.shields.io/badge/version-0.9.20-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.19
+## Nyheter i 0.9.20
 
-> **⚠️ Driftsätt inte den här versionen.** Rättar två riktiga buggar hittade via en skarp incident (regel 3 och 4 ignorerade redan känd framtida sol/pris när de bestämde hur mycket som ska nätladdas/exporteras) – men Steg 3 som helhet är fortfarande overifierat mot riktig hårdvara. v0.9.7 (commit `a57cea2`) är fortfarande den enda versionen som faktiskt körts i drift.
+> **⚠️ Kräver en ny manuell inställning efter driftsättning.** Sätt det nya alternativet **Solcast detaljerad prognos idag (30 min)** till `sensor.solcast_pv_forecast_forecast_today` (eller din instans motsvarighet) – annars fortsätter systemet att tro att solen är slut för dagen när den inte är det.
 
-En skarp incident 2026-09-10 (main deployad kort, tvångsladdade från nätet för fullt trots 75 kWh sol i prognosen bara timmar bort) spårades till en riktig arkitektonisk lucka: regel 3 och 4 bestämmer nätladdnings-/exportmängd genom att bara jämföra det aktuella slotens pris mot en förberäknad tröskel, utan att någonsin kolla den redan tillgängliga framtida sol-/prisdatan i samma planeringscykel. Båda rättade och verifierade genom att spela upp incidentens riktiga priser och Solcast-prognos genom koden (ingen nätladdning alls under den riktiga morgonen efter fixen) plus en full backtest (besparingen förbättrades 3,7 % → 3,9 %). Se [CHANGELOG.sv.md](CHANGELOG.sv.md) och `docs/v1_implementation_plan.md` för hela genomgången.
+En ny skarp incidentrapport 2026-09-10 (`a57cea2`/v0.9.7 i produktion, batteriet nätladdat till ~98 % tidig eftermiddag en solig dag med 37+ kWh sol kvar i prognosen) spårades till att `solcast_today_entity` pekade på Solcasts "remaining"-sensor, som strukturellt saknar per-slot-attributet `detailedForecast` – varje kvarvarande slot idag klassades därför tyst som "mörk" oavsett väder. Den sensorn var dock medvetet vald för produktionskvoten och låg-sol-EV-marginalen (som vill ha just "remaining"-semantik), så lösningen är inte att bara återställa fältet utan att dela upp det: ett nytt valfritt fält `solcast_today_detailed_entity` används nu enbart för per-slot-prognosen, med fallback till det gamla fältet om det lämnas tomt. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 
