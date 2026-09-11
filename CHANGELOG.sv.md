@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.26
+
+Fixar att `_apply_phase_limits()` approximerade fasström från effekt/spänning istället för att använda de riktiga strömsensorerna som redan var konfigurerade och inkopplade men aldrig lästes.
+
+- **Grundorsak (verifierad mot riktig elmätardata, inte gissad)**: `CONF_GRID_CURRENT_L1/L2/L3` (`grid_current_l1_entity` m.fl.) lästes in i `EnergyState.grid_current_l1/l2/l3` i `coordinator.py` men användes aldrig någonstans – `_apply_phase_limits()` räknade fram strömmen som `effekt_w / spänning`, vilket tyst antar en perfekt effektfaktor. En CSV-export från användaren av riktiga `sensor.elmatare_active_power_lX`/`sensor.elmatare_current_lX`-avläsningar visade att approximationen konvergerar mot korrekt vid hög last (13-16A-intervallet, nästan noll fel) men avviker rejält vid låg/måttlig last – upp till +8,7A på L1 ensam – nästan säkert reaktiv/tomgångsström från motorer och standby-elektronik som aktiv effekt inte fångar. Hittat under utredning av ett separat flaggat fynd (ovanligt många fasgränskorrigeringar i januari 2026-backtesten, ~4300-5970/månad, varav 63-97 % visade sig vara permanent okorrigerbara no-ops mot en last – värmepumpens egen fas – som `_apply_phase_limits()` strukturellt inte kan påverka).
+- **Fix**: fasbaslasten använder nu den verkliga uppmätta strömmen (`ström_a × spänning`) när en strömsensor är konfigurerad och rapporterar, med fallback till den gamla effekt-baserade approximationen bara när den inte är det (`ström_a <= 0`). Riktningen (import/export) tas fortfarande från den signerade effektavläsningen, eftersom strömsensorn bara rapporterar magnitud.
+- **Verifierat**: fem handbyggda scenarier – ingen strömsensor konfigurerad (faller tillbaka på effekt, ingen regression), strömsensor som matchar effekten vid hög last, strömsensor som visar högre ström än effekten antyder (det reaktiva ström-fallet fixen är till för), exportriktning med en magnitud-bara strömsensor, och ett riktigt överströmsfall (18A på en okontrollerbar fas) som fortfarande upptäcks och loggas korrekt utan krasch.
+- Samma fix applicerad på v0.9.12-hotfixgrenen (byggd på `a57cea2`, som har identisk funktion) som v0.9.13.
+
 ## Nyheter i 0.9.25
 
 Steg 7, punkt 2 & 5 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — två fristående, testade funktioner tillagda i `heat_planner.py`. **Fortfarande inte kopplad till skarp styrning**, samma avgränsning som punkt 4/6.

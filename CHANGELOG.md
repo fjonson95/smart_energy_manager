@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.26
+
+Fixes `_apply_phase_limits()` approximating per-phase current from power/voltage instead of using the real current sensors that were already configured and wired but never read.
+
+- **Root cause (verified against real elmätare data, not guessed)**: `CONF_GRID_CURRENT_L1/L2/L3` (`grid_current_l1_entity` etc.) were read into `EnergyState.grid_current_l1/l2/l3` in `coordinator.py` but never consumed anywhere — `_apply_phase_limits()` derived current as `power_w / voltage`, silently assuming a unity power factor. A user-supplied CSV export of real `sensor.elmatare_active_power_lX`/`sensor.elmatare_current_lX` readings showed the approximation converges to accurate at high load (13-16A range, near-zero error) but diverges significantly at low/moderate load — up to +8.7A on L1 alone — almost certainly reactive/idle current from motors and standby electronics that active power doesn't capture. Found while investigating a separately-flagged finding (unusually high phase-limit-correction counts in the January 2026 backtest, ~4300-5970/month, 63-97% of which turned out to be permanently uncorrectable no-ops against a load — the heat pump compressor's own phase — that `_apply_phase_limits()` structurally cannot influence).
+- **Fix**: the phase-load baseline now uses the real measured current (`current_a × voltage`) when a current sensor is configured and reporting, falling back to the old power-based approximation only when it isn't (`current_a <= 0`). Direction (import/export) still comes from the signed power reading, since the current sensor only reports magnitude.
+- **Verified**: five hand-built scenarios — no current sensor configured (falls back to power, no regression), current sensor matching power at high load, current sensor showing higher current than power implies (the reactive-current case the fix targets), export direction with a magnitude-only current sensor, and a real overcurrent case (18A on an uncontrollable phase) still detected and logged correctly without crashing.
+- Same fix applied to the v0.9.12 hotfix branch (built on `a57cea2`, which has the identical function) as v0.9.13.
+
 ## What's New in 0.9.25
 
 Step 7, points 2 & 5 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — two standalone, tested functions added to `heat_planner.py`. **Still not wired to live control**, same boundary as points 4/6.

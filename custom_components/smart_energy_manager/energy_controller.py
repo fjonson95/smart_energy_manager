@@ -1084,11 +1084,26 @@ class EnergyController:
         # Elmätarens avläsningar innehåller redan alla nuvarande laster:
         # sol, batteri, EV, värmepump, elpatron.
         # Vi applicerar bara delta för det som beslutet ändrar.
-        loads: dict[str, float] = {
-            "L1": state.grid_power_l1,
-            "L2": state.grid_power_l2,
-            "L3": state.grid_power_l3,
-        }
+        #
+        # Baslasten byggs från VERKLIG uppmätt ström (grid_current_lX) när den
+        # finns, inte bara effekt/spänning - en riktig CSV-jämförelse
+        # (2026-09-11) visade att effekt-approximationen missar reaktiv/
+        # tomgångsström (upp till +8,7A avvikelse vid låg effekt, konvergerar
+        # mot korrekt vid hög last). Strömsensorn rapporterar bara magnitud,
+        # så importriktningen (tecken) tas fortfarande från effekten.
+        # current_a <= 0 (ej konfigurerad/inget state) faller tillbaka på
+        # gamla beteendet: effekt rakt av.
+        loads: dict[str, float] = {}
+        for ph, power_w, current_a in (
+            ("L1", state.grid_power_l1, state.grid_current_l1),
+            ("L2", state.grid_power_l2, state.grid_current_l2),
+            ("L3", state.grid_power_l3, state.grid_current_l3),
+        ):
+            if current_a > 0.0:
+                sign = 1.0 if power_w >= 0.0 else -1.0
+                loads[ph] = sign * current_a * self.voltage
+            else:
+                loads[ph] = power_w
 
         # Batteri: ta bort nuvarande effekt, lägg till beslutets effekt (per fas)
         current_batt_per_phase = state.battery_power_w / 3.0  # positiv=laddning, negativ=urladdning
