@@ -1,18 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.20-blue)
+![Version](https://img.shields.io/badge/version-0.9.23-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.20
+## What's New in 0.9.23
 
-> **⚠️ Requires a new manual setting after deploying.** Set the new **Solcast detailed forecast today (30 min)** option to `sensor.solcast_pv_forecast_forecast_today` (or your instance's equivalent) — otherwise the system keeps believing the sun is done for the day when it isn't.
+New service `smart_energy_manager.export_history` exports the integration's internal history (production ratio, daily consumption, hourly load shape, solar takeover observations) to CSV files under `config/www/smart_energy_manager_export/` by default. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
 
-A fresh live incident report on 2026-09-10 (`a57cea2`/v0.9.7 in production, battery grid-charged to ~98% in the early afternoon on a sunny day with 37+ kWh of solar still forecast) traced to `solcast_today_entity` pointing at Solcast's "remaining" sensor, which structurally lacks the per-slot `detailedForecast` attribute — every remaining slot today was silently classified as "dark" regardless of actual weather. That sensor was deliberately chosen for the production-ratio and low-solar EV margin logic (which wants exactly that "remaining" semantics), so the fix isn't a plain revert but a split: a new optional `solcast_today_detailed_entity` field is now used only for the per-slot forecast, falling back to the old field if left unset. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
-
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.22's dead-config cleanup, v0.9.21's damped-temp crash fix, v0.9.20's Solcast entity split, v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
 ## System Overview
 

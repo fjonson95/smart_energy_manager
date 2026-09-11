@@ -33,6 +33,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.services.async_register(DOMAIN, "reset_battery_cost", _handle_reset_battery_cost)
 
+    async def _handle_export_history(call: ServiceCall) -> None:
+        path = call.data.get("path")
+        for coord in hass.data.get(DOMAIN, {}).values():
+            if hasattr(coord, "async_export_history"):
+                await coord.async_export_history(path)
+
+    hass.services.async_register(DOMAIN, "export_history", _handle_export_history)
+
     return True
 
 

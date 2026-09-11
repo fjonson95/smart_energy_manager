@@ -2,6 +2,22 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.23
+
+- **New service: `smart_energy_manager.export_history`** — exports the four internal history stores (production ratio, daily consumption, hourly load shape, solar takeover observations) to CSV files. These were already tracked internally (in `.storage/`) but never user-visible. Defaults to `config/www/smart_energy_manager_export/`, downloadable via `/local/smart_energy_manager_export/`; an optional `path` field overrides the target directory.
+
+## What's New in 0.9.22
+
+Removed `solar_power_l1_entity`/`l2`/`l3` (Configure → Solar) — confirmed dead: read into `EnergyState.solar_power_l1/l2/l3` in `coordinator.py` but never consumed anywhere in `energy_controller.py`, `energy_planner.py`, or any sensor. Phase protection (`_apply_phase_limits`) uses `state.grid_power_l1/l2/l3` (the grid meter's net per-phase readings, which already reflect solar's effect) plus computed deltas for battery/EV/immersion heater — it never needed solar's raw per-phase output separately. Removed the config keys, schema fields, `EnergyState` fields, and translations; no behavior change.
+
+## What's New in 0.9.21
+
+Fixes a crash introduced by v0.9.20's `damped_outdoor_temp_entity` field, hit live on 2026-09-10 right after configuring it: `Error updating Smart Energy Manager: cannot access local variable 'outdoor_temp' where it is not associated with a value`.
+
+- **Root cause**: `outdoor_temp` (the raw instantaneous reading, used later for `state.outdoor_temp_c`) was only ever assigned inside the `if temp_for_model is None:` branch — the fallback path used when no damped-temperature entity is configured. As soon as `damped_outdoor_temp_entity` is set and returns a value, `temp_for_model` is non-`None` from the start, that whole branch is skipped, and `outdoor_temp` is never bound — yet it's still referenced later when building `EnergyState`. Pre-existing since the damped-temperature field was added; latent until someone actually configured it.
+- **Fix**: read `outdoor_temp` from `CONF_OUTDOOR_TEMP_ENTITY` unconditionally, before the damped/rolling-average branching, since it's needed regardless of which value feeds the consumption model.
+- Same bug existed in the v0.9.8 hotfix branch (built on `a57cea2`, which already had the damped-temp feature); fixed there too as v0.9.9.
+
 ## What's New in 0.9.20
 
 Fixes a real live bug found via a fresh incident report on 2026-09-10 (running v0.9.7/`a57cea2` in production): the battery grid-charged to ~98% in the early afternoon on a sunny day with 37+ kWh of solar still forecast, because the system believed **zero** solar was left for the rest of the day.

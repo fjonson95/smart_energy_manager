@@ -38,9 +38,6 @@
         "description": "Ange solpanelernas mätare (valfritt)",
         "data": {
           "solar_power_total_entity": "Total soleffekt",
-          "solar_power_l1_entity": "Soleffekt L1",
-          "solar_power_l2_entity": "Soleffekt L2",
-          "solar_power_l3_entity": "Soleffekt L3",
           "solcast_today_entity": "Solcast prognos idag, kvarvarande (kWh) – används för produktionskvot och låg-sol-EV-marginal",
           "solcast_today_detailed_entity": "Solcast detaljerad prognos idag (30 min) – används för per-slot-solkurvan (kvällsfyllning, nätladdning). Lämna tom för att falla tillbaka på fältet ovan.",
           "solcast_tomorrow_entity": "Solcast prognos imorgon (kWh)",
@@ -187,9 +184,6 @@
         "description": "Redigera solpanelernas mätare",
         "data": {
           "solar_power_total_entity": "Total soleffekt",
-          "solar_power_l1_entity": "Soleffekt L1",
-          "solar_power_l2_entity": "Soleffekt L2",
-          "solar_power_l3_entity": "Soleffekt L3",
           "solcast_today_entity": "Solcast prognos idag, kvarvarande (kWh) – används för produktionskvot och låg-sol-EV-marginal",
           "solcast_today_detailed_entity": "Solcast detaljerad prognos idag (30 min) – används för per-slot-solkurvan (kvällsfyllning, nätladdning). Lämna tom för att falla tillbaka på fältet ovan.",
           "solcast_tomorrow_entity": "Solcast prognos imorgon (kWh)",

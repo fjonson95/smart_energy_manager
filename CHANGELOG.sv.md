@@ -2,6 +2,22 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.23
+
+- **Ny tjänst: `smart_energy_manager.export_history`** – exporterar de fyra interna historik-stores (produktionskvot, dagsförbrukning, lastprofil, sol-takeover-observationer) till CSV-filer. Datan har alltid sparats internt (i `.storage/`) men var aldrig synlig för användaren. Skriver som standard till `config/www/smart_energy_manager_export/`, nedladdningsbart via `/local/smart_energy_manager_export/`; ett valfritt `path`-fält kan peka om målkatalogen.
+
+## Nyheter i 0.9.22
+
+Tog bort `solar_power_l1_entity`/`l2`/`l3` (Konfigurera → Sol) – bekräftat död kod: lästes in i `EnergyState.solar_power_l1/l2/l3` i `coordinator.py` men användes aldrig någonstans i `energy_controller.py`, `energy_planner.py` eller någon sensor. Fasskyddet (`_apply_phase_limits`) använder `state.grid_power_l1/l2/l3` (elmätarens nettovärden per fas, som redan speglar solens effekt) plus beräknade deltan för batteri/EV/elpatron – det har aldrig behövt solens råa per-fas-effekt separat. Tog bort config-nycklarna, schemafälten, `EnergyState`-fälten och översättningarna; ingen beteendeändring.
+
+## Nyheter i 0.9.21
+
+Fixar en krasch som v0.9.20:s `damped_outdoor_temp_entity`-fält orsakade, uppdagad skarpt 2026-09-10 direkt efter att fältet konfigurerats: `Error updating Smart Energy Manager: cannot access local variable 'outdoor_temp' where it is not associated with a value`.
+
+- **Grundorsak**: `outdoor_temp` (momentanavläsningen, används senare för `state.outdoor_temp_c`) tilldelades bara inuti grenen `if temp_for_model is None:` – fallback-vägen som används när ingen dämpad temperaturentitet är konfigurerad. Så fort `damped_outdoor_temp_entity` är satt och ger ett värde är `temp_for_model` redan satt från början, hela den grenen hoppas över, och `outdoor_temp` blir aldrig tilldelad – men den läses ändå senare när `EnergyState` byggs. Fanns latent sedan det dämpade temperaturfältet lades till; slog bara till när någon faktiskt konfigurerade det.
+- **Fix**: läs `outdoor_temp` från `CONF_OUTDOOR_TEMP_ENTITY` okonditionerat, innan grenvalet mellan dämpad temp/rullande medel, eftersom den behövs oavsett vilket värde som matar förbrukningsmodellen.
+- Samma bugg fanns i v0.9.8-hotfixgrenen (byggd på `a57cea2`, som redan hade det dämpade temp-fältet); fixad där också som v0.9.9.
+
 ## Nyheter i 0.9.20
 
 Fixar en riktig skarp bugg, hittad via en ny incidentrapport 2026-09-10 (v0.9.7/`a57cea2` kör i produktion): batteriet nätladdades till ~98 % tidig eftermiddag en solig dag med 37+ kWh sol fortfarande prognosticerad, eftersom systemet trodde att **noll** sol var kvar för resten av dagen.

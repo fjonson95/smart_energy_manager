@@ -17,7 +17,6 @@ from .const import (
     CONF_BATTERY_OPERATING_MODE_ENTITY,
     CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
     CONF_SOLAR_INVERTER_TOTAL,
-    CONF_SOLAR_INVERTER_POWER_L1, CONF_SOLAR_INVERTER_POWER_L2, CONF_SOLAR_INVERTER_POWER_L3,
     CONF_SOLAR_CURTAILMENT_ENTITY, CONF_SOLAR_INVERTER_RATED_KW, DEFAULT_SOLAR_INVERTER_RATED_KW,
     CONF_EV_CHARGERS,
     CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
@@ -152,9 +151,6 @@ def _grid_schema(d: dict) -> vol.Schema:
 def _solar_schema(d: dict) -> vol.Schema:
     return vol.Schema({
         vol.Optional(CONF_SOLAR_INVERTER_TOTAL, default=_d(d, CONF_SOLAR_INVERTER_TOTAL, "")): _opt_entity_selector(),
-        vol.Optional(CONF_SOLAR_INVERTER_POWER_L1, default=_d(d, CONF_SOLAR_INVERTER_POWER_L1, "")): _opt_entity_selector(),
-        vol.Optional(CONF_SOLAR_INVERTER_POWER_L2, default=_d(d, CONF_SOLAR_INVERTER_POWER_L2, "")): _opt_entity_selector(),
-        vol.Optional(CONF_SOLAR_INVERTER_POWER_L3, default=_d(d, CONF_SOLAR_INVERTER_POWER_L3, "")): _opt_entity_selector(),
         vol.Optional(CONF_SOLCAST_TODAY, default=_d(d, CONF_SOLCAST_TODAY, "")): _opt_entity_selector(),
         vol.Optional(CONF_SOLCAST_TODAY_DETAILED, default=_d(d, CONF_SOLCAST_TODAY_DETAILED, "")): _opt_entity_selector(),
         vol.Optional(CONF_SOLCAST_TOMORROW, default=_d(d, CONF_SOLCAST_TOMORROW, "")): _opt_entity_selector(),

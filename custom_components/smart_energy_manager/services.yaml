@@ -2,3 +2,19 @@ reset_battery_cost:
   name: Reset Battery Cost
   description: Resets the accumulated battery cost and average price to zero.
   fields: {}
+
+export_history:
+  name: Export History
+  description: >-
+    Exports the integration's internal history (production ratio, daily
+    consumption, hourly load shape, solar takeover observations) to CSV
+    files. Defaults to config/www/smart_energy_manager_export/, downloadable
+    via /local/smart_energy_manager_export/.
+  fields:
+    path:
+      name: Path
+      description: Optional directory to write the CSV files to.
+      required: false
+      example: /config/www/smart_energy_manager_export
+      selector:
+        text:

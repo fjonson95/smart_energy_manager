@@ -149,9 +149,6 @@ class EnergyState:
     """Aktuellt tillstånd för hela energisystemet."""
     # Solar
     solar_power_w: float = 0.0
-    solar_power_l1: float = 0.0
-    solar_power_l2: float = 0.0
-    solar_power_l3: float = 0.0
     solar_forecast_today_kwh: float = 0.0
     solar_forecast_tomorrow_kwh: float = 0.0
 

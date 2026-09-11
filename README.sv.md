@@ -1,16 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.20-blue)
+![Version](https://img.shields.io/badge/version-0.9.23-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.20
+## Nyheter i 0.9.23
 
-> **⚠️ Kräver en ny manuell inställning efter driftsättning.** Sätt det nya alternativet **Solcast detaljerad prognos idag (30 min)** till `sensor.solcast_pv_forecast_forecast_today` (eller din instans motsvarighet) – annars fortsätter systemet att tro att solen är slut för dagen när den inte är det.
+Ny tjänst `smart_energy_manager.export_history` exporterar integrationens interna historik (produktionskvot, dagsförbrukning, lastprofil, sol-takeover-observationer) till CSV-filer under `config/www/smart_energy_manager_export/` som standard. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
 
-En ny skarp incidentrapport 2026-09-10 (`a57cea2`/v0.9.7 i produktion, batteriet nätladdat till ~98 % tidig eftermiddag en solig dag med 37+ kWh sol kvar i prognosen) spårades till att `solcast_today_entity` pekade på Solcasts "remaining"-sensor, som strukturellt saknar per-slot-attributet `detailedForecast` – varje kvarvarande slot idag klassades därför tyst som "mörk" oavsett väder. Den sensorn var dock medvetet vald för produktionskvoten och låg-sol-EV-marginalen (som vill ha just "remaining"-semantik), så lösningen är inte att bara återställa fältet utan att dela upp det: ett nytt valfritt fält `solcast_today_detailed_entity` används nu enbart för per-slot-prognosen, med fallback till det gamla fältet om det lämnas tomt. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
-
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 

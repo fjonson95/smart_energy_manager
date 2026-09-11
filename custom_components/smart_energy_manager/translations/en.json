@@ -38,9 +38,6 @@
         "description": "Configure solar inverter sensors (optional)",
         "data": {
           "solar_power_total_entity": "Total solar power",
-          "solar_power_l1_entity": "Solar power L1",
-          "solar_power_l2_entity": "Solar power L2",
-          "solar_power_l3_entity": "Solar power L3",
           "solcast_today_entity": "Solcast forecast today, remaining (kWh) – used for production ratio and low-solar EV margin",
           "solcast_today_detailed_entity": "Solcast detailed forecast today (30 min) – used for the per-slot solar curve (evening fill, grid charging). Leave blank to fall back to the field above.",
           "solcast_tomorrow_entity": "Solcast forecast tomorrow (kWh)",
@@ -187,9 +184,6 @@
         "description": "Edit solar inverter sensors",
         "data": {
           "solar_power_total_entity": "Total solar power",
-          "solar_power_l1_entity": "Solar power L1",
-          "solar_power_l2_entity": "Solar power L2",
-          "solar_power_l3_entity": "Solar power L3",
           "solcast_today_entity": "Solcast forecast today, remaining (kWh) – used for production ratio and low-solar EV margin",
           "solcast_today_detailed_entity": "Solcast detailed forecast today (30 min) – used for the per-slot solar curve (evening fill, grid charging). Leave blank to fall back to the field above.",
           "solcast_tomorrow_entity": "Solcast forecast tomorrow (kWh)",

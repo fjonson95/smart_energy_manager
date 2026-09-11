@@ -1,7 +1,9 @@
 """Data coordinator for Smart Energy Manager."""
 from __future__ import annotations
 
+import csv
 import logging
+import os
 import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -24,7 +26,6 @@ from .const import (
     CONF_BATTERY_OPERATING_MODE_ENTITY,
     CONF_BATTERY_INVERTER_POWER, CONF_BATTERY_CAPACITY_KWH, CONF_BATTERY_MAX_POWER_KW,
     CONF_SOLAR_INVERTER_TOTAL,
-    CONF_SOLAR_INVERTER_POWER_L1, CONF_SOLAR_INVERTER_POWER_L2, CONF_SOLAR_INVERTER_POWER_L3,
     CONF_SOLAR_CURTAILMENT_ENTITY, CONF_SOLAR_INVERTER_RATED_KW, DEFAULT_SOLAR_INVERTER_RATED_KW,
     CONF_EV_CHARGERS, CONF_EV_CARS,
     CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
@@ -734,6 +735,47 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         if self._battery_cost_reset_cb:
             self._battery_cost_reset_cb()
 
+    async def async_export_history(self, directory: Optional[str] = None) -> str:
+        """Exportera de interna historik-stores (produktionskvot, dagsförbrukning,
+        lastprofil, sol-takeover-observationer) till CSV via service-anrop.
+
+        Default-katalogen ligger under www/ så filerna blir nedladdningsbara via
+        /local/smart_energy_manager_export/ utan extra konfiguration.
+        """
+        target_dir = directory or self.hass.config.path("www", "smart_energy_manager_export")
+
+        def _write() -> None:
+            os.makedirs(target_dir, exist_ok=True)
+
+            with open(os.path.join(target_dir, "pv_ratio.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["date", "actual_kwh", "forecast_kwh"])
+                for row in self._pv_ratio_history:
+                    w.writerow([row.get("date"), row.get("actual_kwh"), row.get("forecast_kwh")])
+
+            with open(os.path.join(target_dir, "daily_consumption.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["date", "total_kwh", "dump_kwh", "net_kwh"])
+                for row in self._daily_consumption_history:
+                    w.writerow([row.get("date"), row.get("total_kwh"), row.get("dump_kwh"), row.get("net_kwh")])
+
+            with open(os.path.join(target_dir, "hourly_shape.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["date"] + [f"hour_{h:02d}" for h in range(24)])
+                for row in self._hourly_shape_history:
+                    hours = row.get("hours") or [None] * 24
+                    w.writerow([row.get("date"), *hours])
+
+            with open(os.path.join(target_dir, "solar_takeover.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["observed_minutes_of_day"])
+                for v in self._observed_takeover_minutes:
+                    w.writerow([v])
+
+        await self.hass.async_add_executor_job(_write)
+        _LOGGER.info("Historik exporterad till %s", target_dir)
+        return target_dir
+
     def set_active_car(self, charger_name: str, car_name: str) -> None:
         """Anropas av select-entiteten när användaren väljer bil."""
         self._active_cars[charger_name] = car_name
@@ -1016,6 +1058,16 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             # ett eget dygnsmedel av momentana avläsningar (se
             # docs/forbrukningsanalys.md) – används direkt om konfigurerad,
             # annars faller vi tillbaka på det gamla rullande-medel-beteendet.
+            # outdoor_temp (momentanvärdet) behövs alltid för state.outdoor_temp_c
+            # nedan - oavsett om den dämpade sensorn används för modellen eller ej.
+            # Läses därför okonditionerat, inte bara inuti fallback-grenen.
+            outdoor_temp: Optional[float] = None
+            temp_entity = c.get(CONF_OUTDOOR_TEMP_ENTITY)
+            if temp_entity:
+                val = self._get_state_float(temp_entity)
+                if val != 0.0 or self.hass.states.get(temp_entity) is not None:
+                    outdoor_temp = val
+
             damped_temp_entity = c.get(CONF_DAMPED_OUTDOOR_TEMP_ENTITY)
             temp_for_model: Optional[float] = None
             if damped_temp_entity:
@@ -1024,13 +1076,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     temp_for_model = val
 
             if temp_for_model is None:
-                outdoor_temp: Optional[float] = None
-                temp_entity = c.get(CONF_OUTDOOR_TEMP_ENTITY)
-                if temp_entity:
-                    val = self._get_state_float(temp_entity)
-                    if val != 0.0 or self.hass.states.get(temp_entity) is not None:
-                        outdoor_temp = val
-
                 # Bygg upp rullande dygnsmedeltemperatur.
                 # Modellen är kalibrerad mot dygnsmedeltemp, inte ögonblicksvärde.
                 if outdoor_temp is not None:
@@ -1135,9 +1180,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
             state = EnergyState(
                 solar_power_w=solar_w,
-                solar_power_l1=self._get_state_float(c.get(CONF_SOLAR_INVERTER_POWER_L1)),
-                solar_power_l2=self._get_state_float(c.get(CONF_SOLAR_INVERTER_POWER_L2)),
-                solar_power_l3=self._get_state_float(c.get(CONF_SOLAR_INVERTER_POWER_L3)),
                 solar_forecast_today_kwh=self._get_state_float(c.get(CONF_SOLCAST_TODAY)),
                 solar_forecast_tomorrow_kwh=self._get_state_float(c.get(CONF_SOLCAST_TOMORROW)),
                 # 0 om ingen strypningsentitet konfigurerad - stänger av P4-2 steg 5 helt
