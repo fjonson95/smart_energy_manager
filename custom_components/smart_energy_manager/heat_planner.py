@@ -4,15 +4,15 @@ Egen, ny fil skild från energy_planner.py (batteriet) – annan fysisk
 domän (uppvärmning, inte batteri) som väntas växa med egen logik i takt
 med att steg 7:s punkter implementeras.
 
-Status (docs/v1_implementation_plan.md, "STEG 7"): punkt 4 (lönsamhetsregel
-med COP) och 6 (dump/desinficering som schemalagda laster) implementerade
-som fristående, testade funktioner – INGEN koppling till skarp styrning
-(coordinator.py/energy_controller.py/legionella.py orörda). Punkt 1 och 3
-(rumsvis termisk regression/reglering) parkerade tills en vintersäsongs
-mätdata finns – rumstemperaturgivarna har bara haft data sedan
-~2026-07-25, inte sedan oktober 2025 som ursprungligen antaget. Punkt 2
-(håll elpatronerna utanför) och 5 (soldrift via pannans egen väg) inte
-påbörjade.
+Status (docs/v1_implementation_plan.md, "STEG 7"): punkt 2 (håll
+elpatronerna utanför), 4 (lönsamhetsregel med COP), 5 (soldrift via
+pannans egen väg) och 6 (dump/desinficering som schemalagda laster)
+implementerade som fristående, testade funktioner – INGEN koppling till
+skarp styrning (coordinator.py/energy_controller.py/legionella.py
+orörda). Punkt 1 och 3 (rumsvis termisk regression/reglering) parkerade
+tills en vintersäsongs mätdata finns – rumstemperaturgivarna har bara
+haft data sedan ~2026-07-25, inte sedan oktober 2025 som ursprungligen
+antaget.
 """
 from __future__ import annotations
 
@@ -69,6 +69,77 @@ def is_preheat_profitable(
     cost_per_kwh_shifted = (1.0 / cop_preheat - 1.0 / cop_normal) * price_preheat_sek_kwh
     profit_per_kwh_shifted = price_peak_sek_kwh - price_preheat_sek_kwh
     return profit_per_kwh_shifted > cost_per_kwh_shifted
+
+
+def elpatron_avoidance_setpoints(
+    buy_price_sek_kwh: float,
+    expensive_price_threshold_sek_kwh: float,
+    normal_tempparmode_c: float = 10.0,
+    avoidance_tempparmode_c: float = -5.0,
+    normal_auxheaterdelay_kmin: float = 300.0,
+    avoidance_auxheaterdelay_kmin: float = 600.0,
+) -> tuple[float, float]:
+    """v1.0 steg 7, punkt 2: håll elpatronerna (Eltillskott) utanför genom
+    att bara nudga två av pannans EGNA trösklar under dyra slots -
+    kompressorn får jobba ikapp längre innan pannan själv griper in med
+    elpatron, istället för att SEM tar över styrningen av elpatronen.
+
+    Planens förutsättning för allt annat i steg 7 ("Håll elpatronerna
+    utanför"): `number.boiler_tempparmode` (parallellförskjutning av
+    värmekurvan, idag 10 °C) sänks mot 0…−5 °C och
+    `number.boiler_auxheaterdelay` (K·min - ackumulerat temperaturunderskott
+    över tid innan elpatronen tillåts starta) förlängs, under dyra slots.
+    En lägre tempparmode sänker pannans egen framledningsmål, vilket i
+    praktiken höjder tröskeln för när pannan tycker sig ligga så långt
+    efter att elpatron behövs; ett större auxheaterdelay kräver att
+    underskottet ackumuleras längre innan elpatron tillåts starta.
+
+    Returnerar (tempparmode_c, auxheaterdelay_kmin) - de två EGNA
+    pannovärdena att skriva, inte en egen ersättningsstyrning. Använd
+    helpern `binary_sensor.eltillskott_aktivt` som facit vid intrimning av
+    default-värdena för avoidance-läget (verifierat live 2026-09-11: normal
+    10 °C/300 K·min, `eltillskott_aktivt=off`) - siffrorna ovan är en
+    rimlig startpunkt inom `tempparmode`s -126…126 °C och
+    `auxheaterdelay`s 10…1000 K·min-spann, inte en kalibrerad slutgiltig
+    modell.
+
+    Ren tröskelfunktion (inte en glidande skala mot prisets storlek) - matchar
+    hur `is_preheat_profitable` och `should_dump_to_hot_water` redan är
+    byggda: en klar av/på-gräns är lättare att verifiera och trimma mot
+    `eltillskott_aktivt` än en kontinuerlig kurva utan mätdata att kalibrera
+    den mot.
+    """
+    if buy_price_sek_kwh >= expensive_price_threshold_sek_kwh:
+        return avoidance_tempparmode_c, avoidance_auxheaterdelay_kmin
+    return normal_tempparmode_c, normal_auxheaterdelay_kmin
+
+
+def solar_compressor_boost_kw(
+    surplus_available_for_heat_w: float,
+    max_comp_power_kw: float = 25.0,
+) -> float:
+    """v1.0 steg 7, punkt 5: soldrift via pannans egen väg.
+
+    `number.boiler_pvmaxcomp` (0-25 kW, står på 0 idag) är kompressorns
+    maxeffekt vid PV-överskott - pannans inbyggda soldriftläge. Istället för
+    att SEM självt orkestrerar värmepumpens effekt mot solöverskottet (som
+    med batteri/EV) sätter den här funktionen bara ett TAK som pannan sedan
+    själv reglerar kompressorn inom - en enkel, direkt kW-omvandling av det
+    överskott som redan finns, inget eget beslut om HUR mycket kompressorn
+    faktiskt ska köra just nu.
+
+    `surplus_available_for_heat_w` ska vara överskottet som blir kvar EFTER
+    SEM:s egen prioritetsordning (CLAUDE.md: 1. huslast, 2. EV, 3. batteri) -
+    samma "remaining_surplus" som redan når fram till steg 4:s extra
+    varmvatten-prioritet i `EnergyController.compute()`, inte rått
+    `solar_surplus_w` innan EV/batteri fått sitt. Annars konkurrerar
+    pannans egen soldrift med SEM:s egna prioriteringar om samma överskott.
+
+    Klämd mot pannans egna gränser (0-25 kW som default, matchar
+    `number.boiler_pvmaxcomp`s min/max) - ett negativt eller orimligt stort
+    överskott kan aldrig ge ett värde utanför det pannan faktiskt tillåter.
+    """
+    return max(0.0, min(surplus_available_for_heat_w / 1000.0, max_comp_power_kw))
 
 
 def should_dump_to_hot_water(

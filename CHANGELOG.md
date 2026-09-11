@@ -2,6 +2,23 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.25
+
+Step 7, points 2 & 5 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — two standalone, tested functions added to `heat_planner.py`. **Still not wired to live control**, same boundary as points 4/6.
+
+- **`elpatron_avoidance_setpoints(...)`** (point 2 — "keep the immersion heater out", the precondition for the rest of step 7): a plain threshold function returning `(tempparmode_c, auxheaterdelay_kmin)` — the boiler's own two thresholds that gate when its built-in electric backup heater kicks in. During expensive slots, nudges `tempparmode` down toward the plan's -5°C and extends `auxheaterdelay`, otherwise returns today's live defaults (10°C / 300 K·min, verified against `number.boiler_tempparmode`/`number.boiler_auxheaterdelay` on 2026-09-11). The avoidance defaults are a reasonable starting point within the boiler's own range, not a calibrated final model — `binary_sensor.eltillskott_aktivt` (already live) is the intended ground truth for tuning them.
+- **`solar_compressor_boost_kw(...)`** (point 5 — "solar operation via the boiler's own path"): `number.boiler_pvmaxcomp` (0-25 kW, verified live at 0) is the compressor's max power during PV surplus — the boiler's own built-in solar mode. The function just sets the ceiling the boiler regulates the compressor within; it deliberately takes the surplus left over *after* SEM's own priority order (house load → EV → battery), not raw solar surplus, so the boiler's solar mode doesn't compete with SEM's own priorities for the same kWh.
+- **Verified**: 4 + 5 hand-built scenarios respectively — all passing.
+
+## What's New in 0.9.24
+
+Fixes a real live bug found via a live incident report on 2026-09-11: the battery sat idle at 63% SOC while the grid bought ~537W at the day's peak price (2.14 SEK/kWh) to cover a house deficit.
+
+- **Root cause (verified against live HA state, not guessed)**: `apply_plan_executor()`'s `solar_charge` branch computed `battery_charge_power_w` from the real-time solar surplus (correctly 0, since load 933W exceeded solar 468W) but had no fallback when that surplus is zero — unlike the `grid_charge`+`econ_peak` branch and the `idle`/`cover_load` branch, both of which already fall back to discharging the battery to cover a real house deficit. When the day-old plan slot said `solar_charge` (built when more solar was still forecast) but real solar underdelivered, the executor left both `battery_charge_power_w` and `battery_discharge_power_w` at 0 — letting the grid cover the entire deficit regardless of price.
+- **Fix**: added the same self-consumption fallback the other two branches already have — when the `solar_charge` branch computes zero charge power and there's a real house deficit, discharge the battery to cover it instead (gated by `self_consume_ok`, i.e. never below `battery_min_soc`).
+- **Verified**: three hand-built scenarios replaying the actual incident's readings (solar 468W, load 933W, SOC 63%, price 2.14 SEK/kWh) — confirmed the bug reproduces on the pre-fix code (discharge stayed 0W) and resolves on the fix (discharge 465W, matching the real deficit); a control case with genuine solar surplus confirmed no regression; a floor-protection case confirmed the battery isn't touched at `battery_min_soc`.
+- Same bug and fix applied to the v0.9.11 hotfix branch (built on `a57cea2`, which has the identical branch) as v0.9.12.
+
 ## What's New in 0.9.23
 
 - **New service: `smart_energy_manager.export_history`** — exports the four internal history stores (production ratio, daily consumption, hourly load shape, solar takeover observations) to CSV files. These were already tracked internally (in `.storage/`) but never user-visible. Defaults to `config/www/smart_energy_manager_export/`, downloadable via `/local/smart_energy_manager_export/`; an optional `path` field overrides the target directory.

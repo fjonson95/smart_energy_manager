@@ -1202,6 +1202,52 @@ inte en strikt merit-order-mot-deadline) eller till
 `EnergyController`s riktiga extra-varmvatten-beslut. Ingen anropare av
 de nya funktionerna finns än.
 
+### Steg 7, punkt 2 & 5 (v0.9.25, 2026-09-11)
+
+Två fristående, testade funktioner tillagda i `heat_planner.py`, på
+uttrycklig begäran ("Steg 7 punkt 2 & 5"). Samma avgränsning som
+punkt 4/6 – INGEN koppling till skarp styrning.
+
+1. **`elpatron_avoidance_setpoints(buy_price, expensive_price_threshold,
+   normal_tempparmode_c=10.0, avoidance_tempparmode_c=-5.0,
+   normal_auxheaterdelay_kmin=300.0, avoidance_auxheaterdelay_kmin=600.0)
+   -> tuple[float, float]`.** Punkt 2 – "håll elpatronerna utanför",
+   förutsättningen för resten av steg 7. Ren tröskelfunktion (samma stil
+   som `is_preheat_profitable`/`should_dump_to_hot_water`, inte en
+   glidande skala – lättare att trimma mot `eltillskott_aktivt` utan
+   mätdata att kalibrera en kurva mot): under dyra slots returneras
+   `tempparmode` sänkt mot planens -5 °C och `auxheaterdelay` förlängt,
+   annars dagens live-värden (10 °C / 300 K·min, verifierade mot
+   `number.boiler_tempparmode`/`number.boiler_auxheaterdelay` 2026-09-11).
+   Avoidance-defaultvärdena (-5 °C, 600 K·min) är en rimlig startpunkt
+   inom pannans egna spann (-126…126 °C, 10…1000 K·min), inte en
+   kalibrerad slutgiltig modell – `binary_sensor.eltillskott_aktivt`
+   (redan live, `off` vid verifieringstillfället) är tänkt som facit vid
+   intrimning. Verifierat mot fyra scenarier (billigt → normalt, dyrt →
+   avoidance, exakt på tröskeln → avoidance, anpassade indataparametrar) –
+   alla stämde.
+2. **`solar_compressor_boost_kw(surplus_available_for_heat_w,
+   max_comp_power_kw=25.0) -> float`.** Punkt 5 – "soldrift via pannans
+   egen väg". `number.boiler_pvmaxcomp` (0–25 kW, verifierad live på 0)
+   är kompressorns maxeffekt vid PV-överskott, pannans EGET
+   soldriftläge – funktionen sätter bara taket pannan sedan själv
+   reglerar kompressorn inom, ingen egen HUR-mycket-just-nu-logik. Tar
+   medvetet emot överskottet som blir kvar EFTER SEM:s egen
+   prioritetsordning (huslast → EV → batteri, CLAUDE.md), inte rått
+   `solar_surplus_w` – annars konkurrerar pannans soldrift med SEM:s
+   egna prioriteringar om samma kWh. Klämd mot pannans egna 0–25 kW-spann.
+   Verifierat mot fem scenarier (inget överskott → 0 kW, normalt
+   överskott → direkt W→kW-omvandling, överskott över pannans egen gräns
+   → klämt till 25 kW, negativt överskott/försvarskod → 0 kW, anpassad
+   max_comp_power_kw) – alla stämde.
+
+**Inte gjort:** faktisk koppling till `coordinator.py`/`energy_controller.py`
+(vilken pris-tröskel som räknas som "dyrt", varifrån
+`surplus_available_for_heat_w` faktiskt hämtas i den riktiga
+prioritetskaskaden, och själva skrivningen av `number.boiler_tempparmode`/
+`number.boiler_auxheaterdelay`/`number.boiler_pvmaxcomp`) – samma
+avgränsning som steg 4/6. Ingen anropare av de nya funktionerna finns än.
+
 ---
 
 ## STEG 8 — Validering

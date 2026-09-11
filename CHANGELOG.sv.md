@@ -2,6 +2,23 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.25
+
+Steg 7, punkt 2 & 5 i [v1.0-implementationsplanen](docs/v1_implementation_plan.md) — två fristående, testade funktioner tillagda i `heat_planner.py`. **Fortfarande inte kopplad till skarp styrning**, samma avgränsning som punkt 4/6.
+
+- **`elpatron_avoidance_setpoints(...)`** (punkt 2 – "håll elpatronerna utanför", förutsättningen för resten av steg 7): en ren tröskelfunktion som returnerar `(tempparmode_c, auxheaterdelay_kmin)` – pannans egna två trösklar som styr när dess inbyggda elpatron/eltillskott griper in. Under dyra slots sänks `tempparmode` mot planens -5 °C och `auxheaterdelay` förlängs, annars returneras dagens live-defaultvärden (10 °C / 300 K·min, verifierade mot `number.boiler_tempparmode`/`number.boiler_auxheaterdelay` 2026-09-11). Avoidance-defaultvärdena är en rimlig startpunkt inom pannans eget spann, inte en kalibrerad slutgiltig modell – `binary_sensor.eltillskott_aktivt` (redan live) är tänkt som facit vid intrimning.
+- **`solar_compressor_boost_kw(...)`** (punkt 5 – "soldrift via pannans egen väg"): `number.boiler_pvmaxcomp` (0–25 kW, verifierad live på 0) är kompressorns maxeffekt vid PV-överskott – pannans eget inbyggda soldriftläge. Funktionen sätter bara taket pannan sedan själv reglerar kompressorn inom; den tar medvetet emot överskottet som blir kvar EFTER SEM:s egen prioritetsordning (huslast → EV → batteri), inte rått solöverskott, så att pannans soldrift inte konkurrerar med SEM:s egna prioriteringar om samma kWh.
+- **Verifierat**: 4 respektive 5 handbyggda scenarier – alla godkända.
+
+## Nyheter i 0.9.24
+
+Fixar en riktig skarp bugg, hittad via en incidentrapport 2026-09-11: batteriet stod overksamt på 63 % SOC medan nätet köpte ~537W till dygnets högsta pris (2,14 kr/kWh) för att täcka ett husunderskott.
+
+- **Grundorsak (verifierad mot skarpt HA-state, inte gissad)**: `apply_plan_executor()`:s `solar_charge`-gren räknade ut `battery_charge_power_w` från det verkliga solöverskottet (korrekt 0, eftersom lasten 933W översteg solen 468W) men hade ingen fallback när det överskottet är noll – till skillnad från `grid_charge`+`econ_peak`-grenen och `idle`/`cover_load`-grenen, som båda redan faller tillbaka på att ladda ur batteriet för att täcka ett verkligt husunderskott. När den timmar-gamla plansloten sa `solar_charge` (byggd när mer sol fortfarande var prognosticerad) men verklig sol uteblev, lämnade exekveraren både `battery_charge_power_w` och `battery_discharge_power_w` på 0 – och lät nätet täcka hela underskottet oavsett pris.
+- **Fix**: lade till samma egenförbruknings-fallback som de andra två grenarna redan har – när `solar_charge`-grenen räknar ut noll laddeffekt och det finns ett verkligt husunderskott, ladda ur batteriet för att täcka det istället (spärrat mot `self_consume_ok`, dvs. aldrig under `battery_min_soc`).
+- **Verifierat**: tre handbyggda scenarier som spelar upp incidentens riktiga avläsningar (sol 468W, last 933W, SOC 63 %, pris 2,14 kr/kWh) – bekräftat att buggen reproducerar på den ofixade koden (discharge stannade på 0W) och löses av fixen (discharge 465W, matchar det verkliga underskottet); ett kontrollfall med genuint solöverskott bekräftade ingen regression; ett golv-skyddsfall bekräftade att batteriet inte rörs vid `battery_min_soc`.
+- Samma bugg och fix applicerad på v0.9.11-hotfixgrenen (byggd på `a57cea2`, som har identisk gren) som v0.9.12.
+
 ## Nyheter i 0.9.23
 
 - **Ny tjänst: `smart_energy_manager.export_history`** – exporterar de fyra interna historik-stores (produktionskvot, dagsförbrukning, lastprofil, sol-takeover-observationer) till CSV-filer. Datan har alltid sparats internt (i `.storage/`) men var aldrig synlig för användaren. Skriver som standard till `config/www/smart_energy_manager_export/`, nedladdningsbart via `/local/smart_energy_manager_export/`; ett valfritt `path`-fält kan peka om målkatalogen.

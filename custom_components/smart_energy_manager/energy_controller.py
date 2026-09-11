@@ -1003,7 +1003,21 @@ class EnergyController:
             prefer_sell = sell_price >= self.sell_solar_min_price and not evening_fill
             if not prefer_sell:
                 decision.battery_charge_power_w = min(battery_surplus_w, batt_max_w)
-            decision.reason = f"{ev_reason} | Plan solar_charge {decision.battery_charge_power_w:.0f}W | {now_slot.reason}"
+            if decision.battery_charge_power_w == 0.0 and house_def_w > 0.0 and self_consume_ok:
+                # Planen (upp till 15 min gammal prognos) väntade sig nog med sol för att
+                # ladda, men verkligheten levererar ett underskott istället - täck det med
+                # batteriet i stället för att låta nätet köpa till aktuellt pris (samma
+                # egenförbruknings-fallback som grid_charge/econ_peak och idle/cover_load
+                # redan har; solar_charge saknade den - se incidenten 2026-09-11, där
+                # nätet köpte 537W till dygnets högsta pris medan batteriet stod overksamt
+                # på 63% SOC).
+                decision.battery_discharge_power_w = min(house_def_w, batt_max_w)
+                decision.reason = (
+                    f"{ev_reason} | Plan solar_charge men verkligt underskott → egenförbrukning "
+                    f"{decision.battery_discharge_power_w:.0f}W | {now_slot.reason}"
+                )
+            else:
+                decision.reason = f"{ev_reason} | Plan solar_charge {decision.battery_charge_power_w:.0f}W | {now_slot.reason}"
 
         elif now_slot.action == "grid_charge" and not econ_peak:
             decision.battery_charge_power_w = min(max(0.0, now_slot.target_power_w), batt_max_w)
