@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.27
+
+Kopplar in torkrisk-påslaget (v0.9.17, "Torkrisk-påslag från SMHI:s väderprognos") i skarp drift – den medvetna stanna-upp-punkten från den releasen, nu uttryckligen begärd.
+
+- **Nytt valfritt config-fält `weather_entity`** (Konfigurera → utomhustemp-sektionen) – t.ex. `weather.smhi_home`. Lämnas det tomt blir beteendet exakt som idag (ingen prospektiv torksimulering, som förut).
+- **Ny `coordinator._fetch_weather_forecast()`** anropar `weather.get_forecasts` (type: daily) mot den konfigurerade entiteten en gång per planombyggnad (inte varje 30s-cykel), behåller bara dagar bortom planerarens egen 48h-horisont, och formaterar dem till listan `[(datum, condition, temp_max_c, temp_min_c), ...]` som `_simulate_drought_days()` redan förväntar sig. Fel (ingen entitet konfigurerad, tjänsteanrop misslyckas, felformad prognosdag) loggas och degraderar till tom lista – torkpåslaget är ett prospektivt, valfritt tillägg, aldrig en förutsättning för att bygga en plan.
+- **`current_outdoor_temp_c=state.outdoor_temp_c` och `weather_forecast=...` skickas nu in i `build_plan()`** – tidigare alltid `None`/osatt, så `_simulate_drought_days()` och `_drought_markup()` (implementerade och backtest-kalibrerade sedan v0.9.17) hade aldrig faktiskt körts med riktig data.
+- **Känd brasklapp, oförändrad sedan v0.9.17:s egen slutsats**: mekanismen är verifierad säker (ingen regression) men *obevisad* – den enda backtest som finns visade den byte-identisk med att inte ha den alls, eftersom torkperioden i det datasetet aldrig råkade trigga regel 2/4:s sälj-/håll-kvar-sida. Om den hjälper vid en riktig vintertorka vet vi inte förrän en inträffar skarpt.
+
 ## Nyheter i 0.9.26
 
 Fixar att `_apply_phase_limits()` approximerade fasström från effekt/spänning istället för att använda de riktiga strömsensorerna som redan var konfigurerade och inkopplade men aldrig lästes.

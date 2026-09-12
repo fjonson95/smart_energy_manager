@@ -47,7 +47,7 @@ from .const import (
     DEFAULT_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     CHARGER_CONNECTED_STATES, NO_CAR_SELECTED,
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
-    CONF_OUTDOOR_TEMP_ENTITY, CONF_DAMPED_OUTDOOR_TEMP_ENTITY,
+    CONF_OUTDOOR_TEMP_ENTITY, CONF_DAMPED_OUTDOOR_TEMP_ENTITY, CONF_WEATHER_ENTITY,
     CONF_HEAT_BALANCE_TEMP, CONF_HEAT_FACTOR_KWH_DD, CONF_BASE_DHW_KWH,
     CONF_DISINFECTING_EXTRA_KWH,
     DEFAULT_HEAT_BALANCE_TEMP, DEFAULT_HEAT_FACTOR_KWH_DD, DEFAULT_BASE_DHW_KWH,
@@ -65,7 +65,7 @@ from .energy_controller import (
     EnergyController, EnergyState, ControlDecision,
     ChargerConfig, CarConfig, ChargerState,
 )
-from .energy_planner import EnergyPlanner, DayPlan
+from .energy_planner import EnergyPlanner, DayPlan, _PLAN_HORIZON_H
 from .legionella import LegionellaManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -1275,6 +1275,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             if _ev_needs_charge and (_low_solar_today_ev or _low_solar_tomorrow_ev)
                             else 0.0
                         )
+                        weather_forecast = await self._fetch_weather_forecast(now)
                         self._day_plan = self._energy_planner.build_plan(
                             now=now,
                             battery_soc_pct=state.battery_soc_pct,
@@ -1293,6 +1294,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             rolling_consumption_kwh=state.rolling_consumption_kwh,
                             load_shape_p50=self._get_load_shape(0.5),
                             load_shape_p75=self._get_load_shape(0.75),
+                            current_outdoor_temp_c=state.outdoor_temp_c,
+                            weather_forecast=weather_forecast,
                         )
                         self._last_plan_ps_sig = ps_sig
                         _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)
@@ -1416,6 +1419,56 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.exception("Fel vid uppdatering av Smart Energy Manager")
             raise UpdateFailed(f"Error updating Smart Energy Manager: {err}") from err
+
+    async def _fetch_weather_forecast(self, now: datetime) -> list:
+        """v1.0 steg 3, "Torkrisk-påslag från SMHI:s väderprognos": hämtar
+        dagsprognosen bortom vad ps.slots redan täcker (48h,
+        _PLAN_HORIZON_H) och formaterar den till listan
+        `_simulate_drought_days()` i energy_planner.py förväntar sig:
+        [(datum, condition, temp_max_c, temp_min_c), ...].
+
+        Tom lista (ingen väderentitet konfigurerad, eller anropet
+        misslyckas) ger exakt tidigare beteende - se
+        _simulate_drought_days()s egen docstring. Fel loggas men stoppar
+        aldrig plan-byggnaden; väderprognosen är ett valfritt, prospektivt
+        tillägg, inte en förutsättning.
+        """
+        weather_entity = self._config.get(CONF_WEATHER_ENTITY)
+        if not weather_entity:
+            return []
+
+        try:
+            response = await self.hass.services.async_call(
+                "weather", "get_forecasts",
+                {"entity_id": weather_entity, "type": "daily"},
+                blocking=True, return_response=True,
+            )
+        except Exception as err:
+            _LOGGER.warning("Kunde inte hämta väderprognos från %s: %s", weather_entity, err)
+            return []
+
+        forecast_days = (response or {}).get(weather_entity, {}).get("forecast", [])
+        horizon_end = now + timedelta(hours=_PLAN_HORIZON_H)
+
+        result: list = []
+        for day in forecast_days:
+            try:
+                day_dt_raw = day.get("datetime")
+                if not day_dt_raw:
+                    continue
+                day_dt = datetime.fromisoformat(day_dt_raw)
+                if day_dt.tzinfo is None:
+                    day_dt = day_dt.astimezone()
+                if day_dt <= horizon_end:
+                    continue
+                temp_max_c = day.get("temperature")
+                temp_min_c = day.get("templow")
+                if temp_max_c is None or temp_min_c is None:
+                    continue
+                result.append((day_dt, day.get("condition"), float(temp_max_c), float(temp_min_c)))
+            except (ValueError, TypeError) as err:
+                _LOGGER.debug("Kunde inte tolka väderprognos-dag %s: %s", day, err)
+        return result
 
     async def _check_battery_operating_mode(self) -> None:
         """Varna om batteriets egna driftläge inte står på 'manual' – utan detta

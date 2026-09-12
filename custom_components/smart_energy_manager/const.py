@@ -196,6 +196,12 @@ CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"
 # Dämpad (utjämnad) utetemp – bättre proxy för värmebehov än momentan avläsning.
 # Valfri: om satt, ersätter den momentana temp_for_model-uppbyggnaden helt.
 CONF_DAMPED_OUTDOOR_TEMP_ENTITY = "damped_outdoor_temp_entity"
+# Torkrisk-påslag (v1.0 steg 3, "Torkrisk-påslag från SMHI:s väderprognos") -
+# weather-entitet (t.ex. weather.smhi_home) vars weather.get_forecasts
+# (type: daily) matar _simulate_drought_days() i energy_planner.py. Valfri:
+# tom/ej konfigurerad ger exakt tidigare beteende (ingen prospektiv
+# torkrisk-simulering, bara dagens produktionskvot som i P3-2).
+CONF_WEATHER_ENTITY = "weather_entity"
 
 # ── Förbrukningsprognos ───────────────────────────────────────────────────────
 # Modell: predicted_kwh = base_dhw + k_heat * max(0, T_balance - temp)

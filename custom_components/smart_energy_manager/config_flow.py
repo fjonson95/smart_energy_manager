@@ -48,7 +48,7 @@ from .const import (
     DEFAULT_LEGIONELLA_MAX_PRICE, DEFAULT_LEGIONELLA_DURATION_MINUTES,
     EV_PHASES_OPTIONS,
     CONF_YESTERDAY_CONSUMPTION_ENTITY,
-    CONF_OUTDOOR_TEMP_ENTITY, CONF_DAMPED_OUTDOOR_TEMP_ENTITY,
+    CONF_OUTDOOR_TEMP_ENTITY, CONF_DAMPED_OUTDOOR_TEMP_ENTITY, CONF_WEATHER_ENTITY,
     CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH,
     CONF_HEAT_BALANCE_TEMP, DEFAULT_HEAT_BALANCE_TEMP,
     CONF_HEAT_FACTOR_KWH_DD, DEFAULT_HEAT_FACTOR_KWH_DD,
@@ -128,6 +128,7 @@ def _grid_schema(d: dict) -> vol.Schema:
         vol.Optional(CONF_YESTERDAY_CONSUMPTION_ENTITY, default=_d(d, CONF_YESTERDAY_CONSUMPTION_ENTITY, "")): _opt_entity_selector(),
         vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=_d(d, CONF_OUTDOOR_TEMP_ENTITY, "")): _opt_entity_selector(),
         vol.Optional(CONF_DAMPED_OUTDOOR_TEMP_ENTITY, default=_d(d, CONF_DAMPED_OUTDOOR_TEMP_ENTITY, "")): _opt_entity_selector(),
+        vol.Optional(CONF_WEATHER_ENTITY, default=_d(d, CONF_WEATHER_ENTITY, "")): _opt_entity_selector(),
         vol.Optional(CONF_DISINFECTING_EXTRA_KWH, default=_d(d, CONF_DISINFECTING_EXTRA_KWH, DEFAULT_DISINFECTING_EXTRA_KWH)): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX)
         ),

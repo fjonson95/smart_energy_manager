@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.26-blue)
+![Version](https://img.shields.io/badge/version-0.9.27-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.26
+## What's New in 0.9.27
 
-`_apply_phase_limits()` now uses the real per-phase current sensors (`grid_current_l1/l2/l3`, already configured but never read) instead of approximating current from power/voltage — a real CSV comparison showed the approximation misses reactive/idle current by up to 8.7A at low load. Found while investigating an unusually high phase-limit-correction count in the January 2026 backtest. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
+Wires the drought-risk V markup (v0.9.17) into live control via a new optional `weather_entity` config field (e.g. `weather.smhi_home`) — the intentional stop-and-ask point from that release. Blank/unconfigured keeps today's behavior exactly. **Verified safe but unproven** — the only backtest available showed it byte-identical to not having the mechanism at all; whether it helps won't be known until a real winter drought. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.25's step 7 points 2 & 5, v0.9.24's solar_charge self-consumption fallback fix, v0.9.23's export-history service, v0.9.22's dead-config cleanup, v0.9.21's damped-temp crash fix, v0.9.20's Solcast entity split, v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.26's real-current phase-limit fix, v0.9.25's step 7 points 2 & 5, v0.9.24's solar_charge self-consumption fallback fix, v0.9.23's export-history service, v0.9.22's dead-config cleanup, v0.9.21's damped-temp crash fix, v0.9.20's Solcast entity split, v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
 ## System Overview
 

@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.26-blue)
+![Version](https://img.shields.io/badge/version-0.9.27-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.26
+## Nyheter i 0.9.27
 
-`_apply_phase_limits()` använder nu de riktiga per-fas-strömsensorerna (`grid_current_l1/l2/l3`, redan konfigurerade men aldrig lästa) istället för att approximera ström från effekt/spänning – en riktig CSV-jämförelse visade att approximationen missar reaktiv/tomgångsström med upp till 8,7A vid låg last. Hittat under utredning av ett ovanligt högt antal fasgränskorrigeringar i januari 2026-backtesten. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
+Kopplar in torkrisk-V-påslaget (v0.9.17) i skarp drift via ett nytt valfritt config-fält `weather_entity` (t.ex. `weather.smhi_home`) – den medvetna stanna-upp-punkten från den releasen. Tomt/okonfigurerat behåller dagens beteende exakt. **Verifierad säker men obevisad** – den enda backtest som finns visade den byte-identisk med att inte ha mekanismen alls; om den hjälper vet vi inte förrän en riktig vintertorka inträffar. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 

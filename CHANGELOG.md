@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.27
+
+Wires the drought-risk markup (v0.9.17, "Torkrisk-påslag från SMHI:s väderprognos") into live control — the intentional stop-and-ask point from that release, now explicitly requested.
+
+- **New optional config field `weather_entity`** (Configure → Outdoor temp section) — e.g. `weather.smhi_home`. Leaving it blank gives exactly today's behavior (no prospective drought simulation, same as before).
+- **New `coordinator._fetch_weather_forecast()`** calls `weather.get_forecasts` (type: daily) against the configured entity once per plan rebuild (not every 30s cycle), keeps only days beyond the planner's own 48h horizon, and formats them into the `[(date, condition, temp_max_c, temp_min_c), ...]` list `_simulate_drought_days()` already expects. Failures (no entity configured, service call errors, malformed forecast days) are logged and degrade to an empty list — the drought markup is a prospective, optional addition, never a precondition for building a plan.
+- **`current_outdoor_temp_c=state.outdoor_temp_c` and `weather_forecast=...` now passed into `build_plan()`** — previously always `None`/unset, so `_simulate_drought_days()` and `_drought_markup()` (implemented and backtest-calibrated since v0.9.17) never actually ran with real data.
+- **Known caveat, unchanged from v0.9.17's own conclusion**: the mechanism is verified safe (no regression) but *unproven* — the only backtest available showed it byte-identical to not having it at all, because the drought period in that dataset never happened to trigger rule 2/4's sell/hold-back side. Whether it helps in a real winter drought is not yet known and won't be until one occurs live.
+
 ## What's New in 0.9.26
 
 Fixes `_apply_phase_limits()` approximating per-phase current from power/voltage instead of using the real current sensors that were already configured and wired but never read.
