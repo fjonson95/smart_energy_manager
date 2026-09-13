@@ -139,6 +139,8 @@
           "ev_soc": "Car battery SOC (optional)",
           "ev_soc_target": "Target SOC (%)",
           "car_phases": "Car onboard charger (number of phases)",
+          "battery_capacity_kwh": "Car battery capacity (kWh) - required for deadline scheduling (step 6)",
+          "deadline_entity": "Deadline entity (input_datetime) - optional, guarantees target SOC by this time",
           "phase": "Start phase (L1/L2/L3)"
         }
       }
@@ -288,6 +290,8 @@
           "ev_soc": "Car battery SOC (optional)",
           "ev_soc_target": "Target SOC (%)",
           "car_phases": "Car onboard charger (number of phases)",
+          "battery_capacity_kwh": "Car battery capacity (kWh) - required for deadline scheduling (step 6)",
+          "deadline_entity": "Deadline entity (input_datetime) - optional, guarantees target SOC by this time",
           "phase": "Start phase (L1/L2/L3)"
         }
       }

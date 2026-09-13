@@ -276,6 +276,11 @@ def _car_schema(d: dict) -> vol.Schema:
                 mode=selector.SelectSelectorMode.LIST,
             )
         ),
+        # v1.0 steg 6: valfri deadline-garanti utöver sol-opportunistisk laddning.
+        # Båda krävs tillsammans (kapacitet för att räkna kWh-behov, deadline för
+        # när) - lämnas tomma/0 ger exakt dagens beteende, ingen schemaläggning.
+        vol.Optional("battery_capacity_kwh", default=_d(d, "battery_capacity_kwh", 0.0)): vol.Coerce(float),
+        vol.Optional("deadline_entity", default=_d(d, "deadline_entity", "")): _opt_entity_selector(),
     })
 
 
@@ -302,6 +307,8 @@ def _car_dict_from_input(ui: dict) -> dict:
         "car_phases": car_phases,
         # Fas är relevant för 1-fas och 2-fas bilar; 3-fas bilar använder alla faser
         "phase": ui.get("phase") or "L1" if car_phases < 3 else None,
+        "battery_capacity_kwh": float(ui.get("battery_capacity_kwh", 0.0)),
+        "deadline_entity": ui.get("deadline_entity") or None,
     }
 
 

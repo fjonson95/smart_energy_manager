@@ -2,6 +2,16 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.32
+
+Kopplar in steg 6 (EV-schemaläggning) i skarp styrning som en deadline-garanti-fallback – sol-opportunistisk laddning är oförändrad och har fortfarande förstahandsprioritet; den nya schemaläggaren fyller bara på från de billigaste återstående nätslottarna om solen ensam inte hinner nå mål-SOC i tid.
+
+- **Två nya förutsättningar som behövdes, tillagda i bil-configen**: `battery_capacity_kwh` (omvandlar det befintliga `ev_soc_target` (%) till ett verkligt kWh-underskott) och `deadline_entity` (en `input_datetime`-entitet – inget deadline-begrepp fanns någonstans tidigare). Båda valfria; lämnas någon otillsatt behålls dagens rent sol-opportunistiska beteende exakt som det är.
+- **Nytt**: `coordinator._compute_ev_schedule_inputs()` hittar den första laddaren/bilen med båda konfigurerade och en aktiv bil vald, läser deadline-entiteten och räknar fram det verkliga energiunderskottet – matar `energy_planner.build_plan()`:s befintliga (tidigare alltid-noll) `ev_energy_needed_kwh`/`ev_deadline`/`ev_max_power_kw`-parametrar för första gången. Det resulterande per-slot-`ev_charge_w` når `EnergyController._auto_mode()` via `EnergyState.plan_ev_charge_w`/`plan_ev_charger_name` (samma "läs planens fält precis innan compute()"-mönster som exportgolvet och V_charge-inkopplingen). EV-loopens befintliga sol-opportunistiska laddning körs först och oförändrad; den nya fallbacken aktiverar bara laddning när den loopen lämnade laddaren avslagen *och* planen säger att den här sloten behövs för att nå deadline.
+- **Känd begränsning, medveten för nu**: `build_plan()` tar bara emot ETT globalt EV-behov, inte per laddare – med flera samtidigt deadline-konfigurerade bilar schemaläggs bara den första som hittas. Fungerar för den här installationen (en laddare, en bil); skulle kräva en planerar-API-ändring för att generaliseras.
+- **Medvetet inte gjort**: legionella-schemaläggning (andra halvan av steg 7 punkt 6) förblir på sin egen, redan skarpt verifierade mekanism – inte migrerad till den generiska `schedule_cheapest_window()`-hjälparen.
+- **Verifierat**: syntaxkontroll av alla sex berörda filer, en fullständig backtest (ingen krasch, oförändrad 3,9 % besparing – väntat, eftersom inget backtest-dataset konfigurerar en deadline-entitet, så den nya vägen förblir helt overksam där), samt ett fristående scenariotest som bekräftade att `build_plan()` schemalägger exakt det behövda antalet kWh till de billigaste pre-deadline-slottarna och att den nya strömklampningsformeln håller sig inom `MIN_EV_CURRENT`/`MAX_EV_CURRENT`.
+
 ## Nyheter i 0.9.31
 
 Kopplar in första halvan av steg 7 punkt 6 ("dumpa överskott till varmvatten istället för att sälja") i skarp styrning.

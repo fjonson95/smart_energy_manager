@@ -139,6 +139,8 @@
           "ev_soc": "Bilens batteri SOC (valfritt)",
           "ev_soc_target": "Mål-SOC (%)",
           "car_phases": "Bilens inbyggda laddare (antal faser)",
+          "battery_capacity_kwh": "Bilens batterikapacitet (kWh) - krävs för deadline-schemaläggning (steg 6)",
+          "deadline_entity": "Deadline-entitet (input_datetime) - valfri, garanterar mål-SOC till denna tid",
           "phase": "Startfas (L1/L2/L3)"
         }
       }
@@ -288,6 +290,8 @@
           "ev_soc": "Bilens batteri SOC (valfritt)",
           "ev_soc_target": "Mål-SOC (%)",
           "car_phases": "Bilens inbyggda laddare (antal faser)",
+          "battery_capacity_kwh": "Bilens batterikapacitet (kWh) - krävs för deadline-schemaläggning (steg 6)",
+          "deadline_entity": "Deadline-entitet (input_datetime) - valfri, garanterar mål-SOC till denna tid",
           "phase": "Startfas (L1/L2/L3)"
         }
       }

@@ -54,6 +54,13 @@ class CarConfig:
     car_phases: int = 1
     # Startfas – vid 1-fas: den enda fasen; vid 2-fas: första fasen (nästa fas = fas+1)
     phase: Optional[str] = EV_PHASE_L1
+    # v1.0 steg 6: garanti-fallback utöver sol-opportunistisk laddning.
+    # battery_capacity_kwh omvandlar ev_soc_target (%) till ett kWh-behov;
+    # deadline_entity (input_datetime) säger när bilen måste vara klar.
+    # 0.0/None = ingen deadline-schemaläggning för den här bilen (dagens
+    # rent sol-opportunistiska beteende, oförändrat).
+    battery_capacity_kwh: float = 0.0
+    deadline_entity: Optional[str] = None
 
 
 @dataclass
@@ -256,6 +263,12 @@ class EnergyState:
     # samma tröskel som avgör om batteriet laddas från solöverskott, återanvänd
     # av heat_planner.should_dump_to_hot_water(). None = ingen plan tillgänglig.
     plan_marginal_value_charge_sek_kwh: Optional[float] = None
+
+    # v1.0 steg 6: aktuell planslots ev_charge_w + vilken laddare den gäller,
+    # för deadline-garantin i _auto_mode()s EV-loop. None = ingen bil är
+    # deadline-schemalagd just nu (se coordinator._compute_ev_schedule_inputs).
+    plan_ev_charge_w: Optional[float] = None
+    plan_ev_charger_name: Optional[str] = None
 
     # Driftläge
     operating_mode: str = MODE_AUTO
@@ -550,6 +563,31 @@ class EnergyController:
                     )
                     remaining_surplus = max(0.0, remaining_surplus - consumed)
                     decision.reason += f" | {ch.config.name} {cur:.0f}A sol"
+
+        # v1.0 steg 6: deadline-garanti UTÖVER sol-opportunismen ovan - fyll på
+        # från nätet bara om planeraren schemalagt DEN HÄR sloten för att
+        # garantera ev_soc_target i tid (merit-order, billigaste återstående
+        # slots före deadline, se energy_planner.build_plan()) OCH sol-
+        # opportunismen inte redan täckte behovet den här cykeln. Rör inte
+        # remaining_surplus - det här är en nätdragning, inte solöverskott.
+        if state.plan_ev_charger_name and (state.plan_ev_charge_w or 0.0) > 0:
+            for i, ch in enumerate(state.chargers):
+                if ch.config.name != state.plan_ev_charger_name:
+                    continue
+                if decision.charger_decisions[i].enable:
+                    break  # redan laddar på sol den här cykeln
+                if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
+                    break
+                car = ch.active_car
+                if car and ch.soc_pct is not None and ch.soc_pct >= car.ev_soc_target:
+                    break
+                cur = min(MAX_EV_CURRENT, max(MIN_EV_CURRENT, state.plan_ev_charge_w / (self.voltage * ch.car_phases)))
+                decision.charger_decisions[i] = ChargerDecision(
+                    enable=True, current_a=cur,
+                    reason=f"deadline-garanti {cur:.0f}A",
+                )
+                decision.reason += f" | {ch.config.name} {cur:.0f}A deadline-garanti"
+                break
 
         # Återlägg reserverad batterikapacitet – EV-loopen körde på reducerat överskott;
         # det reserverade beloppet plus ev. EV-rest utgör nu vad batteriet kan ta.

@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    MAX_EV_CURRENT,
     CONF_HOT_WATER_TEMP_ENTITY, CONF_LEGIONELLA_SWITCH,
     CONF_EXTRA_HOT_WATER_MAX_TEMP, CONF_EXTRA_HOT_WATER_MIN_TEMP, CONF_LEGIONELLA_TARGET_TEMP,
     CONF_AUXHEATER_STATUS_ENTITY, CONF_AUXHEATER_LEVEL_ENTITY, CONF_AUXHEATER_RATED_KW, DEFAULT_AUXHEATER_RATED_KW,
@@ -151,6 +152,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             cycle_cost_sek_kwh=float(self._config.get(CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)),
         )
         self._day_plan: Optional[DayPlan] = None
+        # v1.0 steg 6: vilken laddare (om någon) senaste DayPlan schemalade en
+        # deadline-garanti för. Se _compute_ev_schedule_inputs().
+        self._ev_scheduled_charger_name: Optional[str] = None
         self._last_plan_ps_sig: tuple = (0, None, None)
 
         # active_car[charger_name] = car_name eller NO_CAR_SELECTED
@@ -684,6 +688,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     ev_soc_target=float(car.get("ev_soc_target", 80.0)),
                     car_phases=int(car.get("car_phases", 1)),
                     phase=car.get("phase") or None,
+                    battery_capacity_kwh=float(car.get("battery_capacity_kwh", 0.0)),
+                    deadline_entity=car.get("deadline_entity") or None,
                 )
                 for car in ch_data.get("cars", [])
             ]
@@ -761,6 +767,44 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             ))
 
         return result
+
+    def _compute_ev_schedule_inputs(
+        self, chargers: list[ChargerState], now: datetime,
+    ) -> tuple[float, Optional[datetime], float, Optional[str]]:
+        """v1.0 steg 6: deadline-garanti UTÖVER dagens sol-opportunistiska
+        laddning (se energy_controller._auto_mode()s EV-loop, oförändrad).
+        Bara den FÖRSTA laddaren/bilen med både `deadline_entity` och
+        `battery_capacity_kwh` konfigurerade och en aktiv bil vald schemaläggs -
+        planeraren (`build_plan()`) tar bara emot ETT globalt EV-behov, inte
+        per laddare, så flera samtidigt schemalagda bilar stöds inte än.
+
+        Returnerar (ev_energy_needed_kwh, ev_deadline, ev_max_power_kw,
+        charger_name) - allt 0.0/None om ingen bil är deadline-konfigurerad
+        just nu (exakt tidigare beteende, ingen schemaläggning alls).
+        """
+        for ch in chargers:
+            car = ch.active_car
+            if not car or not car.deadline_entity or car.battery_capacity_kwh <= 0:
+                continue
+            deadline_state = self.hass.states.get(car.deadline_entity)
+            if not deadline_state or deadline_state.state in ("unknown", "unavailable"):
+                continue
+            deadline = dt_util.parse_datetime(deadline_state.state)
+            if deadline is None:
+                continue
+            if deadline.tzinfo is None:
+                deadline = dt_util.as_local(deadline)
+            if deadline <= now:
+                continue
+            soc_now = ch.soc_pct if ch.soc_pct is not None else car.ev_soc_target
+            deficit_pct = max(0.0, car.ev_soc_target - soc_now)
+            energy_needed_kwh = deficit_pct / 100.0 * car.battery_capacity_kwh
+            if energy_needed_kwh <= 0.01:
+                continue
+            grid_voltage = float(self._config.get(CONF_GRID_VOLTAGE, DEFAULT_GRID_VOLTAGE))
+            max_power_kw = MAX_EV_CURRENT * grid_voltage * car.car_phases / 1000.0
+            return energy_needed_kwh, deadline, max_power_kw, ch.config.name
+        return 0.0, None, 0.0, None
 
     def _get_house_load_w(self, grid_l1, grid_l2, grid_l3, solar_w, battery_power_w, ev_total_w) -> tuple[float, bool]:
         """Returnerar (huslast_w, from_sensor). from_sensor=True innebär att en
@@ -1433,6 +1477,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             else 0.0
                         )
                         weather_forecast = await self._fetch_weather_forecast(now)
+                        (
+                            _ev_energy_needed_kwh, _ev_deadline, _ev_max_power_kw, self._ev_scheduled_charger_name,
+                        ) = self._compute_ev_schedule_inputs(state.chargers, now)
                         self._day_plan = self._energy_planner.build_plan(
                             now=now,
                             battery_soc_pct=state.battery_soc_pct,
@@ -1453,6 +1500,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             load_shape_p75=self._get_load_shape(0.75),
                             current_outdoor_temp_c=state.outdoor_temp_c,
                             weather_forecast=weather_forecast,
+                            ev_energy_needed_kwh=_ev_energy_needed_kwh,
+                            ev_deadline=_ev_deadline,
+                            ev_max_power_kw=_ev_max_power_kw,
                         )
                         self._last_plan_ps_sig = ps_sig
                         _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)
@@ -1464,6 +1514,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 state.plan_action = _cs.action if _cs else None
                 state.plan_export_floor_kwh = self._day_plan.export_floor_kwh
                 state.plan_marginal_value_charge_sek_kwh = self._day_plan.marginal_value_charge_sek_kwh
+                if self._ev_scheduled_charger_name and _cs is not None:
+                    state.plan_ev_charge_w = _cs.ev_charge_w
+                    state.plan_ev_charger_name = self._ev_scheduled_charger_name
 
             decision = self._controller.compute(state)
             self._last_decision = decision

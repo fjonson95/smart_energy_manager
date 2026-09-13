@@ -2,6 +2,16 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.32
+
+Wires step 6 (EV scheduling) into live control as a deadline-guarantee fallback — solar-opportunistic charging is unchanged and still takes priority; the new scheduler only tops up from the cheapest remaining grid slots if solar alone won't reach the target SOC in time.
+
+- **Two new prerequisites this needed, added to the per-car config**: `battery_capacity_kwh` (converts the existing `ev_soc_target` % into an actual kWh deficit) and `deadline_entity` (an `input_datetime` entity — no deadline concept existed anywhere before). Both optional; leaving either unset keeps today's pure solar-opportunistic behavior exactly as-is.
+- **New**: `coordinator._compute_ev_schedule_inputs()` finds the first charger/car with both configured and an active car selected, reads the deadline entity, and computes the real energy deficit — feeding `energy_planner.build_plan()`'s existing (previously always-zero) `ev_energy_needed_kwh`/`ev_deadline`/`ev_max_power_kw` parameters for the first time. The resulting per-slot `ev_charge_w` reaches `EnergyController._auto_mode()` via `EnergyState.plan_ev_charge_w`/`plan_ev_charger_name` (same "read the plan's field just before compute()" pattern as the export-floor and V_charge wiring). The EV loop's existing solar-opportunistic charging runs first and unchanged; the new fallback only enables charging when that loop left the charger disabled *and* the plan says this slot is needed to hit the deadline.
+- **Known limitation, by design for now**: `build_plan()` only accepts one global EV need, not per-charger — with multiple simultaneously deadline-configured cars, only the first one found gets scheduled. Fine for this install (one charger, one car); would need a planner API change to generalize.
+- **Deliberately not done**: legionella scheduling (the other half of step 7 point 6) stays on its own existing, live-verified mechanism — not migrated to the generic `schedule_cheapest_window()` helper.
+- **Verified**: syntax check across all six touched files, a full backtest run (no crash, unchanged 3.9% savings — expected, since no backtest dataset configures a deadline entity, so the new path stays fully inert there), and a standalone scenario test confirming `build_plan()` schedules the exact needed kWh into the cheapest pre-deadline slots and the new current-clamping formula stays within `MIN_EV_CURRENT`/`MAX_EV_CURRENT`.
+
 ## What's New in 0.9.31
 
 Wires step 7 point 6's first half ("dump surplus to hot water instead of selling") into live control.
