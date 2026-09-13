@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.28
+
+Ny baslinjeinsamling för steg 7 punkt 2:s framtida intrimning ("håll elpatronerna utanför") – `export_history` får en fjärde historikdimension.
+
+- **Ny rullande 60-dygnshistorik**: hur många timmar per dygn eltillskottet/elpatronen (`auxheater_level_entity`) faktiskt varit aktiv, och hur mycket energi den använt – spåras oberoende av den befintliga dygnsförbruknings-dumpspårningen (som exkluderar legionella-desinficeringsfönster och kräver en `auxheater_status_entity` som de flesta installationer, inklusive den här, inte konfigurerar). Den nya spårningen behöver bara den redan konfigurerade `auxheater_level_entity` + `auxheater_rated_kw`.
+- **Ny `heating_backup.csv`** i `export_history`-tjänstens utdata: `date, aux_heat_on_hours, aux_heat_energy_kwh`.
+- **Varför nu, i september**: att börja samla in det redan idag (även om det mest blir nollor tills riktig kyla kommer) betyder att en riktig baslinje finns den dag steg 7 punkt 2:s `elpatron_avoidance_setpoints()` (v0.9.25, fortfarande inte kopplad till skarp styrning) ska trimmas mot `binary_sensor.eltillskott_aktivt` i vinter.
+- Samma tillägg applicerat på v0.9.13-hotfixgrenen som v0.9.14, eftersom det är den grenen som faktiskt körs skarpt – datainsamlingen börjar på det riktiga systemet, inte bara på `main`.
+
 ## Nyheter i 0.9.27
 
 Kopplar in torkrisk-påslaget (v0.9.17, "Torkrisk-påslag från SMHI:s väderprognos") i skarp drift – den medvetna stanna-upp-punkten från den releasen, nu uttryckligen begärd.

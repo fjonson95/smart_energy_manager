@@ -258,6 +258,20 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._shape_current_hour: int = -1
         self._shape_hour_samples: list[float] = []  # house_load_w-avläsningar inom pågående timme
 
+        # Baslinje för steg 7 punkt 2-trimning ("håll elpatronerna utanför"):
+        # hur mycket och hur länge elpatronen/eltillskottet faktiskt kör,
+        # oberoende av dygnsförbruknings-spårningens legionella-undantag ovan
+        # (den mäter opportunistisk sol-dump, inte kallväders-eltillskott -
+        # olika syften, ska inte blandas ihop). Samlas in redan nu (mild
+        # höstväderlek, sannolikt mest nollor) så en baslinje finns klar när
+        # första kylan kräver eltillskott i vinter.
+        self._heating_backup_store = Store(hass, 1, f"{DOMAIN}_heating_backup")
+        self._heating_backup_history: list[dict] = []  # senaste 60 dygn: [{date, aux_heat_on_hours, aux_heat_energy_kwh}]
+        self._heating_backup_date: str = ""
+        self._aux_heat_on_seconds_today: float = 0.0
+        self._aux_heat_energy_today_kwh: float = 0.0
+        self._heating_backup_last_update: Optional[datetime] = None
+
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
         chargers = self._get_charger_configs()
@@ -282,6 +296,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         await self._load_pv_ratio_store()
         await self._load_daily_consumption_store()
         await self._load_hourly_shape_store()
+        await self._load_heating_backup_store()
         await super().async_config_entry_first_refresh()
 
     async def _load_pv_ratio_store(self) -> None:
@@ -373,6 +388,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         """7-dygns (eller färre, tills historiken byggts upp) rullande snitt."""
         vals = [d["net_kwh"] for d in self._daily_consumption_history if "net_kwh" in d]
         return sum(vals) / len(vals) if vals else None
+
+    async def _load_heating_backup_store(self) -> None:
+        data = await self._heating_backup_store.async_load()
+        if isinstance(data, dict):
+            self._heating_backup_history = data.get("history", [])
+            self._heating_backup_date = data.get("date", "")
+            self._aux_heat_energy_today_kwh = float(data.get("aux_heat_energy_kwh_in_progress", 0.0))
+            self._aux_heat_on_seconds_today = float(data.get("aux_heat_on_seconds_in_progress", 0.0))
+
+    async def _save_heating_backup_store(self) -> None:
+        await self._heating_backup_store.async_save({
+            "history": self._heating_backup_history,
+            "date": self._heating_backup_date,
+            "aux_heat_energy_kwh_in_progress": self._aux_heat_energy_today_kwh,
+            "aux_heat_on_seconds_in_progress": self._aux_heat_on_seconds_today,
+        })
 
     async def _load_hourly_shape_store(self) -> None:
         data = await self._hourly_shape_store.async_load()
@@ -737,7 +768,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
     async def async_export_history(self, directory: Optional[str] = None) -> str:
         """Exportera de interna historik-stores (produktionskvot, dagsförbrukning,
-        lastprofil, sol-takeover-observationer) till CSV via service-anrop.
+        lastprofil, sol-takeover-observationer, elpatron-/eltillskotts-
+        baslinje) till CSV via service-anrop.
 
         Default-katalogen ligger under www/ så filerna blir nedladdningsbara via
         /local/smart_energy_manager_export/ utan extra konfiguration.
@@ -771,6 +803,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 w.writerow(["observed_minutes_of_day"])
                 for v in self._observed_takeover_minutes:
                     w.writerow([v])
+
+            with open(os.path.join(target_dir, "heating_backup.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["date", "aux_heat_on_hours", "aux_heat_energy_kwh"])
+                for row in self._heating_backup_history:
+                    w.writerow([row.get("date"), row.get("aux_heat_on_hours"), row.get("aux_heat_energy_kwh")])
 
         await self.hass.async_add_executor_job(_write)
         _LOGGER.info("Historik exporterad till %s", target_dir)
@@ -1171,6 +1209,33 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         auxheater_power_w = auxheater_level_val / 100.0 * auxheater_rated_kw * 1000.0
                         self._dump_energy_today_kwh += auxheater_power_w / 1000.0 * _dt_h
             self._dump_last_update = now
+
+            # Steg 7 punkt 2-baslinje: elpatron-/eltillskottsaktivitet totalt,
+            # OBEROENDE av dygnsförbrukningens legionella-undantag ovan (annat
+            # syfte - se kommentaren vid store-deklarationen i __init__). Ingen
+            # auxheater_status-koppling (den CONF:en är ofta okonfigurerad,
+            # som här) - auxheater_level_val > 0 räcker som "på"-signal.
+            if today_str != self._heating_backup_date:
+                if self._heating_backup_date:
+                    self._heating_backup_history.append({
+                        "date": self._heating_backup_date,
+                        "aux_heat_on_hours": round(self._aux_heat_on_seconds_today / 3600.0, 2),
+                        "aux_heat_energy_kwh": round(self._aux_heat_energy_today_kwh, 3),
+                    })
+                    self._heating_backup_history = self._heating_backup_history[-60:]
+                    self.hass.async_create_task(self._save_heating_backup_store())
+                self._aux_heat_on_seconds_today = 0.0
+                self._aux_heat_energy_today_kwh = 0.0
+                self._heating_backup_date = today_str
+                self._heating_backup_last_update = now
+
+            if self._heating_backup_last_update is not None:
+                _hb_dt_h = (now - self._heating_backup_last_update).total_seconds() / 3600.0
+                if auxheater_level_val is not None and 0.0 < _hb_dt_h < 0.5 and auxheater_level_val > 0.0:
+                    self._aux_heat_on_seconds_today += _hb_dt_h * 3600.0
+                    aux_power_w = auxheater_level_val / 100.0 * auxheater_rated_kw * 1000.0
+                    self._aux_heat_energy_today_kwh += aux_power_w / 1000.0 * _hb_dt_h
+            self._heating_backup_last_update = now
             legionella_active, legionella_reason = self._legionella.should_run_now(
                 now, solar_surplus_w, buy_price,
                 switch_is_on=legionella_switch_on,

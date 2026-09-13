@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.28
+
+New baseline data collection for step 7, point 2's future tuning ("keep the immersion heater out") — `export_history` gains a fourth history dimension.
+
+- **New rolling 60-day history**: how many hours per day the auxiliary/backup heater (`auxheater_level_entity`) was actually active, and how much energy it used — tracked independently of the existing daily-consumption dump-tracking (which excludes legionella disinfection windows and requires an `auxheater_status_entity` that most installs, including this one, don't configure). This new tracking only needs the already-configured `auxheater_level_entity` + `auxheater_rated_kw`.
+- **New `heating_backup.csv`** in the `export_history` service output: `date, aux_heat_on_hours, aux_heat_energy_kwh`.
+- **Why now, in September**: collecting this starting today (even though it'll mostly be zeros until real cold weather) means a real baseline exists the day step 7 point 2's `elpatron_avoidance_setpoints()` (v0.9.25, still not wired to live control) is ready to be tuned against `binary_sensor.eltillskott_aktivt` this winter.
+- Same addition applied to the v0.9.13 hotfix branch as v0.9.14, since that's the branch actually running live — data collection starts on the real system, not just `main`.
+
 ## What's New in 0.9.27
 
 Wires the drought-risk markup (v0.9.17, "Torkrisk-påslag från SMHI:s väderprognos") into live control — the intentional stop-and-ask point from that release, now explicitly requested.
