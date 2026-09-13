@@ -69,6 +69,13 @@ CONF_HEAT_PUMP_PHASE = "heat_pump_phase"
 CONF_HEAT_PUMP_PATRON_PHASES = "heat_pump_patron_phases"
 CONF_HEAT_PUMP_PATRON_POWER_KW = "heat_pump_patron_power_kw"
 
+# v1.0 steg 7 punkt 5: pannans egna soldriftläge (number.boiler_pvmaxcomp,
+# 0-25 kW) - SEM sätter bara ett tak, pannan reglerar kompressorn inom det
+# själv. Se heat_planner.solar_compressor_boost_kw().
+CONF_BOILER_PVMAXCOMP_ENTITY = "boiler_pvmaxcomp_entity"
+CONF_BOILER_PVMAXCOMP_MAX_KW = "boiler_pvmaxcomp_max_kw"
+DEFAULT_BOILER_PVMAXCOMP_MAX_KW = 25.0
+
 # ── EV-laddare (ny modell) ────────────────────────────────────────────────────
 # Lista av laddare; varje laddare har en lista av möjliga bilar.
 #

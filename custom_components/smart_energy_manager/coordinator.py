@@ -30,6 +30,7 @@ from .const import (
     CONF_EV_CHARGERS, CONF_EV_CARS,
     CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
     CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
+    CONF_BOILER_PVMAXCOMP_ENTITY, CONF_BOILER_PVMAXCOMP_MAX_KW, DEFAULT_BOILER_PVMAXCOMP_MAX_KW,
     CONF_GRID_POWER_L1, CONF_GRID_POWER_L2, CONF_GRID_POWER_L3,
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
     CONF_NORDPOOL_ENTITY, CONF_NORDPOOL_TYPE, NORDPOOL_TYPE_HACS, NORDPOOL_TYPE_OFFICIAL,
@@ -1362,6 +1363,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 extra_hot_water_on=self._get_state_bool(c.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)),
                 heat_pump_patron_phases=c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES),
                 heat_pump_patron_power_kw=float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
+                boiler_pvmaxcomp_max_kw=float(c.get(CONF_BOILER_PVMAXCOMP_MAX_KW, DEFAULT_BOILER_PVMAXCOMP_MAX_KW)),
 
                 legionella_active=legionella_active,
 
@@ -1833,6 +1835,23 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 blocking=False,
             )
             self._last_write_times[curtailment_entity] = now
+
+        # v1.0 steg 7 punkt 5: pannans soldriftläge (number.boiler_pvmaxcomp).
+        # SEM sätter bara ett tak - pannan reglerar kompressorn inom det själv.
+        # _should_write_number()s dödband (_POWER_DEADBAND_W = 50) är kalibrerat
+        # för Watt, inte kW (0-25 kW-spannet) - i praktiken skriver den här
+        # entiteten alltså mest på _HEARTBEAT_INTERVAL (5 min), inte på varje
+        # verklig förändring. Samma avvägning som curtailment_entity redan gör
+        # (curtailment_pct 0-100 mot samma 50-dödband) - inget nytt problem,
+        # bara samma befintliga mönster återanvänt.
+        pvmaxcomp_entity = self._config.get(CONF_BOILER_PVMAXCOMP_ENTITY)
+        if pvmaxcomp_entity and self._should_write_number(pvmaxcomp_entity, decision.boiler_pvmaxcomp_kw, now):
+            await self.hass.services.async_call(
+                "number", "set_value",
+                {"entity_id": pvmaxcomp_entity, "value": round(decision.boiler_pvmaxcomp_kw, 1)},
+                blocking=False,
+            )
+            self._last_write_times[pvmaxcomp_entity] = now
 
     def _apply_extra_hot_water_min_runtime(self, decision, now: datetime) -> None:
         """

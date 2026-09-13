@@ -2,6 +2,14 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.30
+
+Kopplar in steg 7 punkt 5 ("soldrift via pannans egen väg") i skarp styrning – den första av `heat_planner.py`:s fem funktioner som faktiskt når `coordinator.py`/`energy_controller.py`.
+
+- **Nytt**: `EnergyController._auto_mode()` beräknar nu `boiler_pvmaxcomp_kw` via `heat_planner.solar_compressor_boost_kw()` från samma `remaining_surplus` som redan når fram till steg 4:s extra-varmvatten-prioritet (efter att huslast, EV och batteri fått sin andel) – ett direkt kW-tak på pannans egna PV-överskotts-kompressorläge, ingen ny SEM-orkestrerad styrslinga. Skrivs till en ny valfri `number.boiler_pvmaxcomp`-liknande entitet (`boiler_pvmaxcomp_entity`-konfig, standard max 25 kW via `boiler_pvmaxcomp_max_kw`) med samma dödbands-/hjärtslagsmönster (`_should_write_number`) som den befintliga strypningsentiteten.
+- **Verifierat**: syntaxkontroll av alla fem berörda filer, plus en fullständig backtest (`testdata/history_jan_apr2026`) som bekräftade ingen krasch och oförändrad besparing (3,9 %) – väntat, eftersom ingen `boiler_pvmaxcomp_entity` är konfigurerad i backtesten, så den nya skrivvägen förblir overksam och rör inte batteri-/EV-besluten den körs bredvid.
+- Steg 7 punkt 2, 4, 6 och Steg 6 (EV-schemaläggning) är fortfarande inte inkopplade – punkt 2 behöver ett riktigt kallväders-kalibreringsfönster mot `binary_sensor.eltillskott_aktivt`, punkt 4 behöver en kalibrerad COP-modell (rå sensorn är för brusig), och punkt 6/Steg 6 är separata, större inkopplingsarbeten som fortfarande pågår.
+
 ## Nyheter i 0.9.29
 
 Lägger till veckovis grupperad, verklig-data-uppföljning av exportgolvets pretakeover-underskottsrisk – ett första steg mot att utvärdera om `main`s platta reservbuffert är säker, inte en fix i sig.

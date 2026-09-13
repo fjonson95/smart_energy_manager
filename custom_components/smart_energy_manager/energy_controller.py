@@ -7,6 +7,7 @@ from typing import Optional, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone
 
 from .price_scheduler import PriceSchedule
+from .heat_planner import solar_compressor_boost_kw
 
 if TYPE_CHECKING:
     from .energy_planner import DayPlan
@@ -22,6 +23,7 @@ from .const import (
     DEFAULT_HEAT_PUMP_PATRON_POWER_KW,
     DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH, DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE,
     DEFAULT_MAX_EXPORT_W, DEFAULT_PHASE_CURRENT_MARGIN,
+    DEFAULT_BOILER_PVMAXCOMP_MAX_KW,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -172,6 +174,8 @@ class EnergyState:
     extra_hot_water_on: bool = False
     heat_pump_patron_phases: list[str] = field(default_factory=lambda: list(DEFAULT_HEAT_PUMP_PATRON_PHASES))
     heat_pump_patron_power_kw: float = DEFAULT_HEAT_PUMP_PATRON_POWER_KW
+    # v1.0 steg 7 punkt 5: pannans egna soldriftläges maxeffekt (number.boiler_pvmaxcomp-spannet).
+    boiler_pvmaxcomp_max_kw: float = DEFAULT_BOILER_PVMAXCOMP_MAX_KW
 
     # Huslast
     house_load_w: float = 0.0
@@ -279,6 +283,10 @@ class ControlDecision:
     chargers_needing_selection: list[str] = field(default_factory=list)
     # Controllerens beräknade kvällsmål (SOC %) för plan-executor-sensor
     evening_target_soc: float = 0.0
+    # v1.0 steg 7 punkt 5: tak för pannans egna soldriftläge (number.boiler_pvmaxcomp).
+    # 0 = av/normalt (inget överskott kvar att ge kompressorn). Skrivs bara om en
+    # entitet är konfigurerad (se coordinator._execute_decision).
+    boiler_pvmaxcomp_kw: float = 0.0
 
     @property
     def any_ev_enabled(self) -> bool:
@@ -709,6 +717,15 @@ class EnergyController:
                 else:
                     suffix = ""
                 decision.reason += f" | Batteri laddar{suffix}"
+
+        # v1.0 steg 7 punkt 5: pannans egna soldriftläge – sätt bara ett TAK
+        # (number.boiler_pvmaxcomp) av det överskott som blir kvar EFTER hus/EV/
+        # batteri, pannan reglerar kompressorn inom det själv. Samma
+        # remaining_surplus som når fram till varmvatten-prioriteten nedan –
+        # se heat_planner.solar_compressor_boost_kw()s docstring.
+        decision.boiler_pvmaxcomp_kw = solar_compressor_boost_kw(
+            remaining_surplus, max_comp_power_kw=state.boiler_pvmaxcomp_max_kw
+        )
 
         # Extra varmvatten – batteri fullt och solöverskott, eller vi har passerat negativt pris idag
         varmvatten_ok = (

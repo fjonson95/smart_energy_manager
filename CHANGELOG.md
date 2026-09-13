@@ -2,6 +2,14 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.30
+
+Wires step 7 point 5 ("solar drive via the boiler's own path") into live control — the first of `heat_planner.py`'s five functions to actually reach `coordinator.py`/`energy_controller.py`.
+
+- **New**: `EnergyController._auto_mode()` now computes `boiler_pvmaxcomp_kw` via `heat_planner.solar_compressor_boost_kw()` from the same `remaining_surplus` that already reaches step 4's extra-hot-water priority (after house load, EV, and battery have taken their share) — a direct kW ceiling on the boiler's own PV-surplus compressor mode, not a new SEM-orchestrated control loop. Written to a newly optional `number.boiler_pvmaxcomp`-style entity (`boiler_pvmaxcomp_entity` config, default max 25 kW via `boiler_pvmaxcomp_max_kw`) using the same dead-band/heartbeat write pattern (`_should_write_number`) as the existing curtailment entity.
+- **Verified**: syntax check across all five touched files, plus a full backtest run (`testdata/history_jan_apr2026`) confirming no crash and unchanged savings (3.9%) — expected, since no `boiler_pvmaxcomp_entity` is configured in the backtest, so the new write path stays inert and doesn't touch the battery/EV decisions it runs alongside.
+- Step 7 points 2, 4, 6 and Step 6 (EV scheduling) remain unwired — point 2 needs a real cold-weather calibration window against `binary_sensor.eltillskott_aktivt`, point 4 needs a calibrated COP model (the raw sensor is too noisy), and points 6/Step 6 are separate, larger wiring efforts still in progress.
+
 ## What's New in 0.9.29
 
 Adds weekly-grouped real-data tracking of the export floor's pretakeover deficit risk — the first step toward evaluating whether `main`'s flat reserve buffer is safe, not a fix itself.

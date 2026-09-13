@@ -85,7 +85,9 @@
           "extra_hot_water_min_runtime_minutes": "Min runtime for extra hot water (minutes)",
           "auxheater_status_entity": "Aux heater status (optional, for the daily budget's dump exclusion)",
           "auxheater_level_entity": "Aux heater power level (%, optional)",
-          "auxheater_rated_kw": "Aux heater rated power (kW, default 8.83)"
+          "auxheater_rated_kw": "Aux heater rated power (kW, default 8.83)",
+          "boiler_pvmaxcomp_entity": "Boiler solar-mode compressor max power ceiling (number.boiler_pvmaxcomp) - step 7 point 5",
+          "boiler_pvmaxcomp_max_kw": "Boiler solar-mode max compressor power (kW, default 25)"
         }
       },
       "legionella": {
@@ -232,7 +234,9 @@
           "extra_hot_water_min_runtime_minutes": "Min runtime for extra hot water (minutes)",
           "auxheater_status_entity": "Aux heater status (optional, for the daily budget's dump exclusion)",
           "auxheater_level_entity": "Aux heater power level (%, optional)",
-          "auxheater_rated_kw": "Aux heater rated power (kW, default 8.83)"
+          "auxheater_rated_kw": "Aux heater rated power (kW, default 8.83)",
+          "boiler_pvmaxcomp_entity": "Boiler solar-mode compressor max power ceiling (number.boiler_pvmaxcomp) - step 7 point 5",
+          "boiler_pvmaxcomp_max_kw": "Boiler solar-mode max compressor power (kW, default 25)"
         }
       },
       "legionella_opts": {

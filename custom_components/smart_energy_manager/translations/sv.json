@@ -85,7 +85,9 @@
           "extra_hot_water_min_runtime_minutes": "Min körtid extra varmvatten (minuter)",
           "auxheater_status_entity": "Elpatronens status (valfri, för dygnsbudgetens dump-exkludering)",
           "auxheater_level_entity": "Elpatronens effektnivå (%, valfri)",
-          "auxheater_rated_kw": "Elpatronens märkeffekt (kW, standard 8.83)"
+          "auxheater_rated_kw": "Elpatronens märkeffekt (kW, standard 8.83)",
+          "boiler_pvmaxcomp_entity": "Pannans soldriftläge - kompressor-maxeffekt-tak (number.boiler_pvmaxcomp) - steg 7 punkt 5",
+          "boiler_pvmaxcomp_max_kw": "Pannans soldriftläge - max kompressoreffekt (kW, standard 25)"
         }
       },
       "legionella": {
@@ -232,7 +234,9 @@
           "extra_hot_water_min_runtime_minutes": "Min körtid extra varmvatten (minuter)",
           "auxheater_status_entity": "Elpatronens status (valfri, för dygnsbudgetens dump-exkludering)",
           "auxheater_level_entity": "Elpatronens effektnivå (%, valfri)",
-          "auxheater_rated_kw": "Elpatronens märkeffekt (kW, standard 8.83)"
+          "auxheater_rated_kw": "Elpatronens märkeffekt (kW, standard 8.83)",
+          "boiler_pvmaxcomp_entity": "Pannans soldriftläge - kompressor-maxeffekt-tak (number.boiler_pvmaxcomp) - steg 7 punkt 5",
+          "boiler_pvmaxcomp_max_kw": "Pannans soldriftläge - max kompressoreffekt (kW, standard 25)"
         }
       },
       "legionella_opts": {
