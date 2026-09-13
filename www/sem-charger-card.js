@@ -137,6 +137,11 @@ class SemChargerCard extends HTMLElement {
           gap: 5px;
           min-width: 28px;
         }
+        /* [hidden] har annars lägre prioritet än .batt-side{display:flex} ovan
+           (author-CSS slår alltid UA-stilarket, oavsett specificitet-tie) */
+        .batt-side[hidden] {
+          display: none;
+        }
         .batt-bar-track {
           width: 10px;
           height: 48px;
@@ -287,10 +292,16 @@ class SemChargerCard extends HTMLElement {
       carLbl.textContent = "Ingen bil";
     }
 
-    // ── Ytterst höger: husbatteriets SOC-stapel ──────────────────────
+    // ── Ytterst höger: batteri-SOC-stapel (t.ex. bilens) ──────────────
+    // Döljs helt när ingen bil är vald - stapeln avser den valda bilen,
+    // inte huset, och har inget att visa utan en aktiv bil.
+    const battSide  = this.shadowRoot.getElementById("batt-side");
     const battFill  = this.shadowRoot.getElementById("batt-fill");
     const battLabel = this.shadowRoot.getElementById("batt-label");
-    if (battFill && battLabel && cfg.battery_soc_sensor) {
+    if (battSide) {
+      battSide.hidden = !carSelected;
+    }
+    if (battFill && battLabel && cfg.battery_soc_sensor && carSelected) {
       const battState = h.states[cfg.battery_soc_sensor];
       const soc = battState && battState.state !== "unavailable"
         ? Math.min(100, Math.max(0, parseFloat(battState.state) || 0))

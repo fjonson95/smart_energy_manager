@@ -2,6 +2,13 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.33
+
+Fixes `sem-charger-card.js`: the battery SOC bar (the selected car's battery, not the house battery) stayed visible after deselecting a car, showing a stale/meaningless value with no car to attribute it to.
+
+- **Fix**: the `.batt-side` element is now hidden (`hidden` attribute, with an explicit `.batt-side[hidden]{display:none}` override since the card's own `display:flex` rule would otherwise beat the browser's default `[hidden]` styling) whenever no car is selected, and the SOC value is only read/rendered while a car is selected.
+- Copy `www/sem-charger-card.js` to `/config/www/custom_components/` (not `/config/www/` directly) and hard-reload the browser (Ctrl+Shift+R) to see the change.
+
 ## What's New in 0.9.32
 
 Wires step 6 (EV scheduling) into live control as a deadline-guarantee fallback — solar-opportunistic charging is unchanged and still takes priority; the new scheduler only tops up from the cheapest remaining grid slots if solar alone won't reach the target SOC in time.

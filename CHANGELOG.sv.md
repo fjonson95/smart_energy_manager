@@ -2,6 +2,13 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.33
+
+Fixar `sem-charger-card.js`: batteri-SOC-stapeln (den valda bilens batteri, inte husets) förblev synlig efter att en bil valts bort, och visade ett inaktuellt/meningslöst värde utan någon bil att koppla det till.
+
+- **Fix**: `.batt-side`-elementet döljs nu (`hidden`-attributet, med en explicit `.batt-side[hidden]{display:none}`-override eftersom kortets egen `display:flex`-regel annars skulle slå webbläsarens standard-`[hidden]`-styling) närhelst ingen bil är vald, och SOC-värdet läses/renderas bara medan en bil är vald.
+- Kopiera `www/sem-charger-card.js` till `/config/www/custom_components/` (inte `/config/www/` direkt) och hårdladda webbläsaren (Ctrl+Shift+R) för att se ändringen.
+
 ## Nyheter i 0.9.32
 
 Kopplar in steg 6 (EV-schemaläggning) i skarp styrning som en deadline-garanti-fallback – sol-opportunistisk laddning är oförändrad och har fortfarande förstahandsprioritet; den nya schemaläggaren fyller bara på från de billigaste återstående nätslottarna om solen ensam inte hinner nå mål-SOC i tid.
