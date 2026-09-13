@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.29
+
+Adds weekly-grouped real-data tracking of the export floor's pretakeover deficit risk — the first step toward evaluating whether `main`'s flat reserve buffer is safe, not a fix itself.
+
+- **Background**: analysis this session found that `main`'s export execution (`energy_controller.py`'s `apply_plan_executor()`, `export` branch) discharges the battery down to `day_plan.export_floor_kwh` — a flat `batt_min_kwh + 2.0 kWh (+ EV margin)` reserve — with no extra margin as `solar_takeover_dt` approaches, structurally the same class of gap that motivated the hotfix branch's 1 kWh pretakeover margin (v0.9.15/v0.9.14-era). `main`'s mechanism differs though: the merit-order `V` calculation already uses conservative P10 solar/P75 load when ranking opportunities, and replans against real SOC at least every 15 minutes — both partial mitigations the hotfix branch's static reserve curve didn't have. No live incident has been reported on `main` since it went live 2026-09-12; rather than guess a fix, this starts collecting the same real evidence used to size the hotfix branch's margin.
+- **New**: whenever a real solar takeover is confirmed (15 minutes of sustained solar surplus), the actual deficit (house load minus solar) in the preceding 30 minutes is measured and rolled up per ISO week (max deficit observed, days observed) into a new persistent store, exported as `export_margin_weekly.csv` (`week, max_pretakeover_deficit_kwh, days_observed`) via the `export_history` service.
+- **Verified**: syntax check, and a full backtest run against `testdata/history_jan_apr2026` confirmed no crash and unchanged planner output (3.9% savings, 912 export slots) — expected, since this addition is coordinator-level observation only and isn't exercised by the planner-only backtest.
+- Same tracking mechanism as the hotfix branch's v0.9.15, ported (not a copy-paste — `main` has no `_EXPORT_PRETAKEOVER_MARGIN_KWH` constant to compare against, since it has no equivalent fix yet).
+
 ## What's New in 0.9.28
 
 New baseline data collection for step 7, point 2's future tuning ("keep the immersion heater out") — `export_history` gains a fourth history dimension.

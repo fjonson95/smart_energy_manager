@@ -8,9 +8,9 @@ export_history:
   description: >-
     Exports the integration's internal history (production ratio, daily
     consumption, hourly load shape, solar takeover observations, auxiliary
-    heater activity baseline) to CSV files. Defaults to
-    config/www/smart_energy_manager_export/, downloadable via
-    /local/smart_energy_manager_export/.
+    heater activity baseline, weekly export-floor pretakeover-margin
+    tracking) to CSV files. Defaults to config/www/smart_energy_manager_export/,
+    downloadable via /local/smart_energy_manager_export/.
   fields:
     path:
       name: Path

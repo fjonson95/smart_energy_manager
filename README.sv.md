@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.28-blue)
+![Version](https://img.shields.io/badge/version-0.9.29-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.28
+## Nyheter i 0.9.29
 
-`export_history` samlar nu även in en rullande 60-dygnsbaslinje för eltillskotts-/elpatronaktivitet (`heating_backup.csv` – aktiva timmar, använd energi per dygn), startad nu så riktig data finns klar för steg 7 punkt 2:s intrimning när vintern kommer. Samma tillägg applicerat på v0.9.13-hotfixgrenen som v0.9.14. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
+Börjar veckovis grupperad, verklig-data-uppföljning av exportgolvets pretakeover-underskottsrisk på `main` (skarp sedan 2026-09-12) – ett datainsamlingssteg, inte en fix ännu. `main`s exportexekvering laddar ur ner till ett platt reservgolv utan extra marginal när `solar_takeover_dt` närmar sig (strukturellt likt det som motiverade hotfix-grenens 1 kWh-marginal), men dämpas delvis av konservativ P10/P75-merit-order-dimensionering och tät omplanering mot verklig SOC. Ny `export_margin_weekly.csv` via `export_history`. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 

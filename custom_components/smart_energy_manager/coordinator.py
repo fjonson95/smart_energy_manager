@@ -272,6 +272,20 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._aux_heat_energy_today_kwh: float = 0.0
         self._heating_backup_last_update: Optional[datetime] = None
 
+        # Veckovis uppföljning av exportgolvets pretakeover-marginal: mäter
+        # det verkliga underskottet de sista 30 min innan ett riktigt
+        # sol-övertagande bekräftas, rullas upp per ISO-vecka. Grundar en
+        # framtida omvärdering av `_reserved_kwh`s platta 2 kWh-buffert i
+        # energy_planner.py (som INTE är tidsvarierande mot
+        # solar_takeover_dt, till skillnad mot hotfix-grenens 1 kWh-marginal
+        # för samma scenario) mot riktiga utfall istället för en gissning.
+        self._pretakeover_deficit_samples: list[tuple[datetime, float, float]] = []  # (ts, house_load_w, solar_w)
+        self._export_margin_store = Store(hass, 1, f"{DOMAIN}_export_margin_weekly")
+        self._export_margin_weekly_history: list[dict] = []  # [{week, max_deficit_kwh, days_observed}]
+        self._export_margin_current_week: str = ""
+        self._export_margin_week_max_kwh: float = 0.0
+        self._export_margin_week_days: int = 0
+
     def _init_active_cars(self) -> None:
         """Initiera bilval för alla laddare."""
         chargers = self._get_charger_configs()
@@ -297,6 +311,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         await self._load_daily_consumption_store()
         await self._load_hourly_shape_store()
         await self._load_heating_backup_store()
+        await self._load_export_margin_store()
         await super().async_config_entry_first_refresh()
 
     async def _load_pv_ratio_store(self) -> None:
@@ -403,6 +418,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             "date": self._heating_backup_date,
             "aux_heat_energy_kwh_in_progress": self._aux_heat_energy_today_kwh,
             "aux_heat_on_seconds_in_progress": self._aux_heat_on_seconds_today,
+        })
+
+    async def _load_export_margin_store(self) -> None:
+        data = await self._export_margin_store.async_load()
+        if isinstance(data, dict):
+            self._export_margin_weekly_history = data.get("history", [])
+            self._export_margin_current_week = data.get("week", "")
+            self._export_margin_week_max_kwh = float(data.get("week_max_kwh_in_progress", 0.0))
+            self._export_margin_week_days = int(data.get("week_days_in_progress", 0))
+
+    async def _save_export_margin_store(self) -> None:
+        await self._export_margin_store.async_save({
+            "history": self._export_margin_weekly_history,
+            "week": self._export_margin_current_week,
+            "week_max_kwh_in_progress": self._export_margin_week_max_kwh,
+            "week_days_in_progress": self._export_margin_week_days,
         })
 
     async def _load_hourly_shape_store(self) -> None:
@@ -769,7 +800,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     async def async_export_history(self, directory: Optional[str] = None) -> str:
         """Exportera de interna historik-stores (produktionskvot, dagsförbrukning,
         lastprofil, sol-takeover-observationer, elpatron-/eltillskotts-
-        baslinje) till CSV via service-anrop.
+        baslinje, veckovis pretakeover-exportmarginal) till CSV via
+        service-anrop.
 
         Default-katalogen ligger under www/ så filerna blir nedladdningsbara via
         /local/smart_energy_manager_export/ utan extra konfiguration.
@@ -809,6 +841,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 w.writerow(["date", "aux_heat_on_hours", "aux_heat_energy_kwh"])
                 for row in self._heating_backup_history:
                     w.writerow([row.get("date"), row.get("aux_heat_on_hours"), row.get("aux_heat_energy_kwh")])
+
+            with open(os.path.join(target_dir, "export_margin_weekly.csv"), "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["week", "max_pretakeover_deficit_kwh", "days_observed"])
+                for row in self._export_margin_weekly_history:
+                    w.writerow([row.get("week"), row.get("max_deficit_kwh"), row.get("days_observed")])
 
         await self.hass.async_add_executor_job(_write)
         _LOGGER.info("Historik exporterad till %s", target_dir)
@@ -1041,9 +1079,18 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 solar_takeover_dt = self._saved_solar_takeover_dt
                 _LOGGER.debug("solar_takeover_dt: Solcast inaktuell, återanvänder sparat värde %s", solar_takeover_dt)
 
+            # Rullande buffert (senaste 90 min) av (tid, huslast, sol) - underlag
+            # för pretakeover-marginalens veckouppföljning nedan. Byggs varje
+            # cykel oavsett om en takeover observeras just nu eller ej.
+            _local_now = dt_util.now()
+            self._pretakeover_deficit_samples.append((_local_now, house_load_w, solar_w))
+            _pretakeover_cutoff = _local_now - timedelta(minutes=90)
+            self._pretakeover_deficit_samples = [
+                s for s in self._pretakeover_deficit_samples if s[0] >= _pretakeover_cutoff
+            ]
+
             # Observera när solöverskott > 0 i ≥15 min – bygger historisk takeover-tid.
             # Nollställ vid midnatt (nytt dygn).
-            _local_now = dt_util.now()
             _today_str = _local_now.strftime("%Y-%m-%d")
             if not hasattr(self, "_takeover_obs_date"):
                 self._takeover_obs_date = _today_str
@@ -1081,6 +1128,49 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             obs_min, self._surplus_positive_since.strftime("%H:%M"),
                         )
                         await self._save_takeover_store()
+
+                        # Pretakeover-marginalens veckouppföljning: mät verkligt
+                        # underskott (huslast minus sol) de 30 minuterna precis
+                        # innan den bekräftade takeover-starten - samma storhet
+                        # den platta 2 kWh-bufferten i _reserved_kwh
+                        # (energy_planner.py, ej tidsvarierande mot
+                        # solar_takeover_dt) behöver täcka. Trapetsintegration
+                        # över den redan byggda 90-minutersbufferten.
+                        _window_start = self._surplus_positive_since - timedelta(minutes=30)
+                        _relevant = [
+                            s for s in self._pretakeover_deficit_samples
+                            if _window_start <= s[0] <= self._surplus_positive_since
+                        ]
+                        _deficit_kwh = 0.0
+                        for i in range(1, len(_relevant)):
+                            ts0, l0, s0 = _relevant[i - 1]
+                            ts1, l1, s1 = _relevant[i]
+                            _dt_h = (ts1 - ts0).total_seconds() / 3600.0
+                            if 0.0 < _dt_h < 0.5:
+                                _avg_deficit_w = max(0.0, ((l0 - s0) + (l1 - s1)) / 2.0)
+                                _deficit_kwh += _avg_deficit_w / 1000.0 * _dt_h
+
+                        _iso_year, _iso_week, _ = _local_now.isocalendar()
+                        _week_key = f"{_iso_year}-W{_iso_week:02d}"
+                        if _week_key != self._export_margin_current_week:
+                            if self._export_margin_current_week:
+                                self._export_margin_weekly_history.append({
+                                    "week": self._export_margin_current_week,
+                                    "max_deficit_kwh": round(self._export_margin_week_max_kwh, 3),
+                                    "days_observed": self._export_margin_week_days,
+                                })
+                                self._export_margin_weekly_history = self._export_margin_weekly_history[-26:]
+                            self._export_margin_current_week = _week_key
+                            self._export_margin_week_max_kwh = 0.0
+                            self._export_margin_week_days = 0
+
+                        self._export_margin_week_max_kwh = max(self._export_margin_week_max_kwh, _deficit_kwh)
+                        self._export_margin_week_days += 1
+                        self.hass.async_create_task(self._save_export_margin_store())
+                        _LOGGER.info(
+                            "Pretakeover-underskott (vecka %s): %.2f kWh (flat buffert i golvet: ~2 kWh)",
+                            _week_key, _deficit_kwh,
+                        )
                 else:
                     self._surplus_positive_since = None
                     self._had_negative_surplus_today = True

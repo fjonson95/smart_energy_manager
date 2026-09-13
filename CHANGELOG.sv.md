@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.29
+
+Lägger till veckovis grupperad, verklig-data-uppföljning av exportgolvets pretakeover-underskottsrisk – ett första steg mot att utvärdera om `main`s platta reservbuffert är säker, inte en fix i sig.
+
+- **Bakgrund**: analys den här sessionen visade att `main`s exportexekvering (`energy_controller.py`:s `apply_plan_executor()`, `export`-grenen) laddar ur batteriet ner till `day_plan.export_floor_kwh` – en platt `batt_min_kwh + 2,0 kWh (+ EV-marginal)`-reserv – utan extra marginal när `solar_takeover_dt` närmar sig, strukturellt samma sorts hål som motiverade hotfix-grenens 1 kWh-pretakeover-marginal (v0.9.15/v0.9.14-eran). `main`s mekanism skiljer sig dock: merit-order-beräkningen av `V` använder redan konservativ P10-sol/P75-last vid rangordning av möjligheter, och omplanerar mot verklig SOC minst var 15:e minut – båda delvisa dämpningar som hotfix-grenens statiska reservbana saknade. Ingen skarp incident har rapporterats på `main` sedan den gick i drift 2026-09-12; istället för att gissa en fix börjar det här samla in samma sorts riktiga underlag som användes för att dimensionera hotfix-grenens marginal.
+- **Nytt**: varje gång ett riktigt sol-övertagande bekräftas (15 minuters sammanhängande solöverskott) mäts nu det faktiska underskottet (huslast minus sol) de föregående 30 minuterna och rullas upp per ISO-vecka (max uppmätt underskott, antal observerade dagar) i en ny persistent store, exporterad som `export_margin_weekly.csv` (`week, max_pretakeover_deficit_kwh, days_observed`) via `export_history`-tjänsten.
+- **Verifierat**: syntaxkontroll, samt en fullständig backtest mot `testdata/history_jan_apr2026` som bekräftade ingen krasch och oförändrat planerarutfall (3,9 % besparing, 912 exportslots) – väntat, eftersom tillägget bara är koordinator-nivå-observation och inte triggas av den rena planerar-backtesten.
+- Samma uppföljningsmekanism som hotfix-grenens v0.9.15, portad (inte en ren kopiering – `main` saknar en `_EXPORT_PRETAKEOVER_MARGIN_KWH`-konstant att jämföra mot, eftersom den saknar en motsvarande fix ännu).
+
 ## Nyheter i 0.9.28
 
 Ny baslinjeinsamling för steg 7 punkt 2:s framtida intrimning ("håll elpatronerna utanför") – `export_history` får en fjärde historikdimension.
