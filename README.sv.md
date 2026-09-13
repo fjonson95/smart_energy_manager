@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.30-blue)
+![Version](https://img.shields.io/badge/version-0.9.31-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.30
+## Nyheter i 0.9.31
 
-Steg 7 punkt 5 ("soldrift via pannans egen väg") är nu inkopplad i skarp styrning – pannans eget PV-överskotts-kompressorläge (`number.boiler_pvmaxcomp`) får ett skarpt kW-tak beräknat från samma sol-överskott (efter batteri/EV) som redan matar extra-varmvatten-prioriteten. Valfri konfig (`boiler_pvmaxcomp_entity` / `boiler_pvmaxcomp_max_kw`, standard 25 kW) – overksam om inte konfigurerad. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
+Första halvan av steg 7 punkt 6 ("dumpa överskott till varmvatten istället för att sälja") är nu inkopplad i skarp styrning – extra varmvatten triggar nu även när batteriladdningströskeln (`V_charge`) ligger under aktuellt säljpris, inte bara när batteriet redan är fullt. Legionella-schemaläggningshalvan av punkt 6 lämnas medvetet oinkopplad – den skulle ersätta en redan fungerande schemaläggningsmekanism, inte bara koppla in en overksam funktion. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.29:s veckovisa exportmarginal-uppföljning, v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.30:s inkoppling av pannans soldriftläge, v0.9.29:s veckovisa exportmarginal-uppföljning, v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 

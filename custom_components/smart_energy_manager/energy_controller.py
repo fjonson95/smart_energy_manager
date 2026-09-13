@@ -7,7 +7,7 @@ from typing import Optional, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone
 
 from .price_scheduler import PriceSchedule
-from .heat_planner import solar_compressor_boost_kw
+from .heat_planner import solar_compressor_boost_kw, should_dump_to_hot_water
 
 if TYPE_CHECKING:
     from .energy_planner import DayPlan
@@ -251,6 +251,11 @@ class EnergyState:
     # DayPlan.export_floor_kwh – batterienergi som ska sparas till att solen tar över.
     # Sätts av coordinator precis innan compute() anropas. None = ingen plan tillgänglig.
     plan_export_floor_kwh: Optional[float] = None
+
+    # DayPlan.marginal_value_charge_sek_kwh (V_charge) – v1.0 steg 7 punkt 6:
+    # samma tröskel som avgör om batteriet laddas från solöverskott, återanvänd
+    # av heat_planner.should_dump_to_hot_water(). None = ingen plan tillgänglig.
+    plan_marginal_value_charge_sek_kwh: Optional[float] = None
 
     # Driftläge
     operating_mode: str = MODE_AUTO
@@ -727,15 +732,37 @@ class EnergyController:
             remaining_surplus, max_comp_power_kw=state.boiler_pvmaxcomp_max_kw
         )
 
-        # Extra varmvatten – batteri fullt och solöverskott, eller vi har passerat negativt pris idag
+        # v1.0 steg 7 punkt 6 (första halvan): dumpa till varmvatten istället
+        # för att sälja, när V_charge < sälj_nu - regel 1:s ELSE-gren (samma
+        # jämförelse som avgör om batteriet laddas, se heat_planner.
+        # should_dump_to_hot_water()s docstring). Bara relevant när det
+        # faktiskt finns överskott kvar att göra något med.
+        dump_to_hot_water = (
+            remaining_surplus > 100
+            and state.plan_marginal_value_charge_sek_kwh is not None
+            and should_dump_to_hot_water(
+                state.plan_marginal_value_charge_sek_kwh, sell_price,
+                state.hot_water_temp_c, state.extra_hot_water_min_temp,
+            )
+        )
+
+        # Extra varmvatten – batteri fullt och solöverskott, vi har passerat
+        # negativt pris idag, eller (punkt 6) överskottet är mer värt att
+        # självkonsumera än att sälja.
         varmvatten_ok = (
             (remaining_surplus > 500 and battery_soc >= self.battery_max_soc)
             or had_negative_today
+            or dump_to_hot_water
         )
         if varmvatten_ok and self._can_start_extra_hot_water(state):
             decision.extra_hot_water = True
             temp_str = f" (tank {state.hot_water_temp_c:.0f}°C)" if state.hot_water_temp_c is not None else ""
-            trigger = "passerat neg pris" if had_negative_today and not (remaining_surplus > 500 and battery_soc >= self.battery_max_soc) else "batteri fullt"
+            if had_negative_today and not (remaining_surplus > 500 and battery_soc >= self.battery_max_soc):
+                trigger = "passerat neg pris"
+            elif not (remaining_surplus > 500 and battery_soc >= self.battery_max_soc):
+                trigger = "V_charge<sälj, dumpar överskott"
+            else:
+                trigger = "batteri fullt"
             decision.reason += f" | Extra varmvatten ({trigger}{temp_str})"
 
         # Export styrs av EnergyPlanner via coordinator – plan_action sätts i EnergyState

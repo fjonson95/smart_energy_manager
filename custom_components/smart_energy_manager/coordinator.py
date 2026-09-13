@@ -1463,6 +1463,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 _cs = self._day_plan.slot_at(now)
                 state.plan_action = _cs.action if _cs else None
                 state.plan_export_floor_kwh = self._day_plan.export_floor_kwh
+                state.plan_marginal_value_charge_sek_kwh = self._day_plan.marginal_value_charge_sek_kwh
 
             decision = self._controller.compute(state)
             self._last_decision = decision

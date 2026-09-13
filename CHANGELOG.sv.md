@@ -2,6 +2,14 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.31
+
+Kopplar in första halvan av steg 7 punkt 6 ("dumpa överskott till varmvatten istället för att sälja") i skarp styrning.
+
+- **Nytt**: `EnergyController._auto_mode()` triggar nu extra varmvatten som ett tredje villkor – bredvid de befintliga "batteri fullt" och "redan passerat negativt pris idag" – närhelst `heat_planner.should_dump_to_hot_water()` säger att det marginella batteriladdningsvärdet (`V_charge`, exakt samma tröskel som redan avgör om solöverskott sparas till batteriet) ligger under aktuellt säljpris. `DayPlan` exponerar nu `marginal_value_charge_sek_kwh` (`V_charge`, skild från den befintliga rå `V`) så att styrlogiken kan återanvända planerarens egen upp-till-15-minuter-gamla jämförelse via `EnergyState.plan_marginal_value_charge_sek_kwh` – samma "läs planens eget fält precis innan compute()"-mönster som `plan_action`/`plan_export_floor_kwh` redan använder, ingen ny koppling mellan de två modulerna.
+- **Verifierat**: syntaxkontroll, samt en fullständig backtest som bekräftade ingen krasch och oförändrad besparing (3,9 %) – väntat, eftersom grenen bara sätter `decision.extra_hot_water`, aldrig rör batteriets ladd-/urladdningseffekt, vilket är det backtestens besparingsmått mäter.
+- **Inte gjort i denna release**: andra halvan av steg 7 punkt 6 (`schedule_cheapest_window()` för legionella-schemaläggning) är medvetet INTE inkopplad – `legionella.py` har redan en annan, skarpt verifierad schemaläggningsmekanism (`price_schedule.is_best_opportunity_now()`, P5-4) som löser i princip samma problem, och att byta ut den mot `schedule_cheapest_window()` skulle ersätta fungerande hälsosäkerhetsrelevant logik, inte bara koppla in en oanvänd funktion. Lämnat för ett separat beslut.
+
 ## Nyheter i 0.9.30
 
 Kopplar in steg 7 punkt 5 ("soldrift via pannans egen väg") i skarp styrning – den första av `heat_planner.py`:s fem funktioner som faktiskt når `coordinator.py`/`energy_controller.py`.

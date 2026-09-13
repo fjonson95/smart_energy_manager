@@ -2,6 +2,14 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.31
+
+Wires step 7 point 6's first half ("dump surplus to hot water instead of selling") into live control.
+
+- **New**: `EnergyController._auto_mode()` now triggers extra hot water as a third condition — alongside the existing "battery full" and "already past negative price today" triggers — whenever `heat_planner.should_dump_to_hot_water()` says the marginal battery-charge value (`V_charge`, the exact threshold that already decides whether solar surplus gets saved to the battery) is below the current sell price. `DayPlan` now exposes `marginal_value_charge_sek_kwh` (`V_charge`, distinct from the existing raw `V`) so the controller can reuse the planner's own up-to-15-minute-old comparison via `EnergyState.plan_marginal_value_charge_sek_kwh` — the same "read the plan's own field just before compute()" pattern `plan_action`/`plan_export_floor_kwh` already use, not a new coupling between the two modules.
+- **Verified**: syntax check, and a full backtest run confirming no crash and unchanged savings (3.9%) — expected, since this branch only sets `decision.extra_hot_water`, never touches battery charge/discharge power, which is what the backtest's savings metric measures.
+- **Not done this release**: step 6 point 6's second half (`schedule_cheapest_window()` for legionella scheduling) is deliberately NOT wired in — `legionella.py` already has a different, live-verified scheduling mechanism (`price_schedule.is_best_opportunity_now()`, P5-4) solving essentially the same problem, and swapping it for `schedule_cheapest_window()` would replace working health-safety-relevant logic, not just connect an unused function. Left for a separate decision.
+
 ## What's New in 0.9.30
 
 Wires step 7 point 5 ("solar drive via the boiler's own path") into live control — the first of `heat_planner.py`'s five functions to actually reach `coordinator.py`/`energy_controller.py`.

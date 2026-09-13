@@ -142,6 +142,10 @@ class DayPlan:
     pv_production_ratio: float = 1.0
     marginal_value_sek_kwh: float = 0.0
     marginal_slot_start: Optional[datetime] = None
+    # v1.0 steg 7 punkt 6: V_charge (regel 1:s faktiska tröskel, inte rå V) -
+    # exponerad separat så heat_planner.should_dump_to_hot_water() kan använda
+    # exakt samma jämförelse som avgör om batteriet laddas från solöverskott.
+    marginal_value_charge_sek_kwh: float = 0.0
 
     slots: list[PlannedSlot] = field(default_factory=list)
     notes: str = ""
@@ -724,6 +728,7 @@ class EnergyPlanner:
             hourly_load_kw=hourly_load_kw,
             pv_production_ratio=pv_production_ratio,
             marginal_value_sek_kwh=V,
+            marginal_value_charge_sek_kwh=V_charge,
             marginal_slot_start=_marginal_slot_start,
             slots=planned,
             notes=notes,
