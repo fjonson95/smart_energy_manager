@@ -359,6 +359,12 @@ class EnergyController:
         self.auto_discharge_threshold = auto_discharge_threshold_sek
         self.sell_solar_min_price = sell_solar_min_price_sek
         self.evening_min_soc = evening_min_soc
+        # v1.0: SEM:s eget senast skickade batterikommando (laddning-urladdning,
+        # W). Används i _apply_phase_limits() istället för Sonnen-batteriets
+        # egen statusåterläsning (state.battery_power_w), som uppdaterar
+        # oregelbundet (30-180s, ej synkat med SEM:s 30s-cykel) - se
+        # kommentaren i _apply_phase_limits() för hela resonemanget.
+        self._last_battery_command_w: float = 0.0
 
     # ── Publik ingångspunkt ───────────────────────────────────────────
 
@@ -1187,8 +1193,21 @@ class EnergyController:
             else:
                 loads[ph] = power_w
 
-        # Batteri: ta bort nuvarande effekt, lägg till beslutets effekt (per fas)
-        current_batt_per_phase = state.battery_power_w / 3.0  # positiv=laddning, negativ=urladdning
+        # Batteri: ta bort nuvarande effekt, lägg till beslutets effekt (per fas).
+        # Baslinjen är SEM:s EGET senast skickade kommando (_last_battery_command_w),
+        # inte Sonnen-batteriets egen statusåterläsning (state.battery_power_w).
+        # Den sensorn uppdaterar oregelbundet (uppmätt 2026-09-14: 422/465
+        # mellanrum = 30s, men 14 st 60s, en 120s) och är inte synkad med
+        # SEM:s egen 30s-cykel eller med elmatare_current_lX (baslasten ovan),
+        # som hinner med snabbare. Diskrepansen gjorde att fasskyddet
+        # systematiskt underskattade batteriets redan pågående bidrag -
+        # loads[ph] fick både den redan-höjda verkliga strömmen OCH nästan
+        # hela det nya 8000W-målet ovanpå, vilket gav falska 20A+-utslag och
+        # en självförstärkande pendling mellan fullt 8000W och hårt klämt
+        # värde var 30:e sekund. SEM:s eget kommando är känt med noll
+        # fördröjning och alltid exakt en cykel gammalt (konsekvent),
+        # istället för en extern sensor vars ålder varierar oförutsägbart.
+        current_batt_per_phase = self._last_battery_command_w / 3.0  # positiv=laddning, negativ=urladdning
         new_batt_per_phase = (
             decision.battery_charge_power_w - decision.battery_discharge_power_w
         ) / 3.0
@@ -1333,6 +1352,9 @@ class EnergyController:
             L2=loads.get("L2", 0.0),
             L3=loads.get("L3", 0.0),
         )
+        # Spara det FAKTISKT klämda kommandot till nästa cykels baslinje
+        # (se kommentaren vid current_batt_per_phase ovan).
+        self._last_battery_command_w = decision.battery_charge_power_w - decision.battery_discharge_power_w
         return decision
 
     # ── Hjälpare ──────────────────────────────────────────────────────

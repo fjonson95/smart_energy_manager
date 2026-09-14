@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.34
+
+Fixar en riktig skarp oscillation hittad via dataanalys 2026-09-14: batteriet svängde upprepade gånger mellan full 8000W-laddning och ett hårt klämt värde varje 30-sekunderscykel i flera timmar under natten, istället för att stabilisera sig mjukt.
+
+- **Grundorsak (verifierad mot riktiga CSV-exporter, inte gissad)**: `_apply_phase_limits()` bygger den projicerade fasströmmen från den verkliga nätströmsensorn (`elmatare_current_lX`) minus batteriets just nu rapporterade effekt (`state.battery_power_w`, läst från Sonnenbatteriets egen statussensor) plus det nya beslutets mål. Uppmätt uppdateringsintervall för den Sonnen-sensorn: 422/465 mellanrum var exakt 30s, men 14 st var 60s och ett var 120s – en uppdateringstakt som inte är synkad med varken SEM:s egen 30s-beslutscykel eller nätströmsensorn. När Sonnen-återläsningen laggade bakom den verkliga, redan stigande batteriströmmen som nätsensorn redan fångat upp, subtraherade koden bort för lite av batteriets befintliga bidrag – den projicerade fasströmmen räknade det alltså dubbelt, gav falska 20A+-utslag och triggade en hård klämning; nästa cykel bad regel 3 om hela 8000W igen (inget minne av föregående klämning), den (fortfarande fördröjda) sensorn visade åter låg ström så klämningen triggade inte – upprepning.
+- **Fix**: `_apply_phase_limits()` använder nu `EnergyController._last_battery_command_w` – SEM:s eget senast skickade kommando, känt direkt utan fördröjning – istället för Sonnen-statussensorns återläsning, för att räkna ut batteriets redan inräknade bidrag till nätbaslasten.
+- **Verifierat**: syntaxkontroll, en fullständig backtest (ingen krasch, besparing oförändrad/marginellt förbättrad: 4,0 % mot 3,9 %), samt ett fristående scenariotest som återskapar exakt fördröjningsvillkoret – bekräftar att fixen låter laddningen trappa upp cykel för cykel istället för att pendla tillbaka till ett återklämt värde.
+- **Känd avvägning**: `_last_battery_command_w` börjar på 0,0 efter en omstart (antar kortvarigt ingen pågående batteriaktivitet), en engångscykel (30s) självläkande avvikelse – samma sorts ofarliga uppstartsartefakt som SMHI-race-villkoret hittat tidigare den här sessionen.
+
 ## Nyheter i 0.9.33
 
 Fixar `sem-charger-card.js`: batteri-SOC-stapeln (den valda bilens batteri, inte husets) förblev synlig efter att en bil valts bort, och visade ett inaktuellt/meningslöst värde utan någon bil att koppla det till.

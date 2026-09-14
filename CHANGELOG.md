@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.34
+
+Fixes a real live oscillation found via data analysis 2026-09-14: the battery repeatedly swung between full 8000W charge and a hard-clamped value every 30-second decision cycle for hours overnight, instead of settling smoothly.
+
+- **Root cause (verified against real CSV exports, not guessed)**: `_apply_phase_limits()` builds the projected phase current from the real grid current sensor (`elmatare_current_lX`) minus the battery's currently-reported power (`state.battery_power_w`, read from the Sonnen battery's own status sensor) plus the new decision's target. Measured update-gap distribution for that Sonnen sensor: 422/465 intervals were exactly 30s, but 14 were 60s and one was 120s — an update cadence not synchronized with SEM's own 30s decision loop or with the grid current sensor. When the Sonnen readback lagged behind the real, already-rising battery current the grid sensor had already captured, the subtraction under-removed the battery's existing contribution — so the projected phase current double-counted it, producing false 20A+ readings and triggering a hard clamp; the next cycle, regel 3 requested the full 8000W again (no memory of the prior correction), the (still-lagging) sensor showed low current again, so the clamp didn't trigger — repeat.
+- **Fix**: `_apply_phase_limits()` now uses `EnergyController._last_battery_command_w` — SEM's own most recently sent command, known instantly with zero lag — instead of the Sonnen status sensor's readback, to compute the battery's already-included contribution to the grid baseline.
+- **Verified**: syntax check, a full backtest run (no crash, savings unchanged/marginally improved: 4.0% vs 3.9%), and a standalone scenario test reproducing the exact lag condition — confirms the fix lets charging ramp up cycle-over-cycle instead of oscillating back down to a re-clamped value.
+- **Known tradeoff**: `_last_battery_command_w` starts at 0.0 after a restart (briefly assumes no ongoing battery activity), a one-cycle (30s) self-healing discrepancy — same class of benign startup transient as the SMHI race condition found earlier this session.
+
 ## What's New in 0.9.33
 
 Fixes `sem-charger-card.js`: the battery SOC bar (the selected car's battery, not the house battery) stayed visible after deselecting a car, showing a stale/meaningless value with no car to attribute it to.
