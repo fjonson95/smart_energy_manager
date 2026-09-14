@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.35
+
+Fixes extra hot water dumping (`should_dump_to_hot_water`, wired in 0.9.31) triggering on a trivial solar surplus and immediately importing most of its 6kW draw from grid/battery — found via live data 2026-09-14: it fired twice in the evening (18:20 and 18:37) with only 300-500W of actual solar surplus and a sell price of 2.93-3.06 SEK/kWh (high, not low), each time locking the heater on for the full 11-minute minimum-runtime window.
+
+- **Root cause**: `extra_hot_water` is a plain on/off switch — the heating element draws its full rated power (`heat_pump_patron_power_kw`, 6kW on this install) the instant it's enabled, regardless of how small the surplus was that triggered it. The gate only required `remaining_surplus > 100`, a fixed 100W floor with no relation to the element's actual draw, so a few hundred watts of surplus could open a 6kW tap — the shortfall gets pulled from grid/battery instead of solar, defeating the "self-consume surplus" purpose.
+- **Fix**: `EnergyController._auto_mode()`'s dump-to-hot-water gate now requires `remaining_surplus` to cover a configurable share (`extra_hot_water_min_surplus_ratio`, default 70%) of `state.heat_pump_patron_power_kw`'s actual wattage, instead of the flat 100W floor.
+- **Same fix applied to the sibling "battery full" trigger**: `varmvatten_ok`'s other surplus-gated branch (battery at max SOC with leftover surplus) had the identical flat-floor bug at 500W, found during the same audit — now shares the same ratio-based `battery_full_dump` check.
+- **Verified**: syntax check. Simulated against today's actual logged data (2026-09-14): with the new gate, none of the four real triggers that fired today (16:30, 16:53, 18:20, 18:37 — solar never exceeded ~1.9kW at any of them, all well under the 4.2kW/70% floor) would have fired.
+
 ## What's New in 0.9.34
 
 Fixes a real live oscillation found via data analysis 2026-09-14: the battery repeatedly swung between full 8000W charge and a hard-clamped value every 30-second decision cycle for hours overnight, instead of settling smoothly.

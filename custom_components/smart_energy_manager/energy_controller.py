@@ -348,6 +348,7 @@ class EnergyController:
         auto_discharge_threshold_sek: float = 0.20,
         sell_solar_min_price_sek: float = 0.80,
         evening_min_soc: float = 90.0,
+        extra_hot_water_min_surplus_ratio: float = 0.70,
     ):
         self.max_current = max_current_per_phase
         self.max_current_effective = max(0.0, max_current_per_phase - DEFAULT_PHASE_CURRENT_MARGIN)
@@ -359,6 +360,7 @@ class EnergyController:
         self.auto_discharge_threshold = auto_discharge_threshold_sek
         self.sell_solar_min_price = sell_solar_min_price_sek
         self.evening_min_soc = evening_min_soc
+        self.extra_hot_water_min_surplus_ratio = extra_hot_water_min_surplus_ratio
         # v1.0: SEM:s eget senast skickade batterikommando (laddning-urladdning,
         # W). Används i _apply_phase_limits() istället för Sonnen-batteriets
         # egen statusåterläsning (state.battery_power_w), som uppdaterar
@@ -779,10 +781,16 @@ class EnergyController:
         # v1.0 steg 7 punkt 6 (första halvan): dumpa till varmvatten istället
         # för att sälja, när V_charge < sälj_nu - regel 1:s ELSE-gren (samma
         # jämförelse som avgör om batteriet laddas, se heat_planner.
-        # should_dump_to_hot_water()s docstring). Bara relevant när det
-        # faktiskt finns överskott kvar att göra något med.
+        # should_dump_to_hot_water()s docstring). extra_hot_water är en ren
+        # PÅ/AV-brytare som drar elpatronens FULLA effekt oavsett hur litet
+        # överskottet var vid triggertillfället - ett tidigare 100W-golv
+        # kunde slå på en 6 kW-brytare på ett par hundra watt sol, vilket i
+        # praktiken importerade resten från nät/batteri (upptäckt 2026-09-14,
+        # flimrade på/av i skymningen). Kräv därför att överskottet täcker
+        # en stor andel (self.extra_hot_water_min_surplus_ratio) av elpatronens
+        # verkliga effekt innan dumpen tillåts.
         dump_to_hot_water = (
-            remaining_surplus > 100
+            remaining_surplus >= state.heat_pump_patron_power_kw * 1000 * self.extra_hot_water_min_surplus_ratio
             and state.plan_marginal_value_charge_sek_kwh is not None
             and should_dump_to_hot_water(
                 state.plan_marginal_value_charge_sek_kwh, sell_price,
@@ -792,18 +800,21 @@ class EnergyController:
 
         # Extra varmvatten – batteri fullt och solöverskott, vi har passerat
         # negativt pris idag, eller (punkt 6) överskottet är mer värt att
-        # självkonsumera än att sälja.
-        varmvatten_ok = (
-            (remaining_surplus > 500 and battery_soc >= self.battery_max_soc)
-            or had_negative_today
-            or dump_to_hot_water
+        # självkonsumera än att sälja. Samma 6kW-brytarproblem som
+        # dump_to_hot_water ovan (se dess kommentar) gäller även här – ett
+        # löst 500W-golv kunde slå på hela patroneffekten på en bråkdel av
+        # vad den faktiskt drar, med resten importerad från nätet.
+        battery_full_dump = (
+            remaining_surplus >= state.heat_pump_patron_power_kw * 1000 * self.extra_hot_water_min_surplus_ratio
+            and battery_soc >= self.battery_max_soc
         )
+        varmvatten_ok = battery_full_dump or had_negative_today or dump_to_hot_water
         if varmvatten_ok and self._can_start_extra_hot_water(state):
             decision.extra_hot_water = True
             temp_str = f" (tank {state.hot_water_temp_c:.0f}°C)" if state.hot_water_temp_c is not None else ""
-            if had_negative_today and not (remaining_surplus > 500 and battery_soc >= self.battery_max_soc):
+            if had_negative_today and not battery_full_dump:
                 trigger = "passerat neg pris"
-            elif not (remaining_surplus > 500 and battery_soc >= self.battery_max_soc):
+            elif not battery_full_dump:
                 trigger = "V_charge<sälj, dumpar överskott"
             else:
                 trigger = "batteri fullt"

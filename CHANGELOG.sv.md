@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.35
+
+Fixar att extra varmvattendump (`should_dump_to_hot_water`, inkopplad i 0.9.31) triggade vid ett futtigt solöverskott och omedelbart importerade merparten av sina 6 kW från nät/batteri – hittat via skarp data 2026-09-14: den slog till två gånger på kvällen (18:20 och 18:37) med bara 300-500W verkligt solöverskott och ett säljpris på 2,93-3,06 kr/kWh (högt, inte lågt), och låste varje gång på elpatronen hela 11-minuters-minimitiden.
+
+- **Grundorsak**: `extra_hot_water` är en ren PÅ/AV-brytare – värmeelementet drar sin fulla märkeffekt (`heat_pump_patron_power_kw`, 6 kW på den här installationen) direkt när den slås på, oavsett hur litet överskottet var som triggade den. Villkoret krävde bara `remaining_surplus > 100`, ett fast 100W-golv utan koppling till elementets faktiska drag, så några hundra watt överskott kunde öppna en 6 kW-kran – mellanskillnaden dras från nät/batteri istället för sol, vilket motverkar hela syftet "självkonsumera överskott".
+- **Fix**: `EnergyController._auto_mode()`s villkor för varmvattendump kräver nu att `remaining_surplus` täcker en konfigurerbar andel (`extra_hot_water_min_surplus_ratio`, standard 70 %) av `state.heat_pump_patron_power_kw`s verkliga effekt, istället för det fasta 100W-golvet.
+- **Samma fix tillämpad på syskongrenen "batteriet fullt"**: `varmvatten_ok`s andra överskottsgrindade gren (batteri vid max-SOC med kvarvarande överskott) hade samma fasta-golv-bugg vid 500W, hittad under samma genomgång – delar nu samma kvotbaserade `battery_full_dump`-kontroll.
+- **Verifierat**: syntaxkontroll. Simulerat mot dagens faktiska loggade data (2026-09-14): med den nya gränsen hade inget av de fyra riktiga tillfällena som triggade idag (16:30, 16:53, 18:20, 18:37 – solen översteg aldrig ~1,9 kW vid något av dem, långt under 4,2kW/70%-golvet) triggat.
+
 ## Nyheter i 0.9.34
 
 Fixar en riktig skarp oscillation hittad via dataanalys 2026-09-14: batteriet svängde upprepade gånger mellan full 8000W-laddning och ett hårt klämt värde varje 30-sekunderscykel i flera timmar under natten, istället för att stabilisera sig mjukt.
