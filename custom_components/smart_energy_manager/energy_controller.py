@@ -525,7 +525,11 @@ class EnergyController:
             )
 
             self._check_car_selection(state, decision)
-            return self._apply_phase_limits(state, decision)
+            # update_memory=False: apply_plan_executor() körs alltid efteråt i
+            # auto-läge (se dess docstring) och äger det slutgiltiga minnes-
+            # skrivandet - annars stör det här preliminära anropet minnet innan
+            # det slutgiltiga anropet hinner läsa föregående cykels värde.
+            return self._apply_phase_limits(state, decision, update_memory=False)
 
         # ── Normal auto ───────────────────────────────────────────────
         remaining_surplus = solar_surplus_w
@@ -963,7 +967,8 @@ class EnergyController:
             decision.battery_discharge_power_w = 0.0
 
         self._check_car_selection(state, decision)
-        return self._apply_phase_limits(state, decision)
+        # update_memory=False: se kommentaren vid negativt-pris-grenens anrop ovan.
+        return self._apply_phase_limits(state, decision, update_memory=False)
 
     # ── Force-lägen ───────────────────────────────────────────────────
 
@@ -1059,10 +1064,19 @@ class EnergyController:
             # planerar mot percentiler av dagens EGNA priser) - utan den här
             # spärren skrev raderna nedan blint över trappans beslut med
             # planens vanliga cover_load/export-logik varje cykel.
+            # _auto_mode()s eget fasskyddsanrop körde med update_memory=False
+            # (se dess kommentar) eftersom DEN HÄR funktionen äger det
+            # slutgiltiga minnesskrivandet i auto-läge - så det måste göras
+            # här på varje returväg, annars fryser minnet kvar på ett gammalt
+            # värde (eller, värre, på ett värde från en tidigare cykel vars
+            # eget minnesskrivande också hoppades över).
+            self._last_battery_command_w = decision.battery_charge_power_w - decision.battery_discharge_power_w
             return decision
 
         now_slot = day_plan.slot_at(now)
         if not now_slot:
+            # Samma resonemang som negativt-pris-grenen ovan.
+            self._last_battery_command_w = decision.battery_charge_power_w - decision.battery_discharge_power_w
             return decision
 
         ps = state.price_schedule
@@ -1179,7 +1193,9 @@ class EnergyController:
 
     # ── Fasbegränsning ────────────────────────────────────────────────
 
-    def _apply_phase_limits(self, state: EnergyState, decision: ControlDecision) -> ControlDecision:
+    def _apply_phase_limits(
+        self, state: EnergyState, decision: ControlDecision, update_memory: bool = True,
+    ) -> ControlDecision:
         # Elmätarens avläsningar innehåller redan alla nuvarande laster:
         # sol, batteri, EV, värmepump, elpatron.
         # Vi applicerar bara delta för det som beslutet ändrar.
@@ -1364,8 +1380,15 @@ class EnergyController:
             L3=loads.get("L3", 0.0),
         )
         # Spara det FAKTISKT klämda kommandot till nästa cykels baslinje
-        # (se kommentaren vid current_batt_per_phase ovan).
-        self._last_battery_command_w = decision.battery_charge_power_w - decision.battery_discharge_power_w
+        # (se kommentaren vid current_batt_per_phase ovan). update_memory=False
+        # för anrop vars beslut kan skrivas över senare SAMMA cykel (_auto_mode()s
+        # egna anrop, när apply_plan_executor() sedan ersätter batteridelen) -
+        # annars stör det preliminära beslutet minnet innan det slutgiltiga
+        # anropet hinner läsa föregående cykels VERKLIGA värde (upptäckt
+        # 2026-09-14: gav samma 8000W↔klämt-pendling som v0.9.34 skulle löst,
+        # fast nu orsakad av anropsordningen istället för Sonnen-sensorlagg).
+        if update_memory:
+            self._last_battery_command_w = decision.battery_charge_power_w - decision.battery_discharge_power_w
         return decision
 
     # ── Hjälpare ──────────────────────────────────────────────────────

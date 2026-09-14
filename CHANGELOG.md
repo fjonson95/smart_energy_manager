@@ -2,6 +2,14 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.36
+
+Fixes the phase-limit oscillation still occurring in production *after* v0.9.34 shipped — live data 2026-09-14 (19:41-19:45) showed the exact same 8000W↔~3000W bang-bang pattern the v0.9.34 fix was meant to eliminate, at 30s intervals, `number...number_discharge` (SEM's own command entity, confirmed via history) toggling every single cycle even though v0.9.34's `_last_battery_command_w` mechanism was already deployed and running.
+
+- **Root cause: `_apply_phase_limits()` runs twice per cycle when a day plan is active** — once inside `_auto_mode()`'s own (soon-to-be-overridden) return, and again inside `apply_plan_executor()` after it overwrites the battery decision with the plan's real target (e.g. an 8000W export). `_last_battery_command_w` was written unconditionally at the end of every call — so `_auto_mode()`'s preliminary, throwaway call clobbered the memory with its own (irrelevant) guess *between* the previous cycle's real final write and `apply_plan_executor()`'s real final calculation for this cycle. The real calculation then read a wrong baseline (this cycle's discarded auto-mode guess instead of what was actually sent to hardware 30s ago), double-counting the battery's own already-flowing current and triggering a false clamp — then writing that clamped, wrong value back to memory, perpetuating the oscillation every single cycle.
+- **Fix**: `_apply_phase_limits()` takes a new `update_memory` parameter (default `True`). `_auto_mode()`'s two internal calls now pass `update_memory=False`, since `apply_plan_executor()` always runs afterward in auto mode and owns the final write. `apply_plan_executor()`'s two early-return paths (negative price, no plan slot for `now`) now finalize the memory themselves on the way out, since those are the cases where it doesn't re-run `_apply_phase_limits()` itself.
+- **Verified**: syntax check, full backtest run (no crash).
+
 ## What's New in 0.9.35
 
 Fixes extra hot water dumping (`should_dump_to_hot_water`, wired in 0.9.31) triggering on a trivial solar surplus and immediately importing most of its 6kW draw from grid/battery — found via live data 2026-09-14: it fired twice in the evening (18:20 and 18:37) with only 300-500W of actual solar surplus and a sell price of 2.93-3.06 SEK/kWh (high, not low), each time locking the heater on for the full 11-minute minimum-runtime window.

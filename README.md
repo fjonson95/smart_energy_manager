@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.35-blue)
+![Version](https://img.shields.io/badge/version-0.9.36-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.35
+## What's New in 0.9.36
 
-Fixes extra hot water dumping firing on a trivial solar surplus and immediately importing most of its 6kW draw from grid/battery — the on/off switch drew its full rated power regardless of how small the triggering surplus was. Both surplus-gated triggers (the "V_charge < sell price" dump and the "battery full" dump) now require the surplus to cover a configurable share (default 70%) of the heating element's actual wattage instead of a flat 100W/500W floor. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
+Fixes the phase-limit oscillation that was still happening in production after v0.9.34 shipped — `_apply_phase_limits()` runs twice per cycle when a day plan is active, and the memory it relies on (`_last_battery_command_w`) was getting clobbered by the first, throwaway call before the second, real one could read the previous cycle's true value — reproducing the same 8000W↔clamped bang-bang v0.9.34 was meant to fix, just via a different mechanism. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.34's battery phase-limit oscillation fix, v0.9.33's charger card battery bar fix, v0.9.32's EV deadline scheduling, v0.9.31's hot-water-dump wiring, v0.9.30's boiler solar-mode wiring, v0.9.29's weekly export-margin tracking, v0.9.28's auxiliary heater baseline tracking, v0.9.27's drought-risk markup wiring, v0.9.26's real-current phase-limit fix, v0.9.25's step 7 points 2 & 5, v0.9.24's solar_charge self-consumption fallback fix, v0.9.23's export-history service, v0.9.22's dead-config cleanup, v0.9.21's damped-temp crash fix, v0.9.20's Solcast entity split, v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.35's hot-water-dump surplus-ratio fix, v0.9.34's battery phase-limit oscillation fix, v0.9.33's charger card battery bar fix, v0.9.32's EV deadline scheduling, v0.9.31's hot-water-dump wiring, v0.9.30's boiler solar-mode wiring, v0.9.29's weekly export-margin tracking, v0.9.28's auxiliary heater baseline tracking, v0.9.27's drought-risk markup wiring, v0.9.26's real-current phase-limit fix, v0.9.25's step 7 points 2 & 5, v0.9.24's solar_charge self-consumption fallback fix, v0.9.23's export-history service, v0.9.22's dead-config cleanup, v0.9.21's damped-temp crash fix, v0.9.20's Solcast entity split, v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
 ## System Overview
 

@@ -2,6 +2,14 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.36
+
+Fixar fasskyddsoscillationen som fortfarande inträffade i produktion *efter* att v0.9.34 släppts – skarp data 2026-09-14 (19:41–19:45) visade exakt samma 8000W↔~3000W-pendling som v0.9.34-fixen skulle eliminera, var 30:e sekund, där `number...number_discharge` (SEM:s eget kommandoentitet, bekräftat via historik) hoppade varje enda cykel trots att v0.9.34:s `_last_battery_command_w`-mekanism redan var utrullad och körde.
+
+- **Grundorsak: `_apply_phase_limits()` körs två gånger per cykel när en dagplan är aktiv** – först inuti `_auto_mode()`s eget (snart överskrivna) beslut, och sedan igen inuti `apply_plan_executor()` efter att den skrivit över batteridelen med planens riktiga mål (t.ex. en 8000W-export). `_last_battery_command_w` skrevs ovillkorligt i slutet av VARJE anrop – så `_auto_mode()`s preliminära, bortkastade anrop förstörde minnet med sin egen (irrelevanta) gissning MELLAN föregående cykels verkliga slutgiltiga skrivning och `apply_plan_executor()`s verkliga slutberäkning för den här cykeln. Den verkliga beräkningen läste då en felaktig baslinje (den här cykelns bortkastade auto-mode-gissning istället för vad som faktiskt skickades till hårdvaran för 30s sedan), dubbelräknade batteriets egen redan flödande ström och triggade en falsk klämning – och skrev sedan tillbaka det klämda, felaktiga värdet till minnet, vilket vidmakthöll oscillationen varje enda cykel.
+- **Fix**: `_apply_phase_limits()` tar en ny `update_memory`-parameter (standard `True`). `_auto_mode()`s två interna anrop skickar nu `update_memory=False`, eftersom `apply_plan_executor()` alltid körs efteråt i auto-läge och äger den slutgiltiga skrivningen. `apply_plan_executor()`s två tidiga returer (negativt pris, ingen plan-slot för `now`) finaliserar nu minnet själva på vägen ut, eftersom det är där den INTE kör om `_apply_phase_limits()` själv.
+- **Verifierat**: syntaxkontroll, fullständig backtest (ingen krasch).
+
 ## Nyheter i 0.9.35
 
 Fixar att extra varmvattendump (`should_dump_to_hot_water`, inkopplad i 0.9.31) triggade vid ett futtigt solöverskott och omedelbart importerade merparten av sina 6 kW från nät/batteri – hittat via skarp data 2026-09-14: den slog till två gånger på kvällen (18:20 och 18:37) med bara 300-500W verkligt solöverskott och ett säljpris på 2,93-3,06 kr/kWh (högt, inte lågt), och låste varje gång på elpatronen hela 11-minuters-minimitiden.
