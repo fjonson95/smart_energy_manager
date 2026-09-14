@@ -1,0 +1,57 @@
+# Power Flow Card Plus – förslag för Smart Energy Manager-anläggningen
+#
+# Klistra in som ett eget kort i din dashboard (redigera dashboard -> Lägg
+# till kort -> Manuell/YAML). Kortet är redan installerat via HACS
+# (flixlix/power-flow-card-plus v0.3.7).
+#
+# Teckenkonvention verifierad live 2026-09-13:
+#   - Batteri (sensor.sonnenbatterie_271100_state_battery_inout):
+#     positivt = urladdning, negativt = laddning -> kräver invert_state: true
+#     (bekräftat samtidigt med ett loggat urladdningsbeslut, +548W).
+#   - Nät (sensor.elmatare_active_power): antar standardkonvention
+#     (positivt = import). INTE live-verifierat (nätflödet var ~0W vid
+#     kontrolltillfället). Om pilen pekar fel riktning i kortet, lägg till
+#     `invert_state: true` under grid också.
+
+type: custom:power-flow-card-plus
+kilo_threshold: 1000
+entities:
+  grid:
+    entity: sensor.elmatare_active_power
+    name: Nät
+    display_state: two_way
+    color_circle: color_dynamically
+    # invert_state: true   # avkommentera om pilen pekar fel håll
+
+  solar:
+    entity: sensor.sg_total_active_power
+    name: Sol
+    color_icon: true
+
+  battery:
+    entity: sensor.sonnenbatterie_271100_state_battery_inout
+    invert_state: true
+    state_of_charge: sensor.sonnenbatterie_271100_state_battery_percentage_real
+    name: Batteri
+    display_state: two_way
+    color_circle: color_dynamically
+    color_state_of_charge_value: color_dynamically
+
+  home:
+    entity: sensor.el_forbruk_power_power
+    name: Hus
+    color_icon: true
+
+  individual:
+    - entity: sensor.0xf4ce365d8573ed2f_total_active_power
+      name: Amina (EV)
+      icon: mdi:car-electric
+      unit_of_measurement: kW
+      secondary_info:
+        entity: sensor.ceed_ev_battery_level
+        unit_of_measurement: "%"
+        icon: mdi:battery-charging
+    - entity: sensor.ivt_total_active_power
+      name: Värmepump
+      icon: mdi:heat-pump
+      unit_of_measurement: kW
