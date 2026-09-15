@@ -238,6 +238,12 @@ class EnergyState:
     # base_dhw + k * max(0, T_balance - avg_temp) [+ extra om disinfecting]
     predicted_daily_kwh: float = 0.0
 
+    # Lastens FORM: 24 värden (fraktion av dygnets totala kWh per timme, P75
+    # över rullande <=21-dygnsfönster, coordinator._get_load_shape(0.75)).
+    # None om ingen historik finns än, eller enskilda timmar utan täckning
+    # (då faller kvällsfyllningen tillbaka på det platta hourly_load_kw-snittet).
+    load_shape_p75: Optional[list] = None
+
     # Sol-tider (från HA sun-integration, används för dynamisk kvällsfylling)
     sun_next_setting: Optional[datetime] = None
     sun_next_rising: Optional[datetime] = None
@@ -691,7 +697,34 @@ class EnergyController:
 
             if solar_covers_at is not None:
                 hours_dark = max(0.0, (solar_covers_at - _dark_start).total_seconds() / 3600)
-                evening_needed_kwh = hourly_load_kw * hours_dark + 2.0  # +2 kWh laddmarginal
+
+                # Formad prognos istället för platt snitt: samma _load_kw_at-
+                # mönster som energy_planner.py redan använder för V/V_charge
+                # (load_shape_p75, 21-dygns rullande P75 per timme). Ett platt
+                # hourly_load_kw × hours_dark sprider förbrukningen jämnt över
+                # hela mörkret - missar morgontoppen helt och underskattar
+                # behovet (upptäckt 2026-09-15: evening_target_soc räknades
+                # till 11,5% trots att verklig förbrukning tömde batteriet
+                # till 5%-golvet timmar innan solen tog över). Faller tillbaka
+                # på det platta snittet per timme utan formdata (idag alla
+                # natt-/morgontimmar, tills v0.9.37s fortlöpande sparning
+                # hunnit bygga upp riktig historik för dem).
+                def _load_kw_at(dt: datetime) -> float:
+                    if state.load_shape_p75 is not None and state.predicted_daily_kwh > 0:
+                        h = state.load_shape_p75[dt.astimezone().hour]
+                        if h is not None:
+                            return state.predicted_daily_kwh * h
+                    return hourly_load_kw
+
+                _dark_kwh = 0.0
+                _t = _dark_start
+                while _t < solar_covers_at:
+                    _next_hour = _t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+                    _seg_end = min(solar_covers_at, _next_hour)
+                    _seg_h = (_seg_end - _t).total_seconds() / 3600.0
+                    _dark_kwh += _load_kw_at(_t) * _seg_h
+                    _t = _seg_end
+                evening_needed_kwh = _dark_kwh + 2.0  # +2 kWh laddmarginal
                 # battery_min_soc är oanvändbar energi längst ner – lägg till den
                 # annars ger 11 kWh behov bara (11/33)*100=34% som har 4.9 kWh tillgänglig.
                 evening_target_soc = min(

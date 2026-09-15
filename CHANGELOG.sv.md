@@ -2,6 +2,22 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.38
+
+Kopplar in den inlärda timförbrukningsformen (`load_shape_p75`, redan använd av `energy_planner.py` för V/V_charge) i `_auto_mode()`s dynamiska kvällsfyllningsbehov (`evening_needed_kwh`), som tidigare spred nattens energibehov platt över alla mörka timmar (`hourly_load_kw × hours_dark`) – missade morgontoppen-mot-nattlugnet-formen helt och underskattade hur mycket batteriet behöver för att klara sig till solen tar över.
+
+- **Nytt**: `EnergyState.load_shape_p75` (piprat från `coordinator._get_load_shape(0.75)`, samma värde planeraren redan räknar ut varje cykel). `_auto_mode()` går nu igenom mörkerperioden timme för timme, använder `predicted_daily_kwh × load_shape_p75[timme]` per timme där formdata finns, och faller tillbaka på det platta `hourly_load_kw`-snittet för varje timme utan täckning (idag: i praktiken alla natt-/morgontimmar – se v0.9.37, som fixar samma-dygns-omstarts-dataförlusten som orsakade luckan).
+- **Ingen beteendeförändring i praktiken ännu**: med dagens 5-dygns, kväll-bara formhistorik faller varje mörk timme fortfarande tillbaka på det platta snittet – den här releasen blir aktiv först när riktig natt-/morgontäckning byggts upp under v0.9.37s tätare sparningar. Medvetet skickad nu så den är redo istället för att kräva ännu en utrullning+omstart när datan väl finns.
+- **Verifierat**: syntaxkontroll, fullständig backtest (ingen krasch, oförändrat resultat – väntat, eftersom backtestens `EnergyState` inte sätter `load_shape_p75` och därför stannar på det platta-snitt-fallbacket precis som innan).
+
+## Nyheter i 0.9.37
+
+Fixar att den lärande timförbrukningsformen (`_update_hourly_shape`, introducerad v0.9.6) tappade en hel dags ackumulerad data vid varje omstart samma dygn – hittat vid utredning av varför `evening_needed_kwh` underskattar natt-/morgonbehovet: den skarpa Storage-filen visade 5 dygns historik, men varje enda dygn hade bara data för sena kvällstimmar (ungefär 18:00–23:00) – natt och morgon var `null` rakt igenom, eftersom formdatan bara sparades till disk vid dygnsskifte (midnatt), så en kvälls-omstart (rutin under aktiv utveckling, som den här sessionen) nollställde allt sedan senaste midnatt.
+
+- **Fix**: `_update_hourly_shape()` sparar nu till Store vid varje avslutad timme, inte bara vid dygnsskifte – en omstart förlorar nu högst den pågående, oavslutade timmen istället för hela dagen.
+- **Inte gjort än**: den inlärda formen (`load_shape_p75`) är fortfarande inte inkopplad i `_auto_mode()`s `evening_needed_kwh`-beräkning (energy_controller.py:694), som fortfarande använder ett platt `hourly_load_kw × hours_dark`-snitt istället för den faktiska timformen – medvetet sparat till en uppföljning när riktig natt-/morgontäckning hunnit byggas upp med den här fixen på plats.
+- **Verifierat**: syntaxkontroll.
+
 ## Nyheter i 0.9.36
 
 Fixar fasskyddsoscillationen som fortfarande inträffade i produktion *efter* att v0.9.34 släppts – skarp data 2026-09-14 (19:41–19:45) visade exakt samma 8000W↔~3000W-pendling som v0.9.34-fixen skulle eliminera, var 30:e sekund, där `number...number_discharge` (SEM:s eget kommandoentitet, bekräftat via historik) hoppade varje enda cykel trots att v0.9.34:s `_last_battery_command_w`-mekanism redan var utrullad och körde.

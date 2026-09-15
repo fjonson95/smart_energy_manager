@@ -479,6 +479,14 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
         if day_changed or hour_changed:
             self._finalize_shape_hour()
+            # Spara varje avslutad timme till disk direkt, inte bara vid
+            # dygnsskifte - annars förlorar en omstart mitt på dagen HELA
+            # dagens hittills ackumulerade data (upptäckt 2026-09-15: fem
+            # dygns sparad historik visade data bara för sena kvällstimmar,
+            # eftersom kvälls-omstarter under utveckling nollställde allt
+            # sedan midnatt varje gång, natt/morgon hann aldrig committas).
+            if not day_changed:
+                self.hass.async_create_task(self._save_hourly_shape_store())
 
         if day_changed:
             if self._shape_current_date and any(h is not None for h in self._shape_current_hours):
@@ -1437,6 +1445,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 avg_temp_yesterday_c=self._yesterday_avg_temp,
                 disinfecting_active=disinfecting_active,
                 predicted_daily_kwh=predicted_daily_kwh,
+                load_shape_p75=self._get_load_shape(0.75),
                 sun_next_setting=self._get_sun_datetime("next_setting"),
                 sun_next_rising=self._get_sun_datetime("next_rising"),
                 solar_takeover_dt=solar_takeover_dt,

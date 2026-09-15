@@ -2,6 +2,22 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.38
+
+Wires the learned hourly consumption shape (`load_shape_p75`, already used by `energy_planner.py` for V/V_charge) into `_auto_mode()`'s dynamic evening-fill need calculation (`evening_needed_kwh`), which previously spread the night's energy need flat across all dark hours (`hourly_load_kw × hours_dark`) — missing the morning-peak-vs-overnight-lull shape entirely and underestimating how much the battery needs to survive until solar takeover.
+
+- **New**: `EnergyState.load_shape_p75` (piped from `coordinator._get_load_shape(0.75)`, same value the planner already computes each cycle). `_auto_mode()` now walks the dark period hour-by-hour, using `predicted_daily_kwh × load_shape_p75[hour]` per hour where shape data exists, falling back to the flat `hourly_load_kw` average for any hour without coverage (today: essentially all night/morning hours — see v0.9.37, which fixes the same-day-restart data loss that caused this gap).
+- **No behavior change yet in practice**: with the current 5-day, evening-only shape history, every dark hour still falls back to the flat average — this release only becomes active as real night/morning coverage accumulates under v0.9.37's more frequent saves. Deliberately shipped now so it's ready rather than needing another deploy+restart once the data exists.
+- **Verified**: syntax check, full backtest run (no crash, unchanged output — expected, since the backtest's `EnergyState` doesn't set `load_shape_p75`, so it stays on the flat-average fallback exactly as before).
+
+## What's New in 0.9.37
+
+Fixes the hourly consumption-shape learner (`_update_hourly_shape`, introduced v0.9.6) losing an entire day's accumulated data on any same-day restart — found while investigating why `evening_needed_kwh` underestimates overnight/morning energy need: the live Storage file showed 5 days of history, but every single day had data only for late-evening hours (roughly 18:00-23:00) — night and morning hours were `null` across the board, because the shape data was only ever persisted to disk at midnight day-rollover, so an evening restart (routine during active development, like this session) wiped everything accumulated since the previous midnight.
+
+- **Fix**: `_update_hourly_shape()` now saves to the Store on every finalized hour, not just at day-rollover — a restart now loses at most the currently in-progress hour instead of the whole day.
+- **Not yet done**: the learned shape (`load_shape_p75`) still isn't wired into `_auto_mode()`'s `evening_needed_kwh` calculation (energy_controller.py:694), which still uses a flat `hourly_load_kw * hours_dark` average instead of the actual per-hour shape — deliberately left for a follow-up once real night/morning coverage has accumulated with this fix in place.
+- **Verified**: syntax check.
+
 ## What's New in 0.9.36
 
 Fixes the phase-limit oscillation still occurring in production *after* v0.9.34 shipped — live data 2026-09-14 (19:41-19:45) showed the exact same 8000W↔~3000W bang-bang pattern the v0.9.34 fix was meant to eliminate, at 30s intervals, `number...number_discharge` (SEM's own command entity, confirmed via history) toggling every single cycle even though v0.9.34's `_last_battery_command_w` mechanism was already deployed and running.
