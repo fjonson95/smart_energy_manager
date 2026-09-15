@@ -2,6 +2,21 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.40
+
+Fixar att regel 3 (nätladdning) fyllde från vilken slot som kom först kronologiskt istället för den billigaste tillgängliga – hittat skarpt 2026-09-15: `V_charge` hoppade till 2,87 kr/kWh (batteriet hade tömts vidare sedan kvällens tidigare plan), vilket gjorde att praktiskt taget varje kvarvarande timme den natten klarade tröskeln `köppris+cykel<V_charge`, inte bara de genuint billiga – och planeraren började nätladda direkt kl 21:15 (2,19 kr/kWh) istället för att vänta på de nästan-gratis timmarna efter midnatt (nere i 0,07-0,10 kr/kWh spotpris).
+
+- **Grundorsak**: merit-order-loopen som bygger `DayPlan` går igenom `future_slots` kronologiskt och laddar den första slot som klarar den ekonomiska tröskeln, utan någon prisrankning bland de slots som kvalificerar.
+- **Fix**: slots som klarar tröskeln samlas nu in som kandidater istället för att laddas direkt; ett andra pass sorterar dem efter `buy_sek` stigande och allokerar totalbehovet billigast-först. Ett tredje pass spelar upp den slutgiltiga planen för att räkna om varje slots `battery_soc_est_pct`, eftersom omflyttad laddning ändrar SOC-banan för allt efteråt.
+- **Verifierat**: syntaxkontroll, fullständig backtest (ingen krasch; besparingen förbättrades något, 159,40→160,39 SEK över testperioden – konsekvent med laddning vid genuint billigare timmar).
+
+## Nyheter i 0.9.39
+
+Fixar `sem-energy-plan-card.js`: plan-zonen `cover_load` ("Egenförbrukning") använde exakt samma blå färg som Nordpool-prisstaplarna (`#2a78d6`), så de två flöt ihop till en enda oskiljbar blå massa över nästan hela grafen (cover_load täcker de flesta natt-/dagtimmar). Dessutom hårdkodad `#888` för "Nattvila"-etiketten, oberoende av dashboardens ljusa/mörka tema.
+
+- **Fix**: `cover_load` använder nu en tydligt skild lila färg (`#7f77dd`), separerad från prisstaplarna (fortfarande blå) och de tre andra planåtgärderna (orange/grön/gul). "Nattvila"-etiketten använder nu `var(--secondary-text-color)` istället för fast grått, så den förblir läsbar i båda temana.
+- Kopiera `www/sem-energy-plan-card.js` till `/config/www/custom_components/` (inte `/config/www/` direkt) och hårdladda webbläsaren (Ctrl+Shift+R) för att se ändringen.
+
 ## Nyheter i 0.9.38
 
 Kopplar in den inlärda timförbrukningsformen (`load_shape_p75`, redan använd av `energy_planner.py` för V/V_charge) i `_auto_mode()`s dynamiska kvällsfyllningsbehov (`evening_needed_kwh`), som tidigare spred nattens energibehov platt över alla mörka timmar (`hourly_load_kw × hours_dark`) – missade morgontoppen-mot-nattlugnet-formen helt och underskattade hur mycket batteriet behöver för att klara sig till solen tar över.

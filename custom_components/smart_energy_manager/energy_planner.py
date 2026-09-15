@@ -538,6 +538,16 @@ class EnergyPlanner:
         # --- Framåtsimulering ----------------------------------------------
         planned: list[PlannedSlot] = []
         expected_revenue = 0.0
+        _initial_batt_kwh = batt_kwh
+        # Regel 3-kandidater (idle-slots som klarar köp+cykel<V_charge) samlas
+        # här istället för att laddas direkt i kronologisk ordning - annars
+        # tar loopen bara FÖRSTA slot som klarar tröskeln, inte den BILLIGASTE
+        # inom fönstret (live-incident 2026-09-15: V_charge steg till 2,87
+        # kr/kWh, varpå praktiskt taget alla kvällstimmar klarade tröskeln,
+        # och planen började nätladda direkt kl 21:15 för 2,19 kr/kWh istället
+        # för att vänta på natten nästan-gratis timmar efter midnatt).
+        # Allokeras billigast-först i ett andra pass nedan.
+        _grid_charge_candidates: list[tuple] = []
 
         for slot in future_slots:
             slot_h = (slot.end - slot.start).total_seconds() / 3600.0
@@ -617,11 +627,10 @@ class EnergyPlanner:
                 _solar_fills_kwh = max(0.0, _cap_by_time.get(_slot_starts_sorted[-1], batt_kwh) - batt_kwh)
                 _grid_needed_kwh = max(0.0, room_kwh - _solar_fills_kwh)
                 if slot.buy_sek + self.cycle_cost_sek_kwh < V_charge and _grid_needed_kwh > 0.1:
-                    charge_kwh = min(_grid_needed_kwh, battery_max_power_kw * slot_h)
-                    batt_kwh = min(batt_max_kwh, batt_kwh + charge_kwh)
-                    power_w = min(charge_kwh / slot_h * 1000.0, battery_max_power_kw * 1000.0) if slot_h > 0 else 0.0
-                    action = "grid_charge"
-                    reason = f"nätladda {slot.buy_sek:.2f}+cykel<V·η {V_charge:.2f} (sol fyller {_solar_fills_kwh:.1f}/{room_kwh:.1f}kWh)"
+                    # Laddas INTE här - se _grid_charge_candidates-kommentaren
+                    # ovanför huvudloopen. batt_kwh/action/power_w lämnas
+                    # orörda tills det billigast-först-passet nedan.
+                    _grid_charge_candidates.append((slot, slot_h, _grid_needed_kwh, len(planned)))
                 # Regel 4:s tröskel är max(V, battery_avg_cost) + cykel, inte
                 # bara V. V beräknas om varje planeringscykel mot en 48h-
                 # horisont som vandrar framåt i tiden – en affär som var
@@ -661,6 +670,52 @@ class EnergyPlanner:
                 battery_soc_est_pct=round(soc_est, 1),
                 reason=reason,
             ))
+
+        # Regel 3, andra passet: allokera insamlade nätladdningskandidater
+        # BILLIGAST FÖRST, inte i kronologisk ordning (se kommentaren vid
+        # _grid_charge_candidates ovan). Totalbehovet tas som det STÖRSTA
+        # observerade _grid_needed_kwh bland kandidaterna - samma golv som
+        # regel 3 redan räknade per slot, bara samlat till en gemensam pott
+        # istället för att spenderas i tidsordning.
+        if _grid_charge_candidates:
+            _grid_total_need_kwh = max(c[2] for c in _grid_charge_candidates)
+            _grid_remaining_kwh = _grid_total_need_kwh
+            for _cand_slot, _cand_slot_h, _, _cand_idx in sorted(
+                _grid_charge_candidates, key=lambda c: c[0].buy_sek,
+            ):
+                if _grid_remaining_kwh <= 0.1:
+                    break
+                _charge_kwh = min(_grid_remaining_kwh, battery_max_power_kw * _cand_slot_h)
+                if _charge_kwh <= 0.01:
+                    continue
+                _power_w = (
+                    min(_charge_kwh / _cand_slot_h * 1000.0, battery_max_power_kw * 1000.0)
+                    if _cand_slot_h > 0 else 0.0
+                )
+                _p = planned[_cand_idx]
+                _p.action = "grid_charge"
+                _p.target_power_w = _power_w
+                _p.reason = (
+                    f"nätladda {_cand_slot.buy_sek:.2f}+cykel<V·η {V_charge:.2f} "
+                    f"(billigast-först {_charge_kwh:.1f}/{_grid_total_need_kwh:.1f}kWh)"
+                )
+                _grid_remaining_kwh -= _charge_kwh
+
+            # Slutgiltig SOC-bana: räkna om battery_soc_est_pct för varje slot
+            # från grunden nu när nätladdningen kan ha flyttats i tiden -
+            # annars visar slots EFTER en omplacerad laddning fel SOC (de
+            # räknades ut i förhållande till den ursprungliga, kronologiska
+            # ordningen i huvudloopen ovan).
+            _replay_kwh = _initial_batt_kwh
+            for _p in planned:
+                _p.battery_soc_est_pct = round(_replay_kwh / battery_capacity_kwh * 100.0, 1)
+                _replay_slot_h = (_p.end - _p.start).total_seconds() / 3600.0
+                if _replay_slot_h > 0:
+                    _replay_kwh += (_p.target_power_w / 1000.0) * _replay_slot_h
+                _replay_kwh = max(0.0, min(batt_max_kwh, _replay_kwh))
+            # batt_kwh används fortfarande nedanför (t.ex. final_soc) - måste
+            # spegla den nätladdning pass två la till, annars saknas den.
+            batt_kwh = _replay_kwh
 
         # v1.0 steg 6, punkt 1: bilen som schemalagd last. Ett fristående
         # merit-order-schema (INTE kopplat till batteriets V eller

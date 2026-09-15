@@ -16,7 +16,7 @@ const ACTION_COLOR = {
   export:       { bg: "rgba(240,120,20,{a})",   border: "#f07814",  label: "Export"        },
   grid_charge:  { bg: "rgba(27,175,122,{a})",   border: "#1baf7a",  label: "Nätladdning"   },
   solar_charge: { bg: "rgba(255,200,0,{a})",    border: "#eda100",  label: "Solladdning"   },
-  cover_load:   { bg: "rgba(42,120,214,{a})",   border: "#2a78d6",  label: "Egenförbr."   },
+  cover_load:   { bg: "rgba(127,119,221,{a})",  border: "#7f77dd",  label: "Egenförbr."   },
   idle:         { bg: null,                      border: null,       label: "Idle"          },
 };
 
@@ -110,7 +110,7 @@ canvas { display: block; width: 100%; }
     <span><span class="lsq" style="background:rgba(240,120,20,0.5)"></span>Export</span>
     <span><span class="lsq" style="background:rgba(27,175,122,0.5)"></span>Nätladdning</span>
     <span><span class="lsq" style="background:rgba(255,200,0,0.5)"></span>Solladdning</span>
-    <span><span class="lsq" style="background:rgba(42,120,214,0.35)"></span>Egenförbrukning</span>
+    <span><span class="lsq" style="background:rgba(127,119,221,0.5)"></span>Egenförbrukning</span>
     <span><span style="display:inline-block;width:16px;height:0;border-top:2.5px solid #1baf7a"></span>&nbsp;Batteri (plan)</span>
     <span><span style="display:inline-block;width:16px;height:0;border-top:2px dashed #eda100"></span>&nbsp;Sol kW</span>
   </div>
@@ -419,7 +419,7 @@ canvas { display: block; width: 100%; }
         this._el("ph2d").textContent = `${gcRange} · ${gcPow} W · batteri → ${(planAttr.evening_target_soc_pct??0).toFixed(0)}%`;
       } else {
         this._el("ph2t").textContent = "Nattvila";
-        this._el("ph2t").style.color = "#888";
+        this._el("ph2t").style.color = "var(--secondary-text-color)";
         const idleSlots = planSlots.filter(s => s.action === "idle" || s.action === "cover_load");
         const clSlots = planSlots.filter(s => s.action === "cover_load");
         this._el("ph2d").textContent = `${idleSlots.length} slots · ${clSlots.length} egenförb.`;
@@ -444,7 +444,7 @@ canvas { display: block; width: 100%; }
         this._el("ph1d").textContent = `${exportableKwh.toFixed(1)} kWh → ${sim.battAfterExport.toFixed(1)} kWh`;
       }
       this._el("ph2t").textContent = "Nattvila";
-      this._el("ph2t").style.color = "#888";
+      this._el("ph2t").style.color = "var(--secondary-text-color)";
       this._el("ph2d").textContent = `${sim.battAfterExport.toFixed(1)} → ${sim.battAtTakeover.toFixed(1)} kWh`;
       const tkSlot = timeline.find(s => s.solarTakeover);
       this._el("ph3t").textContent = `Sol-takeover ~${tkSlot ? tkSlot.label : "–"}`;

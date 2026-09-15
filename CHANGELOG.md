@@ -2,6 +2,21 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.40
+
+Fixes regel 3 (grid_charge) filling from whatever slot came first chronologically instead of the cheapest available slot — found live 2026-09-15: `V_charge` jumped to 2.87 SEK/kWh (battery had drained further since the evening's earlier plan), which meant essentially every remaining hour that night cleared the `buy_price + cycle_cost < V_charge` gate, not just the genuinely cheap ones — and the planner charged starting immediately at 21:15 (2.19 SEK/kWh) instead of waiting for the near-free hours after midnight (as low as 0.07-0.10 SEK/kWh spot).
+
+- **Root cause**: the merit-order loop that builds `DayPlan` walks `future_slots` chronologically and charges the first slot that clears the economic gate, with no price ranking among the slots that qualify.
+- **Fix**: slots that pass the gate are now collected into candidates instead of charged immediately; a second pass sorts them by `buy_sek` ascending and allocates the total need cheapest-first. A third pass replays the finalized plan to recompute each slot's `battery_soc_est_pct`, since reordering the charge changes the SOC trajectory for everything after it.
+- **Verified**: syntax check, full backtest run (no crash; savings improved slightly, 159.40→160.39 SEK over the test period — consistent with charging at genuinely cheaper hours).
+
+## What's New in 0.9.39
+
+Fixes `sem-energy-plan-card.js`: the `cover_load` ("Egenförbrukning") plan-zone shading used the exact same blue as the Nordpool price bars (`#2a78d6`), so the two visually merged into a single indistinguishable blue mass across most of the chart (cover_load covers most night/day hours). Also hardcoded `#888` for the "Nattvila" phase-card label, ignoring the dashboard's light/dark theme.
+
+- **Fix**: `cover_load` now uses a distinct purple (`#7f77dd`), separating it visually from the price bars (still blue) and from the other three plan actions (orange/green/amber). The "Nattvila" label now uses `var(--secondary-text-color)` instead of a fixed gray, so it stays legible in both themes.
+- Copy `www/sem-energy-plan-card.js` to `/config/www/custom_components/` (not `/config/www/` directly) and hard-reload the browser (Ctrl+Shift+R) to see the change.
+
 ## What's New in 0.9.38
 
 Wires the learned hourly consumption shape (`load_shape_p75`, already used by `energy_planner.py` for V/V_charge) into `_auto_mode()`'s dynamic evening-fill need calculation (`evening_needed_kwh`), which previously spread the night's energy need flat across all dark hours (`hourly_load_kw × hours_dark`) — missing the morning-peak-vs-overnight-lull shape entirely and underestimating how much the battery needs to survive until solar takeover.
