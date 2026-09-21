@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.40-blue)
+![Version](https://img.shields.io/badge/version-0.9.45-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.40
+## Nyheter i 0.9.45
 
-Fixar att nätladdningsschemat valde vilken slot som kom först kronologiskt istället för den billigaste tillgängliga – hittat skarpt när `V_charge` steg kraftigt och nästan varje kvarvarande timme klarade den ekonomiska tröskeln, så planeraren började ladda direkt till ett medelmåttigt pris istället för att vänta på de nästan-gratis timmarna efter midnatt. Samlar nu in kvalificerade slots och fyller billigast-först. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
+Batteriets ackumulerade energikostnad (och sensorn "Batterisnittpris") nollställs nu när batteriet i praktiken är tomt (SOC ≤ min-SOC + 5 punkter), så att fel inte ackumuleras cykel efter cykel. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.39:s färgfix i planeringskortet, v0.9.38:s formmedvetna kvällsfyllning, v0.9.37:s fix av dataförlusten i timformen, v0.9.36:s fix av fasskyddets dubbelanrop, v0.9.35:s fix av varmvattendumpens överskottskvot, v0.9.34:s fix av batteriets fasskyddsoscillation, v0.9.33:s fix av charger-kortets batteristapel, v0.9.32:s EV-deadline-schemaläggning, v0.9.31:s varmvattendump-inkoppling, v0.9.30:s inkoppling av pannans soldriftläge, v0.9.29:s veckovisa exportmarginal-uppföljning, v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.44:s fix som får "idle"-slots att hålla batteriet – vinterbacktesten mer än fördubblade besparingen, 93 → 217 kr, v0.9.43:s städning av beslutssensorn, v0.9.42:s omskrivning av beslutstexter, v0.9.41:s öronmärkningsfix för självkonsumtion, v0.9.40:s billigast-först-nätladdning, v0.9.39:s färgfix i planeringskortet, v0.9.38:s formmedvetna kvällsfyllning, v0.9.37:s fix av dataförlusten i timformen, v0.9.36:s fix av fasskyddets dubbelanrop, v0.9.35:s fix av varmvattendumpens överskottskvot, v0.9.34:s fix av batteriets fasskyddsoscillation, v0.9.33:s fix av charger-kortets batteristapel, v0.9.32:s EV-deadline-schemaläggning, v0.9.31:s varmvattendump-inkoppling, v0.9.30:s inkoppling av pannans soldriftläge, v0.9.29:s veckovisa exportmarginal-uppföljning, v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 

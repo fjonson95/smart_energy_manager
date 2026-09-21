@@ -791,7 +791,7 @@ class EnergyController:
                 )
             elif prefer_sell:
                 decision.reason += (
-                    f" | Exporterar sol (sälj {sell_price:.2f} kr/kWh)"
+                    f" | Laddar inte batteriet (säljpris {sell_price:.2f} kr/kWh högt nog för att sälja hellre än lagra)"
                 )
             else:
                 charge_w = min(state.battery_max_power_kw * 1000, remaining_surplus)
@@ -1208,12 +1208,21 @@ class EnergyController:
                     f"{decision.battery_charge_power_w:.0f}W | {now_slot.reason}"
                 )
             else:
-                if self_consume_ok:
+                # hold_battery: planen har valt att köpa från nätet och spara
+                # batteriet (köp ≤ sparvärde, eller kapaciteten är öronmärkt åt
+                # en dyrare slot senare). Utan den här spärren täckte
+                # exekutorn ändå huslasten ur batteriet på "idle"-slots
+                # (live 2026-09-21: SOC 15→8 % kl 23:40-02:10 på 1,4 kr-timmar,
+                # tomt före morgontoppen som kostade 2,1-2,7 kr).
+                if self_consume_ok and not now_slot.hold_battery:
                     decision.battery_discharge_power_w = min(house_def_w, batt_max_w)
-                decision.reason = (
-                    f"{ev_reason} | Plan {now_slot.action} egenförbrukning "
-                    f"{decision.battery_discharge_power_w:.0f}W | {now_slot.reason}"
-                )
+                if now_slot.hold_battery:
+                    decision.reason = f"{ev_reason} | Plan {now_slot.action}: håller batteriet | {now_slot.reason}"
+                else:
+                    decision.reason = (
+                        f"{ev_reason} | Plan {now_slot.action} egenförbrukning "
+                        f"{decision.battery_discharge_power_w:.0f}W | {now_slot.reason}"
+                    )
 
         decision = self._apply_phase_limits(state, decision)
 

@@ -62,6 +62,7 @@ www/
 - Solenergi till batteri bokförs till **säljpris** (alternativkostnad)
 - Nätenergi till batteri bokförs till **köppris**
 - Urladdning skriver ner kostnaden proportionellt: `cost *= new_energy / old_energy`
+- Kostnaden nollställs när SOC ≤ min-SOC + 5 punkter (Sonnen slutar urladdas runt 8 %, över den konfigurerade min-SOC), så fel inte ackumuleras cykel efter cykel
 - `BatteryAccumulatedCostSensor` är master-ackumulatorn; `BatteryAveragePriceSensor` läser direkt från den (ingen egen ackumulator)
 
 ### Proaktiv absorption

@@ -1,6 +1,7 @@
 """Sensors for Smart Energy Manager."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -13,8 +14,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import UnitOfPower, UnitOfElectricCurrent
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, NO_CAR_SELECTED
+from .const import CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC, DOMAIN, NO_CAR_SELECTED
 from .coordinator import SmartEnergyCoordinator
+
+_EMPTY_RESET_MARGIN_PCT = 5.0
 
 
 async def async_setup_entry(
@@ -327,6 +330,9 @@ class SmartEnergyPhaseL3Sensor(_BaseEnergySensor):
         return round(d.phase_loads.L3) if d else 0
 
 
+_POWER_VALUE_RE = re.compile(r"\s*-?\d+(?:\.\d+)?W\b")
+
+
 class SmartEnergyDecisionReasonSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_decision_reason"
     _attr_translation_key = "decision_reason"
@@ -335,7 +341,15 @@ class SmartEnergyDecisionReasonSensor(_BaseEnergySensor):
     @property
     def native_value(self):
         d = self.coordinator.last_decision
-        return d.reason[:255] if d else "No decision yet"
+        if not d:
+            return "No decision yet"
+        # Effektsiffror (t.ex. "871W") plockas bort - de finns redan som
+        # egna mätsensorer (Husförbrukning, Laddnings-/urladdningssetpunkt)
+        # och gjorde annars att den här texten bytte state nästan varje
+        # 30s-cykel bara för att en watt-siffra vinglat, trots att själva
+        # resonemanget (varför) var oförändrat.
+        reason = _POWER_VALUE_RE.sub("", d.reason)
+        return reason[:255]
 
 
 class SmartEnergyOperatingModeSensor(_BaseEnergySensor):
@@ -684,6 +698,7 @@ class BatteryAccumulatedCostSensor(_BaseEnergySensor, RestoreEntity):
       - Nät → batteri:  grid_kwh  * köppris
       - Sol → batteri:  solar_kwh * säljpris  (alternativkostnad – du offrar sälj-intäkten)
       - Urladdning:     cost *= new_energy / old_energy  (= discharge_kwh * snittpris)
+      - Tomt (SOC ≤ min-SOC + 5 punkter): kostnaden nollställs.
 
     battery_power_w > 0 = laddar, < 0 = laddar ur.
     """
@@ -760,6 +775,17 @@ class BatteryAccumulatedCostSensor(_BaseEnergySensor, RestoreEntity):
                 self._cost_sek = max(0.0, self._cost_sek)
 
         if state is not None:
+            # Nollställ kostnaden när batteriet är i praktiken tomt. Sonnen
+            # slutar urladdas runt 8 % (SOC låg platt på 8-9 % natten till
+            # 2026-09-21), över den konfigurerade min-SOC, så gränsen är
+            # min-SOC + marginal. Utan nollställning bär den proportionella
+            # nedskrivningen (cost *= ny/gammal energi) med sig avrundnings-
+            # och sensorfel från cykel till cykel, och snittpriset driver.
+            empty_soc = float(
+                self.coordinator._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)
+            ) + _EMPTY_RESET_MARGIN_PCT
+            if state.battery_soc_pct <= empty_soc and self._cost_sek != 0.0:
+                self._cost_sek = 0.0
             self._last_soc = state.battery_soc_pct
         self._last_update = now
 

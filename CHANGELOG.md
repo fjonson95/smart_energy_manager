@@ -2,6 +2,47 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.45
+
+The battery's accumulated energy cost (and thus the "Batterisnittpris" sensor) is now reset to zero when the battery is effectively empty, so rounding and sensor errors from the proportional write-down (`cost *= new_energy / old_energy`) no longer carry over from cycle to cycle and make the average price drift.
+
+- **Threshold**: SOC ≤ configured min-SOC + 5 percentage points. The Sonnen stops discharging around 8 % (SOC sat flat at 8-9 % on the night of 2026-09-21), above the configured min-SOC, so an exact min-SOC trigger would almost never fire. Chosen with the user, not configurable yet.
+- **Scope**: only `BatteryAccumulatedCostSensor._cost_sek` is zeroed; the informational `solar_kwh_total`/`grid_kwh_total` counters are left alone. The average-price sensor reads from it and follows automatically. The cost is only used by regel 4 (export) as `max(V, snittkostnad)`.
+- **Verified**: syntax check. Not covered by the backtest (the accumulator is a Home Assistant sensor, not part of the planner simulation).
+
+## What's New in 0.9.44
+
+Fixes "idle" plan slots that the plan meant as "buy from the grid, save the battery" still draining the battery in real time. Found live 2026-09-21: from 22:45 the plan said "Nätpris < sparvärde → köper från nätet, sparar batteriet", yet SOC fell 15 → 8 % between 23:40 and 02:10 on 1.4 SEK/kWh hours, the battery sat at its floor from 02:10, and the morning peak (06:30-07:30, 2.06-2.72 SEK/kWh) was bought entirely from the grid — the opposite of CLAUDE.md priority #1.
+
+- **Root cause**: `apply_plan_executor()` handles `idle` and `cover_load` in the same branch and, when there is no solar surplus, always discharges to cover the real house deficit. The planner's regel 2 decision to hold the battery had no way to reach the executor, so the merit-order earmark from v0.9.41 was defeated at execution time.
+- **Fix**: new `PlannedSlot.hold_battery` flag, set by regel 2 when `buy ≤ V + cycle` and when the capacity is earmarked for a better slot. The executor no longer discharges on a slot with `hold_battery`, and says "håller batteriet" in the decision text. Cleared if the slot is later converted to `grid_charge`.
+- **Not changed**: `cover_load` slots that do discharge still cover the full real deficit rather than being capped at the planner's (throttled) power — a possible follow-up.
+- **Verified**: syntax check and backtests. Winter (2026-01-15 to 02-15): savings 93 → 217 SEK (2.0 → 4.6 %), 10.2 → 6.4 equivalent cycles. Summer dataset: 160.4 → 159.5 SEK (essentially unchanged).
+
+## What's New in 0.9.43
+
+Fixes `sensor.smart_energy_manager_last_decision_reason` ("Senaste beslut") changing state almost every 30s cycle purely because an embedded wattage number (house load, battery setpoint) jittered by a few watts — even when the actual reasoning behind the decision hadn't changed at all.
+
+- **Fix**: `SmartEnergyDecisionReasonSensor` now strips embedded power values (`\d+W`) from the reason text before returning it. No new sensor needed — the same numbers are already available as dedicated entities (`Husförbrukning`, `Laddningssetpunkt batteri`, `Urladdningssetpunkt batteri`), so nothing is lost, only de-duplicated. The sensor's state now only changes when the qualitative decision path actually changes.
+- **Verified**: syntax check, regex tested against real logged reason strings (prices and kWh values pass through untouched, only `NNNW` tokens are removed).
+
+## What's New in 0.9.42
+
+Rewrites two of the most-seen decision/plan reason strings, which used a comparative word ("billigare"/"cheaper") without stating what it was being compared to — read on their own, they sounded self-contradictory (e.g. "nät billigare" next to a 2.37 SEK/kWh price, which isn't cheap in absolute terms; it meant "cheaper than spending the battery's reserved value").
+
+- **`energy_planner.py` regel 2** (self-consumption discharge decision, feeds both the `Plan: anledning` sensor and the tail of `Senaste beslut`): all three reason variants now state the explicit comparison ("Nätpris X kr > batteriets sparvärde Y kr → ...") instead of a bare "billigare"/"dyrare" with no referent.
+- **`energy_controller.py`'s `prefer_sell` branch**: "Exporterar sol (sälj X kr/kWh)" renamed to "Laddar inte batteriet (säljpris X kr/kWh högt nog för att sälja hellre än lagra)" — the old text implied export was actively happening, but the hot-water-dump logic can still intercept the same surplus afterward (same class of misleading wording already fixed for "verkligt solöverskott").
+- **Not done this release**: the broader jargon cleanup (V/V_charge/merit-order/economic_peak used verbatim in Swedish sentences) and the still-open `_slot_load_kwh`/"verkligt solöverskott" mislabeling bug (logs `battery_charge_power_w` under a label that says it's the real solar surplus) — flagged for a follow-up, not blocking this readability fix.
+- **Verified**: syntax check, full backtest run (no crash, unchanged savings — text-only change).
+
+## What's New in 0.9.41
+
+Fixes regel 2 (self-consumption discharge) spending battery capacity the merit-order had already earmarked for a higher-value future opportunity — the same blind spot regel 4 (export) was already fixed for, never applied to regel 2. Found live 2026-09-16: the battery drained from 24% to 15% between 00:55-03:57 on ordinary self-consumption (each hour individually cleared `buy_price > V + cycle_cost`), projected to hit the 5% floor around 07:00-07:20 — right in the middle of the morning price peak the whole system's top CLAUDE.md priority exists to protect.
+
+- **Root cause**: `avail = batt_kwh - _reserved_kwh` in regel 2 only checks the flat reserve floor — it has no idea the merit-order (`_accepted`) may have already allocated some of that same capacity to a specific, higher-value future slot (like a morning price peak). Regel 4 already solved this for export via `_accepted_export_kwh_by_slot`; regel 2 never got the equivalent treatment.
+- **Fix**: new `_accepted_cover_kwh_by_slot` (same pattern as regel 4's export map, built from `_accepted` opportunities valued at `buy_sek`). Regel 2's discharge is now also capped by what the merit-order specifically earmarked for that slot — if nothing was earmarked (because it's reserved for something better later), the slot now falls through to grid import instead of spending reserved battery.
+- **Verified**: syntax check, full backtest run (no crash, unchanged output on this dataset — the earmark cap didn't bind differently for these particular historical days).
+
 ## What's New in 0.9.40
 
 Fixes regel 3 (grid_charge) filling from whatever slot came first chronologically instead of the cheapest available slot — found live 2026-09-15: `V_charge` jumped to 2.87 SEK/kWh (battery had drained further since the evening's earlier plan), which meant essentially every remaining hour that night cleared the `buy_price + cycle_cost < V_charge` gate, not just the genuinely cheap ones — and the planner charged starting immediately at 21:15 (2.19 SEK/kWh) instead of waiting for the near-free hours after midnight (as low as 0.07-0.10 SEK/kWh spot).

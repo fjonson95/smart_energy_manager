@@ -126,6 +126,10 @@ class PlannedSlot:
     battery_soc_est_pct: float  # Estimerad SOC vid slottens START
     reason: str
     ev_charge_w: float = 0.0    # v1.0 steg 6: schemalagd EV-laddeffekt denna slot, 0 = ingen
+    # Planen har medvetet valt att köpa från nätet och spara batteriet denna
+    # slot (regel 2: köp ≤ sparvärde, eller kapaciteten är öronmärkt åt en
+    # bättre slot). Exekutorn får då inte täcka huslasten ur batteriet.
+    hold_battery: bool = False
 
 
 @dataclass
@@ -427,6 +431,21 @@ class EnergyPlanner:
             if _value == _s.sell_sek:
                 _accepted_export_kwh_by_slot[_s.start] = _accepted_export_kwh_by_slot.get(_s.start, 0.0) + _kwh
 
+        # Regel 2:s motsvarighet till regel 4:s öronmärkning ovan (tier1,
+        # värderad till s.buy_sek) - live-incident 2026-09-16: V var korrekt
+        # och hade redan öronmärkt kapacitet åt morgontoppen 07:00-07:15 i
+        # merit-ordern, men regel 2 kollade bara det platta reservgolvet
+        # (_reserved_kwh), aldrig vad som specifikt var reserverat åt just
+        # DEN sloten - så vanlig självkonsumtion timme efter timme på natten
+        # (varje enskild timme klarade sitt eget köp>V+cykel-test) åt upp
+        # samma kapacitet morgontoppen redan hade fått, långt innan toppen
+        # ens kom. Batteriet var tomt vid 5-tiden istället för att räcka
+        # till 07:00.
+        _accepted_cover_kwh_by_slot: dict[datetime, float] = {}
+        for _s, _value, _kwh in _accepted:
+            if _value == _s.buy_sek:
+                _accepted_cover_kwh_by_slot[_s.start] = _accepted_cover_kwh_by_slot.get(_s.start, 0.0) + _kwh
+
         if _accepted:
             _cheapest = min(_accepted, key=lambda x: x[1])
             _v_raw = _cheapest[1]
@@ -564,6 +583,7 @@ class EnergyPlanner:
             action  = "idle"
             power_w = 0.0
             reason  = ""
+            hold_battery = False
 
             # Regel 1 (V > sälj_nu → spara): bara relevant när det finns
             # solöverskott att ta ställning till. Annars faller överskottet
@@ -592,17 +612,33 @@ class EnergyPlanner:
             elif deficit_kwh > 0.01:
                 if slot.buy_sek > V + self.cycle_cost_sek_kwh:
                     avail = max(0.0, batt_kwh - _reserved_kwh)
-                    if avail > 0.01:
-                        dis_kwh = min(deficit_kwh, avail, battery_max_power_kw * slot_h)
+                    # Öronmärkt åt DEN HÄR sloten (se _accepted_cover_kwh_by_slot
+                    # ovan) - annars äter vanlig självkonsumtion timme för timme
+                    # upp kapacitet merit-ordern redan reserverat åt en dyrare
+                    # möjlighet senare (t.ex. morgontoppen).
+                    _accepted_kwh = _accepted_cover_kwh_by_slot.get(slot.start, 0.0)
+                    if avail > 0.01 and _accepted_kwh > 0.01:
+                        dis_kwh = min(deficit_kwh, avail, battery_max_power_kw * slot_h, _accepted_kwh)
                         batt_kwh -= dis_kwh
                         power_w = -(dis_kwh / slot_h * 1000.0) if slot_h > 0 else 0.0
                         action = "cover_load"
-                        reason = f"köp {slot.buy_sek:.2f}>V {V:.2f}+cykel → batteri {-power_w:.0f}W"
+                        reason = (
+                            f"Nätpris {slot.buy_sek:.2f} kr > batteriets sparvärde {V:.2f} kr "
+                            f"→ laddar ur batteriet {-power_w:.0f}W ({_accepted_kwh:.1f}/{avail:.1f}kWh tillgängligt)"
+                        )
                     else:
                         action = "cover_load"
-                        reason = f"köp {slot.buy_sek:.2f}>V {V:.2f}+cykel men batteri vid reserven → nät"
+                        hold_battery = True
+                        reason = (
+                            f"Nätpris {slot.buy_sek:.2f} kr > sparvärde {V:.2f} kr, men batteriet är "
+                            f"reserverat åt ett bättre tillfälle → köper från nätet istället"
+                        )
                 else:
-                    reason = f"köp {slot.buy_sek:.2f}≤V {V:.2f}+cykel → nät billigare, spara batteriet"
+                    hold_battery = True
+                    reason = (
+                        f"Nätpris {slot.buy_sek:.2f} kr < batteriets sparvärde {V:.2f} kr "
+                        f"→ köper från nätet, sparar batteriet"
+                    )
             else:
                 reason = "balans: sol täcker last"
 
@@ -669,6 +705,7 @@ class EnergyPlanner:
                 target_power_w=power_w,
                 battery_soc_est_pct=round(soc_est, 1),
                 reason=reason,
+                hold_battery=hold_battery,
             ))
 
         # Regel 3, andra passet: allokera insamlade nätladdningskandidater
@@ -694,6 +731,7 @@ class EnergyPlanner:
                 )
                 _p = planned[_cand_idx]
                 _p.action = "grid_charge"
+                _p.hold_battery = False
                 _p.target_power_w = _power_w
                 _p.reason = (
                     f"nätladda {_cand_slot.buy_sek:.2f}+cykel<V·η {V_charge:.2f} "
