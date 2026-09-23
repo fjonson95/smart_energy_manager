@@ -1144,11 +1144,21 @@ class EnergyController:
         decision.battery_discharge_power_w = 0.0
 
         if now_slot.action == "solar_charge":
+            # Live-incident 2026-09-22: batteriet stod stilla på 16% SOC i
+            # 40+ minuter med 7+ kW solöverskott tillgängligt, trots att
+            # planen sa solar_charge. `prefer_sell` (menat för idle/
+            # cover_load-grenen nedan, där PLANEN inte alls räknat med
+            # överskott just nu) jämförde säljpriset mot ett statiskt,
+            # föråldrat golv (evening_target ~11,5%, bara min-SOC+EV-
+            # marginal) - helt orelaterat till planens FAKTISKA mål för
+            # dagen (t.ex. 99% SOC). Eftersom batteriet redan råkade ligga
+            # över det gamla golvet och säljpriset var över 0,80 kr,
+            # river exekutorn tyst upp planens egen, betydligt bättre
+            # informerade V_charge>sälj-bedömning för just den här sloten.
+            # Planen har redan avgjort att spara är mer värt än sälja här -
+            # exekutorn ska inte lägga ett eget, kruddare veto ovanpå det.
             battery_surplus_w = max(0.0, solar_surplus_w - ev_total_w)
-            evening_fill = state.battery_soc_pct < evening_target
-            prefer_sell = sell_price >= self.sell_solar_min_price and not evening_fill
-            if not prefer_sell:
-                decision.battery_charge_power_w = min(battery_surplus_w, batt_max_w)
+            decision.battery_charge_power_w = min(battery_surplus_w, batt_max_w)
             if decision.battery_charge_power_w == 0.0 and house_def_w > 0.0 and self_consume_ok:
                 # Planen (upp till 15 min gammal prognos) väntade sig nog med sol för att
                 # ladda, men verkligheten levererar ett underskott istället - täck det med

@@ -12,13 +12,25 @@
  *   night_house_load_w: 700
  */
 
+// Nordpool-priset ritas som blå stapel (se PRICE_COLOR nedan) ovanpå dessa
+// kolumn-tonarna - live-feedback 2026-09-23: cover_load låg i lavendel
+// (#7f77dd), för nära blått i nyans för att gå att skilja från prisstapeln
+// på liten skärm, särskilt i mörkt tema där båda bara syns som låg-alpha
+// överlägg. Bytt till rosa/magenta - maximalt avstånd i nyans från blått,
+// samtidigt som orange/gult/grönt behåller sitt inbördes avstånd.
 const ACTION_COLOR = {
   export:       { bg: "rgba(240,120,20,{a})",   border: "#f07814",  label: "Export"        },
   grid_charge:  { bg: "rgba(27,175,122,{a})",   border: "#1baf7a",  label: "Nätladdning"   },
   solar_charge: { bg: "rgba(255,200,0,{a})",    border: "#eda100",  label: "Solladdning"   },
-  cover_load:   { bg: "rgba(127,119,221,{a})",  border: "#7f77dd",  label: "Egenförbr."   },
+  cover_load:   { bg: "rgba(224,60,120,{a})",   border: "#e03c78",  label: "Egenförbr."   },
   idle:         { bg: null,                      border: null,       label: "Idle"          },
 };
+// Nordpool-prisstapeln (låg tidigare på 0.15-0.18 alpha rgba(42,120,214,…),
+// vilket smälte ihop med kolumn-tonarna bakom - särskilt cover_load, som
+// hade lika låg alpha på nästan samma yta). Egen, klart mörkare/mättad blå
+// med betydligt högre alpha - staplarna ska läsas som en tydlig, egen serie,
+// inte som ett svagt filter över åtgärdsfärgen.
+const PRICE_COLOR = { dark: "rgba(90,160,255,0.55)", light: "rgba(20,90,200,0.42)" };
 
 function actionBg(action, alpha) {
   const c = ACTION_COLOR[action];
@@ -106,11 +118,11 @@ canvas { display: block; width: 100%; }
   </div>
   <canvas id="c" height="270"></canvas>
   <div class="leg" id="legend">
-    <span><span class="lsq" style="background:rgba(42,120,214,0.5)"></span>Nordpool-pris</span>
+    <span><span class="lsq" style="background:rgba(20,90,200,0.6)"></span>Nordpool-pris</span>
     <span><span class="lsq" style="background:rgba(240,120,20,0.5)"></span>Export</span>
     <span><span class="lsq" style="background:rgba(27,175,122,0.5)"></span>Nätladdning</span>
     <span><span class="lsq" style="background:rgba(255,200,0,0.5)"></span>Solladdning</span>
-    <span><span class="lsq" style="background:rgba(127,119,221,0.5)"></span>Egenförbrukning</span>
+    <span><span class="lsq" style="background:rgba(224,60,120,0.5)"></span>Egenförbrukning</span>
     <span><span style="display:inline-block;width:16px;height:0;border-top:2.5px solid #1baf7a"></span>&nbsp;Batteri (plan)</span>
     <span><span style="display:inline-block;width:16px;height:0;border-top:2px dashed #eda100"></span>&nbsp;Sol kW</span>
   </div>
@@ -149,6 +161,20 @@ canvas { display: block; width: 100%; }
   }
 
   _el(id) { return this.shadowRoot.getElementById(id); }
+
+  // Live-feedback 2026-09-23: skalsiffrorna på höger/vänster axel var
+  // osynliga i ljust tema. Orsak: canvas-ritningen avgjorde ljust/mörkt via
+  // OS-inställningen (prefers-color-scheme), inte HA:s eget tema - byter
+  // användaren HA-tema utan att matcha OS-läget (t.ex. ljust HA-tema på en
+  // enhet med mörkt OS-läge) ritades texten i fel färg mot bakgrunden.
+  // hass.themes.darkMode är HA:s egen, redan beräknade sanning för vilket
+  // tema som faktiskt visas - föredra den, OS-inställningen bara som
+  // reservläge om hass av någon anledning saknar den.
+  _isDark() {
+    const hassDark = this._hass?.themes?.darkMode;
+    if (typeof hassDark === "boolean") return hassDark;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
 
   _getFloat(eid, def = 0) {
     const s = this._hass?.states[eid];
@@ -366,11 +392,22 @@ canvas { display: block; width: 100%; }
     );
 
     // ── Stat tiles ────────────────────────────────────────────────────
+    // planAttr.total_exportable_kwh är en ÖGONBLICKSBILD (batt_kwh vid
+    // planeringstillfället minus reserv) - inte vad planen faktiskt tänker
+    // exportera senare i dygnet. Live-incident 2026-09-22: batteriet stod
+    // på 16% (nyss urladdat) när planen genererades kl 11:15, så talet blev
+    // 1,4 kWh, trots att planen redan då la ~6 kWh export kl 17:45-19:00 -
+    // efter att solladdningen hunnit fylla batteriet till 99%. Summera
+    // istället vad export-slotsen FAKTISKT innehåller.
+    const plannedExportKwh = hasPlan
+      ? planSlots.filter(s => s.action === "export").reduce(
+          (sum, s) => sum + Math.abs(s.target_power_w) / 1000 * (s.endMs - s.startMs) / 3600000, 0)
+      : exportableKwh;
     const eveningTgt = hasPlan
       ? (planAttr.evening_target_soc_pct ?? 0)
       : (minKwh / capKwh * 100 + 10);
     this._el("v-soc").textContent  = `${battPct.toFixed(0)}% · ${battKwh.toFixed(1)} kWh`;
-    this._el("v-exp").textContent  = `${exportableKwh.toFixed(1)} kWh`;
+    this._el("v-exp").textContent  = `${plannedExportKwh.toFixed(1)} kWh`;
     this._el("v-tgt").textContent  = `${eveningTgt.toFixed(0)}% SOC`;
     this._el("v-sol").textContent  = `${solTomKwh.toFixed(1)} kWh`;
 
@@ -403,7 +440,7 @@ canvas { display: block; width: 100%; }
         const battStart = _adjKwh(expSlots[0].battery_soc_est_pct);
         const battEnd   = _adjKwh(expSlots[expSlots.length-1].battery_soc_est_pct);
         this._el("ph1d").textContent =
-          `${exportableKwh.toFixed(1)} kWh · ~${expPow.toFixed(0)} W · ${battStart.toFixed(1)}→${battEnd.toFixed(1)} kWh`;
+          `${plannedExportKwh.toFixed(1)} kWh · ~${expPow.toFixed(0)} W · ${battStart.toFixed(1)}→${battEnd.toFixed(1)} kWh`;
       } else {
         this._el("ph1t").textContent = "Ingen export";
         this._el("ph1d").textContent = `Golv ${(planAttr.export_floor_kwh??0).toFixed(1)} kWh`;
@@ -451,7 +488,7 @@ canvas { display: block; width: 100%; }
       this._el("ph3d").textContent = peakW > 0 ? `${(peakW/1000).toFixed(1)} kW peak imorgon` : "Sol > hushållslast";
     }
 
-    this._drawCanvas(timeline, sim, solarKwsData, planBattKwhs, planSlots, exportableKwh, capKwh, minKwh, nowMs, _currentPlanAction);
+    this._drawCanvas(timeline, sim, solarKwsData, planBattKwhs, planSlots, hasPlan ? plannedExportKwh : exportableKwh, capKwh, minKwh, nowMs, _currentPlanAction);
   }
 
   // ── Timeline ─────────────────────────────────────────────────────────
@@ -578,9 +615,11 @@ canvas { display: block; width: 100%; }
 
     const fz   = Math.max(10, Math.min(12, Math.round(dispW / 55)));
     const font = `${fz}px sans-serif`;
-    const dark  = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const muted = dark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.45)";
-    const grid  = dark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)";
+    const dark  = this._isDark();
+    // Höjd alpha mot tidigare (0.5/0.45 - för svagt för skalsiffror på
+    // liten skärm, samma live-feedback 2026-09-23).
+    const muted = dark ? "rgba(255,255,255,0.62)" : "rgba(0,0,0,0.58)";
+    const grid  = dark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.09)";
 
     ctx.clearRect(0, 0, W, H);
 
@@ -597,7 +636,7 @@ canvas { display: block; width: 100%; }
       timeline.forEach((slot, i) => {
         const act = slot.planAction;
         if (!act || act === "idle") return;
-        const bg = actionBg(act, dark ? "0.20" : "0.14");
+        const bg = actionBg(act, dark ? "0.26" : "0.18");
         if (!bg) return;
         const x = xOf(i) - slotW / 2;
         ctx.fillStyle = bg;
@@ -682,7 +721,7 @@ canvas { display: block; width: 100%; }
       const yTop = yP(slot.price), yBot = yP(0);
       const r = 2;
       const isExport = hasPlan ? (slot.planAction === "export") : slot.high;
-      ctx.fillStyle = isExport ? "#f07814" : (dark ? "rgba(42,120,214,0.18)" : "rgba(42,120,214,0.15)");
+      ctx.fillStyle = isExport ? "#f07814" : (dark ? PRICE_COLOR.dark : PRICE_COLOR.light);
       ctx.beginPath();
       ctx.moveTo(x + r, yTop);
       ctx.lineTo(x + barW - r, yTop);

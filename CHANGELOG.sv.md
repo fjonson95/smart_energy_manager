@@ -2,6 +2,48 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.50
+
+Full färgöversyn av `sem-energy-plan-card.js` för både ljust och mörkt tema, efter feedback om att Nordpool-prisstaplarna och kolumntoningen för "Egenförbrukning" (cover_load) låg för nära varandra i nyans/kontrast för att gå att skilja på en liten skärm i mörkt tema, att ljust tema bara var lite bättre, och att skalsiffrorna på axlarna var osynliga i ljust tema.
+
+- **Grundorsak till osynliga skalsiffror**: canvas-ritningen valde ljus/mörk-palett från `window.matchMedia("(prefers-color-scheme: dark)")` – OS-inställningen – istället för Home Assistants eget aktiva tema. Om HA:s tema och OS-inställningen inte stämmer överens (t.ex. ett ljust HA-tema på en enhet inställd på mörkt läge) ritade kortet ljus-temats text mot en ljus bakgrund, eller mörk-temats text mot en mörk bakgrund – osynligt i båda fallen. Läser nu `hass.themes.darkMode` (HA:s egen, redan avgjorda sanning) först, och faller bara tillbaka till OS-inställningen om den saknas.
+- **Grundorsak till låg kontrast**: `cover_load`:s kolumnton (lavendel, `#7f77dd`) låg nära Nordpool-prisstaplarnas blå både i nyans och i (mycket låg, 0.15–0.18) alpha – särskilt i mörkt tema lästes båda som liknande svaga överlägg. `cover_load` är nu rosa/magenta (`#e03c78`), så långt från blått i nyans som den befintliga orange/gul/grön-uppsättningen tillåter, och prisstaplarna är nu en klart mer mättad blå med högre alpha (egen `PRICE_COLOR`-konstant) så de läses som en egen serie oavsett vilken kolumnton som ligger bakom.
+- **Även höjt**: den dämpade axel-/etiketttextens alpha (0,5/0,45 → 0,62/0,58) och planslotarnas bakgrundsalpha (0,14–0,20 → 0,18–0,26), båda för svaga på en liten skärm.
+- **Ingen backend-ändring**: bara kortet.
+- **Verifierat**: manuell genomgång av diffen (ingen `node` tillgänglig i den här miljön för att köra en JS-syntaxkontroll; ändringen är ett litet, mekaniskt färg-/detekteringsbyte utan ny kontrollflödeslogik).
+
+## Nyheter i 0.9.49
+
+Fixar att exekutorn tyst vägrade ladda batteriet på en `solar_charge`-plan-slot trots flera kW soltillgängligt överskott. Hittat skarpt 2026-09-22: SOC låg still på 16 % i 40+ minuter med 8,4 kW solproduktion mot 1,2 kW husförbrukning och planen sa `solar_charge`, "Batteri laddar" i beslutstexten – men den faktiska laddningssetpunkten låg kvar på 0 W. Den avskalade beslutstexten (watt togs bort i v0.9.43) dolde diskrepansen.
+
+- **Grundorsak**: `apply_plan_executor()`:s `solar_charge`-gren omprövade planerarens eget ladda-eller-sälj-beslut med en separat, kruddare heuristik (`prefer_sell`, som jämförde det aktuella säljpriset mot ett statiskt golv på 0,80 kr/kWh och mot `evening_target` – ett nästan-minimum SOC-golv, ~11,5 %, orelaterat till vad planen faktiskt siktar mot den dagen, t.ex. 99 %). Eftersom batteriet råkade ligga över det föråldrade golvet och säljpriset var okej, nollställde `prefer_sell` tyst laddningskommandot som planen redan bestämt via sin egen, betydligt bättre informerade `V_charge > sälj`-jämförelse.
+- **Fix**: `solar_charge`-grenen laddar nu bara med tillgängligt överskott, punkt slut – planeraren har redan fattat det beslutet för just den här sloten; exekutorns jobb här är att verkställa det, inte omvärdera det. `prefer_sell`:s realtidsroll ("planen väntade inget överskott men verkligheten levererar") är oförändrad i idle/cover_load-grenen, där den är rätt fallback (inget planbeslut att luta sig mot där).
+- **Verifierat**: syntaxkontroll och backtester (samma `apply_plan_executor()`-väg som backtesten faktiskt kör, inte bara planeraren). Vinter: 940,53 → 943,24 kr, ytterligare liten förbättring. Sommar: oförändrat, 158,60 kr.
+
+## Nyheter i 0.9.48
+
+Fixar att planeraren exporterade batteriet på eftermiddagen/kvällen en dag då morgondagen redan (via Solcast) var känd som en solfattig dag – innan Nordpool hunnit publicera morgondagens priser (vanligtvis ~13:00–14:00). Hittat skarpt 2026-09-22: kl 11:30, med Solcasts prognos för imorgon redan nere på 12,5 kWh (en bråkdel av en normal dag) och soligt idag, lade planen ändå in kvällsexport – eftersom merit-orderns horisont (`future_slots`, byggd av `ps.slots`) helt saknade prisdata för imorgon och därför inte hade något sätt att representera morgondagens underskott alls. Användaren påpekade helt korrekt: att inte känna morgondagens PRIS ändrar inte att vi redan vet att morgondagens SOL inte räcker.
+
+- **Fix**: när ingen `future_slots`-slot startar på eller efter morgondagens midnatt (dvs Nordpool har inte publicerat än), höjs `_reserved_kwh` till `max(befintligt golv, min(batt_max_kwh, batt_min_kwh + (dagens effektiva dygnsförbrukning − Solcasts prognos för imorgon)))` – dagens förbrukningsnivå används som en samma-säsong-proxy för imorgon, i brist på en bättre uppskattning. Kapat vid batteriets egen användbara kapacitet, så till skillnad från den tidigare (borttagna) v1-torkreserven kan den här aldrig kräva mer än vad batteriet fysiskt rymmer. `max()`, inte `+`, mot det befintliga golvet – samma stapelskydd som redan används mellan `_uncertainty_markup` och `_drought_markup`.
+- **Självbegränsande**: bara aktiv i fönstret innan morgondagens priser publicerats; så fort de kommer in täcker `future_slots` morgondagen direkt och den befintliga, prismedvetna merit-ordern (v0.9.46) tar över – reserven blir då irrelevant och läggs inte ovanpå den.
+- **Verifierat**: syntaxkontroll och backtester. Vinter (2026-01-01 till 04-30): 950,95 → 940,53 kr – en liten ytterligare förbättring, ingen regression (backtest-datasetet har mestadels full prisframförhållning, så den här vägen triggar sällan där). Sommardatasetet: oförändrat, 158,60 kr.
+
+## Nyheter i 0.9.47
+
+Fixar att `sem-energy-plan-card.js`:s statruta "Exporterbart" (och motsvarande exportfas-ruta) visade ett litet eller missvisande kWh-tal som inte stämde med exportblocket som faktiskt ritades i grafen. Hittat skarpt 2026-09-22: kl 11:15, med batteriet nyss urladdat till 16 %, hade planen redan lagt in ~6 kWh export kl 17:45–19:00 (efter att solladdningen hunnit fylla batteriet till 99 % igen) – men statrutan visade "1,4 kWh", eftersom den läste `DayPlan.total_exportable_kwh`, en ögonblicksbild av `batt_kwh - reserv` vid tidpunkten planen GENERERADES, inte vad planen faktiskt tänker exportera senare när batteriet fyllts på.
+
+- **Fix**: kortet summerar nu de riktiga export-slotsens egna `target_power_w × varaktighet` till både "Exporterbart"-rutan och exportfas-textens tal, och använder samma summa för att styra om "↑ EXPORT"-etiketten i grafen visas (tidigare styrd av samma inaktuella ögonblicksvärde, vilket kunde dölja etiketten helt vid en plan genererad med lågt batteri).
+- **Ingen backend-ändring**: `DayPlan.total_exportable_kwh` självt är oförändrat och fortfarande korrekt för sitt andra syfte (planerarens egen utrymmesberäkning) – det här är rent en visningsfix i kortet.
+- **Verifierat**: syntaxkontroll (ingen backtest-täckning – bara kortet, inte en del av planerarsimuleringen).
+
+## Nyheter i 0.9.46
+
+Fixar att planeraren reserverade batterikapacitet åt dygnets dyraste slot (oftast kvällstoppen) på bekostnad av en tidigare, billigare men ändå värdefull möjlighet (morgontoppen) – även när ett stort, säkert solfönster ligger mellan de två och ändå skulle fylla på batteriet igen. Hittat skarpt 2026-09-22: kl 05:30 låg planen `idle` rakt igenom den faktiska morgonprisstoppen (07:00–07:45, köppris upp till 4,68 kr/kWh) och köpte ändå från nätet, eftersom batteriets öronmärkta värde var låst till kvällstoppen (19:00, köppris 6,51 kr/kWh) – trots en solprognos på 41 kWh (P10) och en redan planerad `solar_charge`-slot kl 13:45.
+
+- **Grundorsak**: `_cap_by_time` (taket som merit-orderns utrymmeskontroll använder, `energy_planner.py`) utgår från batteriets NUVARANDE nivå och klipps vid `batt_max_kwh`. När batteriet redan startar nästan fullt finns inget rum kvar för taket att växa i alls, så hela dagens solprognos bidrar med noll extra utrymme – varje framtida möjlighet (morgon som kväll) tvingas då konkurrera om exakt samma, orörliga pool, och den dyrare kvällsslotten vinner alltid.
+- **Fix**: solöverskott som taket annars skulle klippa bort i brist på utrymme (`_increment > _headroom`) bankas nu som `_banked_extra_kwh` och läggs till taket för alla senare tidpunkter – det motsvarar det utrymme en tidigare urladdning skulle frigjort åt just den solen att fylla på. Använder fortfarande P10-sol och P75-last genomgående, så den tidigare P50-optimism-regressionen (v1.0 steg 3) återinförs inte.
+- **Verifierat**: syntaxkontroll och backtester. Vinter (2026-01-01 till 04-30): 952,93 → 950,95 kr (i stort sett oförändrat). Sommardatasetet: 159,54 → 158,60 kr (i stort sett oförändrat).
+
 ## Nyheter i 0.9.45
 
 Batteriets ackumulerade energikostnad (och därmed sensorn "Batterisnittpris") nollställs nu när batteriet i praktiken är tomt, så att avrundnings- och sensorfel från den proportionella nedskrivningen (`cost *= ny_energi / gammal_energi`) inte förs vidare från cykel till cykel och får snittpriset att driva.

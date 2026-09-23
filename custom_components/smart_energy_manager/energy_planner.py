@@ -341,17 +341,59 @@ class EnergyPlanner:
         # sol som skulle laddat batteriet för natten exporterades istället
         # för nästan inget). Se docs/v1_implementation_plan.md, Steg 3
         # implementerat.
+        # Live-incident 2026-09-22: batteriet stod redan på 96% SOC vid
+        # planeringstillfället, så _running_cap (redan vid taket) kunde
+        # aldrig växa - trots att Solcast lovade 41 kWh (P10!) sol under
+        # dagen. Morgonens och kvällens urladdningsmöjligheter tvingades då
+        # konkurrera om exakt samma, orörliga pool (nuvarande nivå minus
+        # reserv) i _slack_min_from nedan - kvällens högre pris vann alltid,
+        # och morgontoppen (billigare men FÖRE middagssolen) fick ingenting
+        # trots att en morgonurladdning fysiskt hinner fyllas på av
+        # middagssolen långt innan kvällen. _banked_extra_kwh fångar upp
+        # solöverskott som annars hade klippts bort av min()-taket här och
+        # gör det tillgängligt som utrymme för SENARE möjligheter - exakt
+        # det utrymme en tidigare urladdning skulle frigjort för solen att
+        # fylla i.
         _cap_by_time: dict[datetime, float] = {}
         _running_cap = batt_kwh
+        _banked_extra_kwh = 0.0
         for s in future_slots:
             s_h = (s.end - s.start).total_seconds() / 3600.0
             if s_h <= 0:
                 continue
             _s_surplus_kwh = max(0.0, s.solar_kwh_p10 - _slot_load_kwh(s, load_shape_p75))
-            _running_cap = min(batt_max_kwh, _running_cap + min(_s_surplus_kwh, battery_max_power_kw * s_h))
-            _cap_by_time[s.start] = _running_cap
+            _increment = min(_s_surplus_kwh, battery_max_power_kw * s_h)
+            _headroom = max(0.0, batt_max_kwh - _running_cap)
+            if _increment > _headroom:
+                _banked_extra_kwh += _increment - _headroom
+                _running_cap = batt_max_kwh
+            else:
+                _running_cap += _increment
+            _cap_by_time[s.start] = _running_cap + _banked_extra_kwh
 
         _reserved_kwh = batt_min_kwh + _flat_buffer_kwh
+
+        # Live-incident 2026-09-22, del 2: Nordpool publicerar imorgondagens
+        # priser runt 13-14, så future_slots (byggt uteslutande av ps.slots)
+        # tar effektivt slut vid midnatt fram tills dess - merit-ordern är
+        # då helt blind för imorgon, oavsett hur säker Solcast-prognosen
+        # redan är. Användaren påpekade korrekt: vi vet redan att solen inte
+        # räcker imorgon, prisokunskapen ändrar inte DEN sanningen. Så länge
+        # ps.slots inte når in i morgondagen, höj golvet med det förväntade
+        # underskottet (dagens lastnivå som proxy för imorgon, minus
+        # Solcasts redan kända prognos) - ett EXTRA, TEMPORÄRT skydd som
+        # försvinner automatiskt så fort riktiga priser (och därmed regel
+        # 2/3/4:s egen, prismedvetna hantering av morgondagen) kommer in.
+        # max(), inte +, mot det befintliga golvet - samma stapelskydd som
+        # _drought_markup redan använder mot _uncertainty_markup ovan.
+        # Kapat vid batt_max_kwh - kan aldrig reservera mer än batteriet
+        # fysiskt rymmer, till skillnad från v1:s drought-golv (borttaget)
+        # som saknade den spärren och mättade nästan varje vinterdag.
+        _tomorrow_start = (now_a + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        _prices_cover_tomorrow = any(s.start >= _tomorrow_start for s in future_slots)
+        if not _prices_cover_tomorrow:
+            _tomorrow_deficit_kwh = max(0.0, _eff_daily_kwh - solar_forecast_tomorrow_kwh)
+            _reserved_kwh = max(_reserved_kwh, min(batt_max_kwh, batt_min_kwh + _tomorrow_deficit_kwh))
 
         # Merit-order över ALLA framtida "möjligheter" en kWh batteri kan
         # användas till – inte två separata pass (köpsida/säljsida) som
