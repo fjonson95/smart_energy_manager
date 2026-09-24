@@ -511,7 +511,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     def _get_load_shape(self, percentile: float) -> Optional[list[float]]:
         """24 värden (fraktion av dygnets totala kWh per timme), given percentil
         (0.5=P50, 0.75=P75) över det rullande <=21-dygnsfönstret. None om ingen
-        historik finns än – build_plan() faller då tillbaka till den platta takten."""
+        historik finns än – build_plan() faller då tillbaka till den platta takten.
+
+        Live-incident 2026-09-23: varje timmes percentil togs oberoende av de
+        andra timmarna - en enda dag med en ovanlig kvällslast (elpatron, EV,
+        diskmaskin) på EN timme slog igenom fullt i just den timmens 75:e
+        percentil, utan att vägas mot att samma dags ÖVRIGA timmar inte alls
+        var lika höga. Resultat: P75-formens dygnssumma för kl 18-23 kunde
+        själv överstiga 108% av HELA dygnets förbrukning - fysiskt omöjligt.
+        energy_planner.py:s merit-order tolkade det som att kvällen krävde
+        flera gånger mer energi än verkligheten, åt upp nästan hela
+        batteriets kapacitet i förtid och tryngde ut den betydligt mindre
+        (och korrekta) morgontoppen helt. Renormaliserar därför resultatet
+        till summa 1,0 (en giltig dygnsfördelning) - P75:s avsedda signal
+        ("vissa timmar är historiskt mer riskabla") behålls som en RELATIV
+        omviktning mellan timmarna, bara utan att blåsa upp dygnstotalen.
+        """
         if not self._hourly_shape_history:
             return None
         result: list[Optional[float]] = []
@@ -527,6 +542,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             result.append(vals[idx])
         if all(v is None for v in result):
             return None
+        total = sum(v for v in result if v is not None)
+        if total > 0:
+            result = [v / total if v is not None else None for v in result]
         return result
 
     async def _load_takeover_store(self) -> None:

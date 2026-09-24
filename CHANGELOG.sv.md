@@ -2,6 +2,31 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.53
+
+Fixar att timformens percentil (`coordinator._get_load_shape()`) gav en fysiskt omöjlig dygnssumma – hittat skarpt 2026-09-23 genom att återskapa den faktiska formfilen: P75-formens kvällstimmar (18:00–23:00) ensamma summerade till 108 % av ett helt dygns förbrukning. Det blåste upp kvällens skenbara underskott långt bortom verkligheten i planerarens merit-ordning, vilket satte `V` (sparvärdet) till 4,78 kr/kWh – högre än till och med morgondagens morgonpristopp (~3,8 kr/kWh) – så planen fortsatte köpa färsk nätel rakt igenom morgontoppen istället för att ladda ur ett batteri som just laddats i natt för ~2,6 kr/kWh.
+
+- **Grundorsak**: varje timmes percentil (P50/P75) beräknas oberoende över det rullande ≤21-dygnsfönstret (`_get_load_shape()`). En enda dag med en ovanlig kvällslast (elpatron, EV, diskmaskin) på EN timme driver upp just den timmens 75:e percentil utan hänsyn till hur låga SAMMA dags övriga timmar var – så de 24 oberoende valda percentilvärdena representerar inte längre ett sammanhängande dygn och kan summera till långt över 100 %.
+- **Fix**: renormaliserar det returnerade 24-värdesmönstret till summa 1,0 (en giltig dygnsfördelning) efter att varje timmes percentil valts. P75:s avsedda signal – vissa timmar är historiskt mer riskabla än andra – lever kvar som en RELATIV omviktning mellan timmarna, den blåser bara inte längre upp dygnstotalen. Tillämpat i både `coordinator.py` (produktion) och `testdata/backtest.py` (som hade sin egen, oberoende skrivna kopia av samma bugg – därför fångade inte tidigare backtester i den här sessionen den).
+- **Verifierat**: syntaxkontroll; återskapat lokalt mot riktig pris-/sol-/formdata extraherad från den skarpa lagringen (`testdata/smart_energy_manager_daily_consumption`, `testdata/smart_energy_manager_hourly_shape`) – innan fixen blev V-motsvarigheten för hög för att finansiera morgontoppen alls; efteråt får både morgon- (07:30) och kvällstoppen (17:30–21:00) riktig `cover_load`-urladdning istället för idle. Backtester: sommar 158,60 → 158,81 kr (i stort sett oförändrat), vinter 943,24 → 918,94 kr (-2,6 %) – en äkta, måttlig minskning i ren besparingssiffra, inte en regression i vanlig mening: den gamla, överdrivet uppblåsta P75:an var av misstag överförsiktig på ett sätt som ibland lönade sig i backtestens smala kostnadsmått utan att vara en sund mekanism.
+
+## Nyheter i 0.9.52
+
+Exponerar planerarens marginalvärdes-bokföring (`V`, `V_charge`, vilken slot som satte det, och hela `notes`-sammanfattningen) som attribut på `Plan: anledning`, så ett överraskande sparvärde (t.ex. varför en billigare morgonpristopp hoppas över till förmån för en dyrare kvällstopp) går att spåra utan att gissa eller återskapa planen offline.
+
+- **Varför**: skarp diagnos 2026-09-23 hittade `V` (marginalvärdet/den billigaste accepterade möjlighetens värde) på 4,78 kr/kWh – högre än morgondagens morgonpristopp (~3,8 kr/kWh), så planen köpte färsk nätel genom hela morgontoppen istället för att ladda ur ett batteri som just laddats i natt för ~2,6 kr/kWh. Att återskapa samma indata lokalt med en platt (oformad) lastnivå finansierade BÅDA topparna korrekt (V=3,41 kr/kWh) – vilket pekar på den inlärda timformen som trolig källa till skillnaden, inte `_eff_daily_kwh`-fixen från v0.9.51. Kunde inte bekräfta vidare utan att se den skarpa `notes`/marginalslot-datan, som inte exponerades någonstans.
+- **Nya attribut på `sensor.smart_energy_manager_plan_anledning`**: `marginal_value_sek_kwh`, `marginal_value_charge_sek_kwh`, `marginal_slot_start`, `notes`.
+- **Ingen beteendeändring**: bara skrivskyddad exponering av tal planeraren redan räknar ut internt.
+- **Verifierat**: syntaxkontroll.
+
+## Nyheter i 0.9.51
+
+Fixar att planeraren projicerade nästan noll hushållslast för varenda timme på dygnet – inklusive morgondagens morgonpristopp – på en mild dag med lite eller ingen uppvärmning, och därmed tyst hoppade över regel 2 (egenförbrukningsurladdning) överallt den borde ha gällt.
+
+- **Grundorsak**: formskalningsfunktionen `_load_kw_at()` multiplicerade det 24-timmars förbrukningsmönstret med `predicted_daily_kwh` – gradtimmodellens eget utfall, som bara täcker uppvärmning och varmvatten, aldrig hushållets generella baslast (belysning, apparater, standby). Hittat skarpt 2026-09-23: med utetemp 14,9°C och 0 gradtimmar blev `predicted_daily_kwh` 1,0 kWh (bara varmvattnets golv) – så den formskalade lasten för bokstavligen varje slot i planen, dag som natt, kollapsade mot noll. `deficit_kwh` översteg aldrig 0,01 kWh-tröskeln någonstans, så regel 2 triggade aldrig ens under morgondagens pristopp (06:30–09:00, köppris upp mot ~3,8 kr/kWh) – planen visade `idle` rakt igenom istället för att ladda ur eller öronmärka batteriet.
+- **Fix**: `_load_kw_at()` skalar nu mönstret med `_eff_daily_kwh` (`max(predicted_daily_kwh, rullande/gårdagens förbrukning)`) istället för den råa, uppvärmnings-bara siffran – samma golv som `hourly_load_kw`:s egen fallback redan använder några rader ovanför, bara utsträckt till den formbaserade vägen också. Reagerar fortfarande direkt uppåt på en genuint kall dag (gradtimtermen dominerar då `max()`); stoppar bara nivån från att kollapsa under redan uppmätt verklig förbrukning på en mild sådan.
+- **Verifierat**: syntaxkontroll och backtester, oförändrat (158,60 kr sommar, 943,24 kr vinter inkl. april för sig) – de tillgängliga historiska dataseten övar inte den skillnad det här fixar: sommardatasetet är för kort för att 21-dygnsformfönstret ska hinna byggas upp, och Sveriges jan–apr-vinterdata har aldrig en tillräckligt mild dag för att `_eff_daily_kwh` ska skilja sig från gradtimsiffran. Buggen och fixen är istället bekräftade direkt mot levande sensordata (`sensor.smart_energy_manager_predicted_house_load` som visar 1,0 kWh med `heating_degree_day: 0`).
+
 ## Nyheter i 0.9.50
 
 Full färgöversyn av `sem-energy-plan-card.js` för både ljust och mörkt tema, efter feedback om att Nordpool-prisstaplarna och kolumntoningen för "Egenförbrukning" (cover_load) låg för nära varandra i nyans/kontrast för att gå att skilja på en liten skärm i mörkt tema, att ljust tema bara var lite bättre, och att skalsiffrorna på axlarna var osynliga i ljust tema.

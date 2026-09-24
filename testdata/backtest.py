@@ -611,6 +611,13 @@ def run_backtest(
             result.append(vals[idx])
         if all(v is None for v in result):
             return None
+        # Speglar coordinator.py:_get_load_shape()'s v0.9.53-fix: renormalisera
+        # till summa 1,0 - annars kan P75-formens dygnssumma själv överstiga
+        # 100% av dygnet (en enda dags kvällsutstickare slår igenom fullt i
+        # just den timmens percentil, se live-incident 2026-09-23).
+        total = sum(v for v in result if v is not None)
+        if total > 0:
+            result = [v / total if v is not None else None for v in result]
         return result
 
     # --drought-oracle (testverktyg för v2 av torkrisk-påslaget, docs/

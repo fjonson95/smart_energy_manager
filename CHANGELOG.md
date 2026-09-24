@@ -2,6 +2,31 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.53
+
+Fixes the load-shape percentile (`coordinator._get_load_shape()`) producing a physically impossible daily total — found live 2026-09-23 by reconstructing the actual shape store: the P75 shape's evening hours (18:00-23:00) alone summed to 108% of an entire day's consumption. This inflated evening's apparent deficit far beyond reality in the planner's merit-order, which set `V` (the sparvärde) at 4.78 SEK/kWh — above even tomorrow's morning price peak (~3.8 SEK/kWh) — so the plan kept buying fresh grid power straight through the morning peak instead of discharging a battery that had just been charged overnight for ~2.6 SEK/kWh.
+
+- **Root cause**: each hour's percentile (P50/P75) is computed independently across the rolling ≤21-day window (`_get_load_shape()`). A single day with an unusual evening load (immersion heater, EV, dishwasher) on one hour pushes that hour's 75th percentile up without any regard for how low the *rest* of that same day's hours were — so the 24 independently-chosen percentile values no longer represent one coherent day and can sum to well over 100%.
+- **Fix**: renormalize the returned 24-value shape to sum to 1.0 (a valid daily distribution) after picking each hour's percentile. P75's intended signal — some hours are historically riskier than others — survives as a *relative* reweighting between hours; it just no longer inflates the daily total. Applied in both `coordinator.py` (production) and `testdata/backtest.py` (which had its own, independently-written copy of the same bug — that's why earlier backtests in this session didn't catch it).
+- **Verified**: syntax check; reproduced locally against real price/solar/shape data extracted from the live store (`testdata/smart_energy_manager_daily_consumption`, `testdata/smart_energy_manager_hourly_shape`) — before the fix, V-equivalent came out too high to fund the morning peak at all; after, both the morning (07:30) and evening (17:30-21:00) peaks get real `cover_load` discharge instead of idle. Backtests: summer 158.60 → 158.81 SEK (roughly unchanged), winter 943.24 → 918.94 SEK (-2.6%) — a genuine, modest decrease in raw savings, not a regression in the usual sense: the old, over-inflated P75 was accidentally over-cautious in a way that sometimes paid off in the backtest's narrow cost metric without being a sound mechanism.
+
+## What's New in 0.9.52
+
+Exposes the planner's marginal-value bookkeeping (`V`, `V_charge`, which slot set it, and the full `notes` summary) as attributes on `Plan: anledning`, so a surprising sparvärde (e.g. why a cheaper morning price peak gets skipped in favor of a pricier evening one) can be traced without guessing or reconstructing the plan offline.
+
+- **Why**: live diagnosis 2026-09-23 found `V` (the marginal/cheapest accepted opportunity's value) at 4.78 SEK/kWh — higher than tomorrow's morning price peak (~3.8 SEK/kWh), so the plan bought fresh grid power through the whole morning peak instead of discharging a battery that had just been charged overnight at ~2.6 SEK/kWh. Reproducing the same inputs locally with a flat (unshaped) load level funded *both* peaks correctly (V=3.41 SEK/kWh) — pointing at the learned hourly load shape as the likely source of the discrepancy, not the `_eff_daily_kwh` fix from v0.9.51. Couldn't confirm further without seeing the live `notes`/marginal-slot data, which wasn't exposed anywhere.
+- **New attributes on `sensor.smart_energy_manager_plan_anledning`**: `marginal_value_sek_kwh`, `marginal_value_charge_sek_kwh`, `marginal_slot_start`, `notes`.
+- **Not a behavior change**: read-only exposure of numbers the planner already computes internally.
+- **Verified**: syntax check.
+
+## What's New in 0.9.51
+
+Fixes the planner projecting near-zero household load for every hour of the day — including tomorrow's morning price peak — on a mild day with little or no heating demand, silently skipping regel 2 (self-consumption discharge) everywhere it should have applied.
+
+- **Root cause**: the load-shape scaling function `_load_kw_at()` multiplied the 24-hour consumption shape by `predicted_daily_kwh` — the temperature/heating-degree-day model's own output, which covers only heating and hot water, never the household's general baseline (lights, appliances, standby). Found live 2026-09-23: with outdoor temp 14.9°C and 0 heating-degree-hours, `predicted_daily_kwh` was 1.0 kWh (just the DHW floor) — so the shape-scaled load for literally every slot in the plan, day and night, collapsed toward zero. `deficit_kwh` never exceeded the 0.01 kWh threshold anywhere, so regel 2 never triggered even through tomorrow's price peak (06:30-09:00, buy up to ~3.8 SEK/kWh) — the plan showed `idle` straight through it instead of discharging or earmarking the battery.
+- **Fix**: `_load_kw_at()` now scales the shape by `_eff_daily_kwh` (`max(predicted_daily_kwh, rolling/yesterday consumption)`) instead of the raw heating-only figure — the same floor `hourly_load_kw`'s own fallback already uses a few lines above, just extended to the shape-based path too. Still reacts immediately upward on a genuinely cold day (the heating-degree-day term dominates the `max()` then); only stops the level from collapsing below already-measured real consumption on a mild one.
+- **Verified**: syntax check and backtests, unchanged (158.60 SEK summer, 943.24 SEK winter incl. April alone) — the available historical datasets don't exercise the divergence this fixes: the summer set is too short for the 21-day shape window to populate, and Sweden's Jan-Apr winter data never has a mild enough day for `_eff_daily_kwh` to differ from the heating-model figure. The bug and fix are both confirmed directly against live sensor data instead (`sensor.smart_energy_manager_predicted_house_load` showing 1.0 kWh with `heating_degree_day: 0`).
+
 ## What's New in 0.9.50
 
 Full color pass on `sem-energy-plan-card.js` for both light and dark themes, after live feedback that the Nordpool-price bars and the "Egenförbrukning" (cover_load) column tint were too close in hue/contrast to tell apart on a small screen in dark mode, that light mode was only somewhat better, and that the axis scale numbers were invisible in light mode.

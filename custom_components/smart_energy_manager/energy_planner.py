@@ -269,18 +269,30 @@ class EnergyPlanner:
 
         # v1.0 steg 1A: lastens FORM (24 timhinkar, rullande <=21-dygnssnitt,
         # normaliserat per dygn – se coordinator._get_load_shape()) skild från
-        # NIVÅN (gradtimmodellen, predicted_daily_kwh – INTE _eff_daily_kwh,
-        # eftersom formen redan är byggd på verklig data och nivån ska kunna
-        # reagera på morgondagens temperaturprognos direkt). P50 för allmän
-        # planering, P75 för underskottsprojektionen i V (en smalt högre
-        # försiktighetsmarginal). Faller tillbaka till den platta
-        # hourly_load_kw tills 21 dygns formhistorik hunnit byggas upp, eller
-        # för enskilda timmar utan täckning i fönstret.
+        # NIVÅN. P50 för allmän planering, P75 för underskottsprojektionen i
+        # V (en smalt högre försiktighetsmarginal). Faller tillbaka till den
+        # platta hourly_load_kw tills 21 dygns formhistorik hunnit byggas
+        # upp, eller för enskilda timmar utan täckning i fönstret.
+        #
+        # Live-incident 2026-09-23: en mild kväll (14,9°C, 0 gradtimmar) gav
+        # predicted_daily_kwh=1,0 kWh (bara varmvattnets baslinje - gradtim-
+        # modellen täcker ALDRIG hushållets generella baslast, se
+        # kommentaren vid _eff_daily_kwh ovan). Formen skalades mot den
+        # råa 1,0 kWh:en istället för _eff_daily_kwh, så varenda timmes
+        # projicerade last - dag som natt, inklusive morgondagens pristopp
+        # 06:30-09:00 - kollapsade mot nästan noll. Underskottet (deficit_kwh)
+        # blev aldrig >0,01 kWh, så regel 2 (köp>V → täck ur batteriet)
+        # triggade aldrig alls; hela natten och morgondagens toppris blev
+        # "idle" istället för cover_load. _eff_daily_kwh reagerar ändå direkt
+        # uppåt på en kall dag (gradtimmen slår igenom via max()) - den
+        # skyddar bara mot att NIVÅN kollapsar under den redan uppmätta
+        # baslasten på en mild dag, exakt samma golv hourly_load_kw redan
+        # har några rader ovan.
         def _load_kw_at(dt: datetime, shape: Optional[list]) -> float:
             if shape is not None:
                 h = shape[dt.astimezone().hour]
                 if h is not None:
-                    return predicted_daily_kwh * h
+                    return _eff_daily_kwh * h
             return hourly_load_kw
 
         def _slot_load_kwh(s, shape: Optional[list]) -> float:

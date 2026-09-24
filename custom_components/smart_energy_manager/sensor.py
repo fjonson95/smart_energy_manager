@@ -1134,6 +1134,15 @@ class DayPlanReasonSensor(_DayPlanBase):
             "pv_production_ratio": round(plan.pv_production_ratio, 2),
             "solar_takeover": plan.solar_takeover_dt.isoformat() if plan.solar_takeover_dt else None,
             "plan_generated_at": plan.generated_at.isoformat(),
+            # Live-feedback 2026-09-23: användaren kunde inte spåra VARFÖR V
+            # (sparvärdet) hamnade där det hamnade utan den här texten - bara
+            # sparvärdet, ingen förklaring av vilken slot/möjlighet som satte
+            # det. notes/marginal_* är redan beräknade i DayPlan, bara aldrig
+            # exponerade förut.
+            "marginal_value_sek_kwh": round(plan.marginal_value_sek_kwh, 2),
+            "marginal_value_charge_sek_kwh": round(plan.marginal_value_charge_sek_kwh, 2),
+            "marginal_slot_start": plan.marginal_slot_start.isoformat() if plan.marginal_slot_start else None,
+            "notes": plan.notes,
             # P6-2: begränsad till 24h – hela 28h-horisonten sprängde recorderns
             # 16 kB-gräns för attribut och slutade sparas alls.
             "slots": [
