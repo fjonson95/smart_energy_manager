@@ -89,12 +89,8 @@ Om imorgon bittis pris är 1,20 kr och kvällens är 0,80 kr allokeras proportio
 ```
 Vid uppstart återställs `_takeover_observed_today = True` om `last_obs_date` är idag – förhindrar dubbel-observation vid omstart. Bakåtkompatibelt med gammalt listformat (utan datum).
 
-### Legionella – förfallokontroll på datum
-`due`-kontrollen i `LegionellaManager.should_run_now()` jämför *datum*, inte exakt timantal:
-```python
-due = today >= (last_run + timedelta(days=interval_days)).date()
-```
-Hela förfallodagen räknas som tillgänglig. Kördes senast torsdag 14:00 → nästa förfallodag är torsdag om 7 dagar, och sol/billigt pris tidigt på morgonen den dagen räcker för att trigga.
+### Legionella – rörligt intervall (5–9 dagar), billigaste fönstret
+`LegionellaManager.should_run_now()` jämför *datum*: från `min`-dagen (standard 5) är det dags, och senast slutet av `max`-dagen (standard 9) körs det bästa kända fönstret oavsett pris. Mellan dem väljs billigaste körfönstret (körtid × **effektivt pris**) bland kvartarna i Nordpools kända prisdata, dygnets alla timmar. Effektivt pris = solöverskott (p10 minus husets last, mot 6 kW patron) värderat till säljpris, resten till köppris. Före max-dagen körs bara om bästa fönstret är ≤ 90 % av snittet i det kända; dagar bortom prishorisonten ses via Solcasts `forecast_day_3..7` (härledda ur imorgon-entiteten) och väntas in om de är minst 10 % billigare. Nödstart undviker natten 23–06. `next_due` = senaste körning + min-dagar.
 
 ### EV-vakthund
 Om bil är vald, laddning är beordrad men `charger_power < 50 W` i >5 minuter → `_active_cars[charger_name]` återställs till `NO_CAR_SELECTED`. Hanteras i `coordinator._build_charger_states()` via `_charge_command_times`.

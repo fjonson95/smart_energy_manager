@@ -95,10 +95,8 @@
         "description": "Runs the heating element weekly to heat water to ≥60°C. Prioritises solar surplus, otherwise low electricity price.",
         "data": {
           "legionella_enabled": "Enable legionella disinfection",
-          "legionella_interval_days": "Interval (days)",
-          "legionella_preferred_hour_start": "Preferred start hour (0-23)",
-          "legionella_preferred_hour_end": "Preferred end hour (0-23)",
-          "legionella_max_price_sek_kwh": "Max price for run (SEK/kWh)",
+          "legionella_min_interval_days": "Earliest after (days since last run)",
+          "legionella_max_interval_days": "Latest after (days, runs regardless of price)",
           "legionella_duration_minutes": "Run duration (minutes)",
           "legionella_switch_entity": "Legionella switch (boiler program)",
           "legionella_target_temp": "Legionella confirmation temperature (°C)"
@@ -246,10 +244,8 @@
         "description": "Runs the heating element weekly to heat water to ≥60°C.",
         "data": {
           "legionella_enabled": "Enable legionella disinfection",
-          "legionella_interval_days": "Interval (days)",
-          "legionella_preferred_hour_start": "Preferred start hour (0-23)",
-          "legionella_preferred_hour_end": "Preferred end hour (0-23)",
-          "legionella_max_price_sek_kwh": "Max price for run (SEK/kWh)",
+          "legionella_min_interval_days": "Earliest after (days since last run)",
+          "legionella_max_interval_days": "Latest after (days, runs regardless of price)",
           "legionella_duration_minutes": "Run duration (minutes)",
           "legionella_switch_entity": "Legionella switch (boiler program)",
           "legionella_target_temp": "Legionella confirmation temperature (°C)"

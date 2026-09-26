@@ -113,10 +113,8 @@ CONF_EV_SOC = "ev_soc_entity"
 
 # ── Legionella ────────────────────────────────────────────────────────────────
 CONF_LEGIONELLA_ENABLED = "legionella_enabled"
-CONF_LEGIONELLA_INTERVAL_DAYS = "legionella_interval_days"
-CONF_LEGIONELLA_PREFERRED_HOUR_START = "legionella_preferred_hour_start"
-CONF_LEGIONELLA_PREFERRED_HOUR_END = "legionella_preferred_hour_end"
-CONF_LEGIONELLA_MAX_PRICE = "legionella_max_price_sek_kwh"
+CONF_LEGIONELLA_MIN_INTERVAL_DAYS = "legionella_min_interval_days"
+CONF_LEGIONELLA_MAX_INTERVAL_DAYS = "legionella_max_interval_days"
 CONF_LEGIONELLA_DURATION_MINUTES = "legionella_duration_minutes"
 CONF_LEGIONELLA_LAST_RUN = "legionella_last_run"
 
@@ -137,10 +135,8 @@ DEFAULT_HEAT_PUMP_PATRON_PHASES = ["L1", "L2"]
 DEFAULT_HEAT_PUMP_PATRON_POWER_KW = 6.0
 
 DEFAULT_LEGIONELLA_ENABLED = True
-DEFAULT_LEGIONELLA_INTERVAL_DAYS = 7
-DEFAULT_LEGIONELLA_PREFERRED_HOUR_START = 10
-DEFAULT_LEGIONELLA_PREFERRED_HOUR_END = 15
-DEFAULT_LEGIONELLA_MAX_PRICE = 1.50
+DEFAULT_LEGIONELLA_MIN_INTERVAL_DAYS = 5
+DEFAULT_LEGIONELLA_MAX_INTERVAL_DAYS = 9
 DEFAULT_LEGIONELLA_DURATION_MINUTES = 60
 
 # ── Fas-alternativ ────────────────────────────────────────────────────────────

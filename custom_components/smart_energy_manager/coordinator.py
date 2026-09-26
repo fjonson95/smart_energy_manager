@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
+import re
 import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -616,6 +617,27 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         )
 
     # ── Avläsningshjälpare ────────────────────────────────────────────
+
+    def _get_future_solar_hourly(self, now: datetime) -> list[tuple[datetime, float]]:
+        """Timvis pessimistisk (p10) soleffekt i kW för dagarna bortom Nordpools
+        prishorisont, ur Solcasts forecast_day_3..7. Entitetsnamnen härleds ur
+        imorgon-entiteten (…forecast_tomorrow → …forecast_day_N); saknas de
+        hoppas de över tyst. Används av legionella-valet."""
+        tomorrow_entity = self._config.get(CONF_SOLCAST_TOMORROW)
+        if not tomorrow_entity or not tomorrow_entity.endswith("forecast_tomorrow"):
+            return []
+        base = tomorrow_entity[: -len("forecast_tomorrow")]
+        out: list[tuple[datetime, float]] = []
+        for n in range(3, 8):
+            st = self.hass.states.get(f"{base}forecast_day_{n}")
+            if st is None:
+                continue
+            for entry in st.attributes.get("detailedHourly") or []:
+                start = dt_util.parse_datetime(str(entry.get("period_start")))
+                kw = entry.get("pv_estimate10")
+                if start is not None and kw is not None and start + timedelta(hours=1) > now:
+                    out.append((start, float(kw)))
+        return out
 
     def _get_state_float(self, entity_id: Optional[str], default: float = 0.0) -> float:
         if not entity_id:
@@ -1398,10 +1420,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     self._aux_heat_energy_today_kwh += aux_power_w / 1000.0 * _hb_dt_h
             self._heating_backup_last_update = now
             legionella_active, legionella_reason = self._legionella.should_run_now(
-                now, solar_surplus_w, buy_price,
+                now, solar_surplus_w,
                 switch_is_on=legionella_switch_on,
                 water_temp=hot_water_temp,
                 price_schedule=price_schedule,
+                house_load_w=house_load_avg_w if house_load_avg_w is not None else house_load_w,
+                future_solar=self._get_future_solar_hourly(now),
             )
 
             state = EnergyState(

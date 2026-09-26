@@ -1,7 +1,8 @@
 """Legionella-desinficering för Smart Energy Manager.
 
-Kör pannans legionella-program (digital switch) ca 1 gång/vecka för att
-värma varmvattnet till ≥65°C och eliminera legionellabakterier.
+Kör pannans legionella-program (digital switch) med ett rörligt intervall
+(standard 5–9 dagar) för att värma varmvattnet till ≥65°C och eliminera
+legionellabakterier.
 
 Pannans beteende:
   - Vi slår PÅ switchen för att starta programmet
@@ -9,14 +10,16 @@ Pannans beteende:
   - Om vi slår av i förtid avbryts cykeln
   - Vi bekräftar lyckad körning via temperatursensorn (≥ target_temp)
 
-Prioritetsordning för start:
-  1. Solöverskott (primärt val) inom önskat tidsfönster
-  2. Lågt spotpris inom önskat tidsfönster
-  3. Nödkörning om intervallet överskridits med 50% (undviker natten 23-06)
+Startval: från min-dagen väljs billigaste körfönstret (körtid × effektivt
+pris) bland de kvartar vars priser redan är publicerade, dygnets alla timmar.
+Effektivt pris räknar solöverskottet (pessimistiskt p10 minus husets last) som
+värt säljpriset istället för köppriset. Senast på max-dagen körs det bästa
+kända fönstret oavsett pris.
 """
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -27,19 +30,29 @@ from homeassistant.util import dt as dt_util
 from .price_scheduler import PriceSchedule
 from .const import (
     DOMAIN,
-    CONF_LEGIONELLA_ENABLED, CONF_LEGIONELLA_INTERVAL_DAYS,
-    CONF_LEGIONELLA_PREFERRED_HOUR_START, CONF_LEGIONELLA_PREFERRED_HOUR_END,
-    CONF_LEGIONELLA_MAX_PRICE, CONF_LEGIONELLA_DURATION_MINUTES,
+    CONF_LEGIONELLA_ENABLED, CONF_LEGIONELLA_MIN_INTERVAL_DAYS, CONF_LEGIONELLA_MAX_INTERVAL_DAYS,
+    CONF_LEGIONELLA_DURATION_MINUTES,
     CONF_LEGIONELLA_TARGET_TEMP,
-    DEFAULT_LEGIONELLA_ENABLED, DEFAULT_LEGIONELLA_INTERVAL_DAYS,
-    DEFAULT_LEGIONELLA_PREFERRED_HOUR_START, DEFAULT_LEGIONELLA_PREFERRED_HOUR_END,
-    DEFAULT_LEGIONELLA_MAX_PRICE, DEFAULT_LEGIONELLA_DURATION_MINUTES,
+    DEFAULT_LEGIONELLA_ENABLED, DEFAULT_LEGIONELLA_MIN_INTERVAL_DAYS, DEFAULT_LEGIONELLA_MAX_INTERVAL_DAYS,
+    DEFAULT_LEGIONELLA_DURATION_MINUTES,
     DEFAULT_LEGIONELLA_TARGET_TEMP,
 )
 
 _LOGGER = logging.getLogger(__name__)
 STORAGE_KEY = f"{DOMAIN}.legionella"
 STORAGE_VERSION = 1
+
+# Elpatronernas uttag under körningen (samma 6 kW som hetvattendumpen använder).
+_BOILER_LOAD_KW = 6.0
+# Före max-dagen körs bara om bästa fönstret är klart billigare än snittet av
+# det kända – annars väntas en billigare dag in (priser publiceras ~36–48 h
+# framåt, så spannet 5–9 dagar kan bara utnyttjas genom att vänta).
+_CHEAP_FACTOR = 0.9
+# En framtida soldag (bortom prishorisonten) måste vara minst 10 % billigare
+# än bästa kända fönster för att vi ska vänta in den – prognosen är osäker.
+_FUTURE_GAIN = 0.9
+# Under 12 h känd prisdata går det inte att bedöma om något är billigt.
+_MIN_KNOWN_HOURS = 12.0
 
 
 class LegionellaManager:
@@ -93,10 +106,11 @@ class LegionellaManager:
         self,
         now: datetime,
         solar_surplus_w: float,
-        buy_price: float,
         switch_is_on: Optional[bool],  # pannans legionella-switch: True/False, None = tillfälligt otillgänglig
         water_temp: Optional[float],  # ackumulatortank-temperatur (°C) eller None
         price_schedule: Optional[PriceSchedule] = None,
+        house_load_w: float = 0.0,
+        future_solar: Optional[list[tuple[datetime, float]]] = None,  # (timstart, p10-kW) för dagar bortom prishorisonten
     ) -> tuple[bool, str]:
         """
         Returnera (ska_hålla_switch_på, orsak).
@@ -174,55 +188,96 @@ class LegionellaManager:
                 return False, "legionella: avbruten (temp ej bekräftad)"
 
         # ── Bedöm om det är dags att starta ──────────────────────────
-        interval_days = int(self._config.get(CONF_LEGIONELLA_INTERVAL_DAYS, DEFAULT_LEGIONELLA_INTERVAL_DAYS))
+        min_days = int(self._config.get(CONF_LEGIONELLA_MIN_INTERVAL_DAYS, DEFAULT_LEGIONELLA_MIN_INTERVAL_DAYS))
+        max_days = max(min_days, int(self._config.get(CONF_LEGIONELLA_MAX_INTERVAL_DAYS, DEFAULT_LEGIONELLA_MAX_INTERVAL_DAYS)))
+        today = now.date()
         if self._last_run is None:
-            days_since = interval_days + 1
+            days_since = float(max_days)
             due = True
-            overdue = True
+            deadline_reached = True
+            deadline_end = now - timedelta(days=1)
         else:
             days_since = (now - self._last_run).total_seconds() / 86400
-            today = now.date() if hasattr(now, "date") else now.astimezone().date()
-            due_date = (self._last_run + timedelta(days=interval_days)).date()
-            overdue_date = (self._last_run + timedelta(days=int(interval_days * 1.5))).date()
-            due = today >= due_date
-            overdue = today >= overdue_date
+            due = today >= (self._last_run + timedelta(days=min_days)).date()
+            deadline_date = (self._last_run + timedelta(days=max_days)).date()
+            deadline_reached = today >= deadline_date
+            deadline_end = datetime.combine(deadline_date + timedelta(days=1), datetime.min.time(), tzinfo=now.tzinfo)
 
         if not due:
-            return False, f"legionella: {days_since:.1f}/{interval_days} dagar sedan senaste"
+            return False, f"legionella: {days_since:.1f} dagar sedan senaste (körs tidigast efter {min_days}, senast {max_days})"
 
-        hour = now.hour
-        hour_start = int(self._config.get(CONF_LEGIONELLA_PREFERRED_HOUR_START, DEFAULT_LEGIONELLA_PREFERRED_HOUR_START))
-        hour_end   = int(self._config.get(CONF_LEGIONELLA_PREFERRED_HOUR_END,   DEFAULT_LEGIONELLA_PREFERRED_HOUR_END))
-        max_price  = float(self._config.get(CONF_LEGIONELLA_MAX_PRICE, DEFAULT_LEGIONELLA_MAX_PRICE))
-
-        in_preferred_window = hour_start <= hour < hour_end
-        # P5-4: planera in i den billigaste tredjedelen eller soligaste sloten
-        # inom fönstret, istället för att trigga på första ögonblick som råkar
-        # uppfylla ett fast tröskelvärde. 6 kW (inte 3 kW) matchar elpatronernas
-        # uttag – annars var solkravet lägre än vad de själva drar.
-        if price_schedule is not None:
-            is_opportunity, opp_reason = price_schedule.is_best_opportunity_now(
-                now, hour_start, hour_end, solar_threshold_kw=6.0,
-            )
-            solar_ok = is_opportunity and "sol" in opp_reason
-            cheap_ok = is_opportunity and not solar_ok
+        slots = [s for s in (price_schedule.slots if price_schedule else []) if s.end > now]
+        if not slots:
+            # Utan prisschema: bara solöverskott eller nödstart på dagtid.
+            if solar_surplus_w >= _BOILER_LOAD_KW * 1000:
+                reason = f"legionella: startar på solöverskott ({solar_surplus_w:.0f}W)"
+            elif deadline_reached and 6 <= now.hour < 23:
+                reason = f"legionella: nödstart ({days_since:.1f} dagar sedan senaste, prisdata saknas)"
+            else:
+                return False, f"legionella: väntar (prisdata saknas, sol={solar_surplus_w:.0f}W)"
         else:
-            # Fallback utan prisschema: gamla absoluta trösklar.
-            solar_ok = solar_surplus_w >= 6000 and in_preferred_window
-            cheap_ok = buy_price <= max_price and in_preferred_window
-        emergency_ok = overdue and (6 <= hour < 23)
+            house_kw = max(0.0, house_load_w) / 1000.0
 
-        if solar_ok:
-            reason = f"legionella: startar på solöverskott ({solar_surplus_w:.0f}W)"
-        elif cheap_ok:
-            reason = f"legionella: startar på lågt pris ({buy_price:.3f} SEK)"
-        elif emergency_ok:
-            reason = f"legionella: nödstart ({days_since:.1f} dagar sedan senaste)"
-        else:
-            return False, (
-                f"legionella: väntar (sol={solar_surplus_w:.0f}W "
-                f"pris={buy_price:.3f} timme={hour})"
-            )
+            def _effective_price(s) -> float:
+                slot_h = (s.end - s.start).total_seconds() / 3600.0
+                surplus_kw = max(0.0, s.solar_kwh_p10 / slot_h - house_kw) if slot_h > 0 else 0.0
+                covered = min(1.0, surplus_kw / _BOILER_LOAD_KW)
+                return covered * s.sell_sek + (1.0 - covered) * s.buy_sek
+
+            slot_min = (slots[0].end - slots[0].start).total_seconds() / 60.0
+            n = max(1, math.ceil(float(self._config.get(CONF_LEGIONELLA_DURATION_MINUTES, DEFAULT_LEGIONELLA_DURATION_MINUTES)) / slot_min))
+            eff = [_effective_price(s) for s in slots]
+            window_cost = [sum(eff[i:i + n]) / n for i in range(len(slots) - n + 1)]
+            allowed = [i for i in range(len(window_cost)) if slots[i].start < deadline_end]
+            known_hours = (slots[-1].end - now).total_seconds() / 3600.0
+
+            if not allowed:
+                if not deadline_reached:
+                    return False, "legionella: väntar (inget fullständigt körfönster i känd prisdata)"
+                if not 6 <= now.hour < 23:
+                    return False, "legionella: nödstart väntar till 06 (undviker natten)"
+                reason = f"legionella: nödstart ({days_since:.1f} dagar sedan senaste)"
+            else:
+                best_i = min(allowed, key=lambda i: window_cost[i])
+                best_cost = window_cost[best_i]
+                mean_cost = sum(eff) / len(eff)
+                start_txt = slots[best_i].start.astimezone().strftime("%d %H:%M")
+
+                # Bortom prishorisonten (~36–48 h) finns bara solprognos. Är en
+                # sådan dag klart billigare (solen täcker patronerna, värderat
+                # till säljpris mot snittköppris) väntar vi in den.
+                if future_solar and not deadline_reached:
+                    horizon_end = slots[-1].end
+                    buy_mean = sum(s.buy_sek for s in slots) / len(slots)
+                    sell_mean = sum(s.sell_sek for s in slots) / len(slots)
+                    hours = max(1, math.ceil(n * slot_min / 60.0))
+                    by_start = {t: kw for t, kw in future_solar if t >= horizon_end and t < deadline_end}
+                    best_future: Optional[tuple[float, datetime]] = None
+                    for t in sorted(by_start):
+                        span = [by_start.get(t + timedelta(hours=k)) for k in range(hours)]
+                        if any(v is None for v in span):
+                            continue
+                        covered = sum(min(1.0, max(0.0, v - house_kw) / _BOILER_LOAD_KW) for v in span) / hours
+                        est = covered * sell_mean + (1.0 - covered) * buy_mean
+                        if best_future is None or est < best_future[0]:
+                            best_future = (est, t)
+                    if best_future is not None and best_future[0] <= _FUTURE_GAIN * best_cost:
+                        return False, (
+                            f"legionella: väntar på soligare dag {best_future[1].astimezone().strftime('%d %H:%M')} "
+                            f"(uppskattat {best_future[0]:.2f} kr/kWh mot {best_cost:.2f} bästa kända pris)"
+                        )
+
+                if not deadline_reached and known_hours >= _MIN_KNOWN_HOURS and best_cost > _CHEAP_FACTOR * mean_cost:
+                    return False, (
+                        f"legionella: väntar på billigare dag (bästa kända {best_cost:.2f} kr/kWh "
+                        f"{start_txt}, snitt {mean_cost:.2f}, {days_since:.1f}/{max_days} dagar)"
+                    )
+                if window_cost[0] > best_cost + 1e-6:
+                    return False, (
+                        f"legionella: väntar på bästa fönstret {start_txt} "
+                        f"({best_cost:.2f} kr/kWh mot {window_cost[0]:.2f} nu)"
+                    )
+                reason = f"legionella: startar (fönsterpris {window_cost[0]:.2f} kr/kWh, snitt {mean_cost:.2f})"
 
         # Starta – markera INTE _running här. Om coordinatorns switch.turn_on
         # misslyckas (nätverk nere, enheten svarar inte) skulle managern annars
@@ -255,8 +310,8 @@ class LegionellaManager:
     def next_due(self) -> Optional[datetime]:
         if self._last_run is None:
             return dt_util.now()
-        interval_days = int(self._config.get(CONF_LEGIONELLA_INTERVAL_DAYS, DEFAULT_LEGIONELLA_INTERVAL_DAYS))
-        return self._last_run + timedelta(days=interval_days)
+        min_days = int(self._config.get(CONF_LEGIONELLA_MIN_INTERVAL_DAYS, DEFAULT_LEGIONELLA_MIN_INTERVAL_DAYS))
+        return self._last_run + timedelta(days=min_days)
 
     def update_config(self, config: dict) -> None:
         self._config = config

@@ -2,6 +2,25 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.55
+
+Legionella runs now use a flexible 5–9 day interval and pick the cheapest day and time instead of a fixed 7-day cycle in a fixed 10–15 window.
+
+- **Interval**: `legionella_interval_days` is replaced by `legionella_min_interval_days` (default 5) and `legionella_max_interval_days` (default 9). The preferred-hour window and max-price options are removed; the program may start at any hour. **An existing `legionella_interval_days` value is ignored — check the two new options after updating.**
+- **Choice**: from the min day, the cheapest run window (run duration × effective price) among already-published Nordpool quarters is chosen. Effective price treats solar surplus (p10 minus house load, against the 6 kW heaters) as worth the sell price instead of the buy price. Before the max day it only starts if the best window is ≤ 90 % of the known average price; on the max day it takes the best remaining window regardless of price, avoiding 23–06 for emergency starts.
+- **Beyond the price horizon**: Solcast `forecast_day_3`–`forecast_day_7` (hourly p10, derived from the configured "tomorrow" entity name; skipped silently if absent) are used so the run waits for a clearly sunnier day (≥ 10 % cheaper) instead of being blind past ~48 h. Solcast only gives solar, so unknown days are priced at the known average buy/sell price.
+- **Verified**: syntax check and an offline run against real prices (not-due, wait-for-best-window, wait-for-sunny-day, deadline-day and never-run cases behaved as intended). Not verified live. Translations (sv/en) updated. `sensor` "Nästa legionella" now shows the earliest eligible date (last run + min days).
+
+## What's New in 0.9.54
+
+The plan card now shows the real buy price (spot + grid fee + energy tax + VAT) as a stepped line over the spot-price bars, plus the plan's marginal value V (the "sparvärde") as a dashed horizontal line on the same axis — buy price above the line means discharge, below it means buy from the grid and keep the battery.
+
+- **V line**: read from the `marginal_value_sek_kwh` attribute of the plan sensor (added in v0.9.52), violet dashed with a "V x.xx kr" label; the price axis scales to include it. Only drawn in plan mode.
+
+- **Data**: read per quarter from `sensor.smart_energy_manager_nordpool_prisschema` (`prices_today`/`prices_tomorrow`, field `buy`). Configurable via the optional `buy_price_sensor` card option; the default needs no config.
+- **Shared price axis**: bars and line now share one kr/kWh axis (auto-scaled, previously fixed 0-160 öre, which clipped everything above 1.6 SEK — today's spot peaks are 2.5+ SEK). Legend updated ("Spotpris", "Köppris").
+- **Card-only change**, no backend impact. Not run in a browser by me — please hard-reload (Ctrl+Shift+R) and check both themes.
+
 ## What's New in 0.9.53
 
 Fixes the load-shape percentile (`coordinator._get_load_shape()`) producing a physically impossible daily total — found live 2026-09-23 by reconstructing the actual shape store: the P75 shape's evening hours (18:00-23:00) alone summed to 108% of an entire day's consumption. This inflated evening's apparent deficit far beyond reality in the planner's merit-order, which set `V` (the sparvärde) at 4.78 SEK/kWh — above even tomorrow's morning price peak (~3.8 SEK/kWh) — so the plan kept buying fresh grid power straight through the morning peak instead of discharging a battery that had just been charged overnight for ~2.6 SEK/kWh.

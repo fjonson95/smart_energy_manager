@@ -2,6 +2,25 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.55
+
+Legionella-körningen använder nu ett rörligt intervall på 5–9 dagar och väljer billigaste dag och tid, istället för en fast 7-dagarscykel i ett fast 10–15-fönster.
+
+- **Intervall**: `legionella_interval_days` ersätts av `legionella_min_interval_days` (standard 5) och `legionella_max_interval_days` (standard 9). Önskat tidsfönster och maxpris är borttagna; programmet får starta vid vilken timme som helst. **Ett befintligt värde för `legionella_interval_days` ignoreras – kontrollera de två nya inställningarna efter uppdatering.**
+- **Val**: från min-dagen väljs det billigaste körfönstret (körtid × effektivt pris) bland redan publicerade Nordpool-kvartar. Effektivt pris räknar solöverskott (p10 minus husets last, mot 6 kW-patronerna) som värt säljpriset istället för köppriset. Före max-dagen startar det bara om bästa fönstret är ≤ 90 % av snittpriset i det kända; på max-dagen tas bästa återstående fönster oavsett pris, och nödstart undviker 23–06.
+- **Bortom prishorisonten**: Solcasts `forecast_day_3`–`forecast_day_7` (timvis p10, härledda ur namnet på den konfigurerade "imorgon"-entiteten; hoppas över tyst om de saknas) används så att körningen väntar in en klart soligare dag (≥ 10 % billigare) istället för att vara blind bortom ~48 h. Solcast ger bara sol, så okända dagar prissätts till kända snittpriser för köp/sälj.
+- **Verifierat**: syntaxkontroll och en offline-körning mot riktiga priser (ej dags, vänta på bästa fönster, vänta på soldag, sista dagen och aldrig körd betedde sig som avsett). Inte verifierat skarpt. Översättningar (sv/en) uppdaterade. Sensorn "Nästa legionella" visar nu tidigaste möjliga datum (senaste körning + min-dagar).
+
+## Nyheter i 0.9.54
+
+Planeringskortet visar nu verkligt köppris (spot + nätavgift + energiskatt + moms) som en stegad linje ovanpå spotprisstaplarna, samt planens marginalvärde V ("sparvärdet") som en streckad horisontell linje på samma axel – köppris över linjen betyder urladdning, under linjen betyder köp från nätet och spara batteriet.
+
+- **V-linjen**: läses från attributet `marginal_value_sek_kwh` på plansensorn (infört i v0.9.52), violett streckad med etiketten "V x,xx kr"; prisaxeln skalas så att den ryms. Ritas bara i plan-läge.
+
+- **Data**: läses per kvart ur `sensor.smart_energy_manager_nordpool_prisschema` (`prices_today`/`prices_tomorrow`, fältet `buy`). Kan styras via kortalternativet `buy_price_sensor`; standardvärdet kräver ingen config.
+- **Gemensam prisaxel**: staplar och linje delar nu en kr/kWh-axel (autoskalad, tidigare fast 0–160 öre, vilket kapade allt över 1,6 kr – dagens spottoppar ligger på 2,5+ kr). Förklaringen uppdaterad ("Spotpris", "Köppris").
+- **Bara kortet**, ingen backend-påverkan. Jag har inte kört det i en webbläsare – hårdladda (Ctrl+Shift+R) och kolla båda teman.
+
 ## Nyheter i 0.9.53
 
 Fixar att timformens percentil (`coordinator._get_load_shape()`) gav en fysiskt omöjlig dygnssumma – hittat skarpt 2026-09-23 genom att återskapa den faktiska formfilen: P75-formens kvällstimmar (18:00–23:00) ensamma summerade till 108 % av ett helt dygns förbrukning. Det blåste upp kvällens skenbara underskott långt bortom verkligheten i planerarens merit-ordning, vilket satte `V` (sparvärdet) till 4,78 kr/kWh – högre än till och med morgondagens morgonpristopp (~3,8 kr/kWh) – så planen fortsatte köpa färsk nätel rakt igenom morgontoppen istället för att ladda ur ett batteri som just laddats i natt för ~2,6 kr/kWh.

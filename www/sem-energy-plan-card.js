@@ -50,6 +50,7 @@ class SemEnergyPlanCard extends HTMLElement {
   setConfig(config) {
     this._config = {
       nordpool:             "sensor.nordpool_kwh_se3_sek_3_10_0_2",
+      buy_price_sensor:     "sensor.smart_energy_manager_nordpool_prisschema",
       battery_soc:          "sensor.sonnenbatterie_271100_state_battery_percentage_real",
       battery_wh:           "sensor.sonnenbatterie_271100_battery_remaining_capacity_usable",
       solar_w:              "sensor.sonnenbatterie_271100_state_production",
@@ -118,7 +119,9 @@ canvas { display: block; width: 100%; }
   </div>
   <canvas id="c" height="270"></canvas>
   <div class="leg" id="legend">
-    <span><span class="lsq" style="background:rgba(20,90,200,0.6)"></span>Nordpool-pris</span>
+    <span><span class="lsq" style="background:rgba(20,90,200,0.6)"></span>Spotpris</span>
+    <span><span style="display:inline-block;width:16px;height:0;border-top:2.5px solid var(--primary-text-color)"></span>&nbsp;Köppris (inkl. avgifter+moms)</span>
+    <span><span style="display:inline-block;width:16px;height:0;border-top:2px dashed #a855f7"></span>&nbsp;Sparvärde V</span>
     <span><span class="lsq" style="background:rgba(240,120,20,0.5)"></span>Export</span>
     <span><span class="lsq" style="background:rgba(27,175,122,0.5)"></span>Nätladdning</span>
     <span><span class="lsq" style="background:rgba(255,200,0,0.5)"></span>Solladdning</span>
@@ -246,6 +249,14 @@ canvas { display: block; width: 100%; }
 
     // ── Timeline ─────────────────────────────────────────────────────
     const timeline = this._buildTimeline(now, rawToday, rawTomorrow, chartEndMs);
+
+    // Verkligt köppris (spot + nätavgift + skatt + moms) per kvart ur SEM:s
+    // egen prissensor - Nordpool-sensorn har bara råspot i öre.
+    const buyAttr = this._hass?.states[cfg.buy_price_sensor]?.attributes ?? {};
+    const buyByMs = new Map();
+    [...(buyAttr.prices_today ?? []), ...(buyAttr.prices_tomorrow ?? [])]
+      .forEach(p => buyByMs.set(new Date(p.start).getTime(), p.buy));
+    timeline.forEach(s => { s.buy = buyByMs.get(s.time.getTime()) ?? null; });
 
     // ── Solar profile – Gaussisk Solcast-modell för båda dagarna ─────
     const _parseDate = (s) => {
@@ -488,7 +499,8 @@ canvas { display: block; width: 100%; }
       this._el("ph3d").textContent = peakW > 0 ? `${(peakW/1000).toFixed(1)} kW peak imorgon` : "Sol > hushållslast";
     }
 
-    this._drawCanvas(timeline, sim, solarKwsData, planBattKwhs, planSlots, hasPlan ? plannedExportKwh : exportableKwh, capKwh, minKwh, nowMs, _currentPlanAction);
+    this._drawCanvas(timeline, sim, solarKwsData, planBattKwhs, planSlots, hasPlan ? plannedExportKwh : exportableKwh, capKwh, minKwh, nowMs, _currentPlanAction,
+      hasPlan ? (planAttr.marginal_value_sek_kwh ?? null) : null);
   }
 
   // ── Timeline ─────────────────────────────────────────────────────────
@@ -572,7 +584,7 @@ canvas { display: block; width: 100%; }
 
   // ── Canvas ───────────────────────────────────────────────────────────
 
-  _drawCanvas(timeline, sim, solarKwsData, planBattKwhs, planSlots, exportableKwh, capKwh, minKwh, nowMs, currentPlanAction = null) {
+  _drawCanvas(timeline, sim, solarKwsData, planBattKwhs, planSlots, exportableKwh, capKwh, minKwh, nowMs, currentPlanAction = null, vValue = null) {
     const canvas = this._el("c");
     if (!canvas) return;
 
@@ -609,7 +621,15 @@ canvas { display: block; width: 100%; }
     const battMax  = Math.min(usableCap + 2, Math.max(8, Math.ceil(battPeak * 1.35 / 4) * 4));
 
     const xOf  = (i) => pL + (i / Math.max(n - 1, 1)) * pw;
-    const yP   = (v) => pT + ph - Math.max(0, Math.min(1, v / 160)) * ph;
+    // Gemensam prisaxel i kr/kWh för spotstaplar (öre/100) och köpprislinjen.
+    // Tidigare fast 0-160 öre, vilket kapade allt över 1,6 kr (dagens toppar
+    // ligger på 2,5+ kr spot).
+    const priceMaxRaw = Math.max(2, vValue || 0, ...timeline.map(s => Math.max((s.price || 0) / 100, s.buy || 0)));
+    const priceStep = priceMaxRaw <= 5 ? 1 : 2;
+    const priceMax = Math.ceil(priceMaxRaw / priceStep) * priceStep;
+    const priceTicks = [];
+    for (let v = 0; v <= priceMax; v += priceStep) priceTicks.push(v);
+    const yP   = (v) => pT + ph - Math.max(0, Math.min(1, v / priceMax)) * ph;
     const yB   = (v) => pT + ph - Math.max(0, Math.min(1, v / battMax)) * ph;
     const ySOL = (v) => pT + ph - Math.max(0, Math.min(1, v / 12)) * ph;
 
@@ -625,7 +645,7 @@ canvas { display: block; width: 100%; }
 
     // Grid lines
     ctx.strokeStyle = grid; ctx.lineWidth = 0.5;
-    [40, 80, 120, 160].forEach(v => {
+    priceTicks.filter(v => v > 0).forEach(v => {
       ctx.beginPath(); ctx.moveTo(pL, yP(v)); ctx.lineTo(pL + pw, yP(v)); ctx.stroke();
     });
 
@@ -718,7 +738,7 @@ canvas { display: block; width: 100%; }
     const barW = (pw / n) * 0.76;
     timeline.forEach((slot, i) => {
       const x = xOf(i) - barW / 2;
-      const yTop = yP(slot.price), yBot = yP(0);
+      const yTop = yP((slot.price || 0) / 100), yBot = yP(0);
       const r = 2;
       const isExport = hasPlan ? (slot.planAction === "export") : slot.high;
       ctx.fillStyle = isExport ? "#f07814" : (dark ? PRICE_COLOR.dark : PRICE_COLOR.light);
@@ -730,6 +750,36 @@ canvas { display: block; width: 100%; }
       ctx.quadraticCurveTo(x, yTop, x + r, yTop);
       ctx.fill();
     });
+
+    // Köppris (inkl. avgifter+moms) som stegad linje ovanpå spotstaplarna
+    ctx.strokeStyle = dark ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.8)";
+    ctx.lineWidth = 2; ctx.lineJoin = "miter";
+    const stepHalf = (pw / Math.max(n - 1, 1)) / 2;
+    let buyOpen = false;
+    timeline.forEach((slot, i) => {
+      if (slot.buy == null) {
+        if (buyOpen) { ctx.stroke(); buyOpen = false; }
+        return;
+      }
+      const y = yP(slot.buy);
+      if (!buyOpen) { ctx.beginPath(); ctx.moveTo(xOf(i) - stepHalf, y); buyOpen = true; }
+      else ctx.lineTo(xOf(i) - stepHalf, y);
+      ctx.lineTo(xOf(i) + stepHalf, y);
+    });
+    if (buyOpen) ctx.stroke();
+
+    // Sparvärdet V (planens marginalvärde): köppris över linjen → urladdning,
+    // under → köp från nätet och spara batteriet.
+    if (vValue != null && vValue > 0) {
+      const vCol = dark ? "#c084fc" : "#7e22ce";
+      const yV = yP(vValue);
+      ctx.strokeStyle = vCol; ctx.lineWidth = 2; ctx.setLineDash([7, 4]);
+      ctx.beginPath(); ctx.moveTo(pL, yV); ctx.lineTo(pL + pw, yV); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = vCol; ctx.font = `bold ${fz}px sans-serif`; ctx.textAlign = "right";
+      ctx.fillText(`V ${vValue.toFixed(2)} kr`, pL + pw - 4, yV - 4);
+      ctx.font = font;
+    }
 
     // Solar line – alltid från solarKwsData (beräknat i _update oavsett plan/sim)
     ctx.strokeStyle = "#eda100"; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
@@ -812,7 +862,7 @@ canvas { display: block; width: 100%; }
 
     // Left axis – price
     ctx.fillStyle = muted; ctx.font = font; ctx.textAlign = "right";
-    [0, 40, 80, 120, 160].forEach(v => ctx.fillText(v + "¢", pL - 4, yP(v) + fz * 0.4));
+    priceTicks.forEach(v => ctx.fillText(v + " kr", pL - 4, yP(v) + fz * 0.4));
 
     // Right axis – battery
     ctx.textAlign = "left";
