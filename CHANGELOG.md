@@ -2,6 +2,13 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.57
+
+The default Legionella run duration is now 110 minutes (was 60), matching the boiler program's measured runtime (2026-09-26: 12:30–14:21). The cheapest-window choice averages price over this duration, so 60 minutes undercounted the tail of each run.
+
+- **Note**: only affects installs that never saved a value; an already-saved "Körtid (minuter)" keeps its value — set it to ~110 under the Legionella options if it still says 60.
+- **Verified**: syntax check only.
+
 ## What's New in 0.9.56
 
 The reason behind the Legionella decision is now visible as the `reason` attribute on `sensor.smart_energy_manager_legionella_next_due` ("Nästa legionella"), e.g. "väntar på bästa fönstret 27 12:30", "väntar på soligare dag …", "väntar på billigare dag …" or the start reason. Previously the text only reached "Senaste beslut" while a run was active, so waiting was invisible.

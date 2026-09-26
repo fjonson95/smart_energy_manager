@@ -2,6 +2,13 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.57
+
+Standardvärdet för Legionella-körtid är nu 110 minuter (var 60), i linje med pannprogrammets uppmätta körtid (2026-09-26: 12:30–14:21). Valet av billigaste fönster medelvärdesbildar priset över körtiden, så 60 minuter underskattade slutet av varje körning.
+
+- **Obs**: påverkar bara installationer som aldrig sparat ett värde; ett redan sparat "Körtid (minuter)" behåller sitt värde – sätt det till ca 110 under Legionella-inställningarna om det fortfarande står på 60.
+- **Verifierat**: bara syntaxkontroll.
+
 ## Nyheter i 0.9.56
 
 Orsaken bakom Legionella-beslutet syns nu som attributet `reason` på `sensor.smart_energy_manager_legionella_next_due` ("Nästa legionella"), t.ex. "väntar på bästa fönstret 27 12:30", "väntar på soligare dag …", "väntar på billigare dag …" eller startorsaken. Tidigare nådde texten bara "Senaste beslut" medan en körning pågick, så väntandet var osynligt.
