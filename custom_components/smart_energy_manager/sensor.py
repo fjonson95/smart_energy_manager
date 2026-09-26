@@ -400,6 +400,11 @@ class SmartEnergyLegionellaNextDueSensor(_BaseEnergySensor):
         d = self.coordinator.data
         return d.get("legionella_next_due") if d else None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        d = self.coordinator.data
+        return {"reason": d.get("legionella_reason")} if d else {}
+
 
 class SmartEnergyHouseLoadSensor(_BaseEnergySensor):
     _attr_unique_id = "sem_house_load"

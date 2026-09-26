@@ -1662,6 +1662,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "legionella_last_run": self._legionella.last_run,
                 "legionella_days_since": self._legionella.days_since_last_run,
                 "legionella_next_due": self._legionella.next_due(),
+                "legionella_reason": legionella_reason,
                 "chargers_needing_selection": decision.chargers_needing_selection,
                 "price_schedule": price_schedule,
                 "yesterday_consumption_kwh": yesterday_kwh,

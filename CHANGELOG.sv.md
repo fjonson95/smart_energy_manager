@@ -2,6 +2,12 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.56
+
+Orsaken bakom Legionella-beslutet syns nu som attributet `reason` på `sensor.smart_energy_manager_legionella_next_due` ("Nästa legionella"), t.ex. "väntar på bästa fönstret 27 12:30", "väntar på soligare dag …", "väntar på billigare dag …" eller startorsaken. Tidigare nådde texten bara "Senaste beslut" medan en körning pågick, så väntandet var osynligt.
+
+- **Skrivskyddat**: ingen beteendeändring. **Verifierat**: bara syntaxkontroll.
+
 ## Nyheter i 0.9.55
 
 Legionella-körningen använder nu ett rörligt intervall på 5–9 dagar och väljer billigaste dag och tid, istället för en fast 7-dagarscykel i ett fast 10–15-fönster.
