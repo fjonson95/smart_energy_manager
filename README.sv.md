@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.57-blue)
+![Version](https://img.shields.io/badge/version-0.9.58-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.57
+## Nyheter i 0.9.58
 
-Standardvärdet för Legionella-körtid är nu 110 minuter (var 60), i linje med pannprogrammets uppmätta körtid. Ett redan sparat värde behålls. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
+Båda Lovelace-korten (`sem-charger-card` och `sem-energy-plan-card`) går nu att installera via HACS, via en sammanslagen resurs `dist/smart-energy-manager-cards.js` – se "Installation via HACS" nedan. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.56:s Legionella-orsaksattribut, v0.9.55:s rörliga Legionella-intervall på 5–9 dagar med val av billigaste fönster, v0.9.54:s köppris- och V-linjer i planeringskortet, v0.9.53:s fix för att timformens percentil gav en fysiskt omöjlig dygnssumma, v0.9.52:s exponering av planerarens marginalvärdes-bokföring, v0.9.51:s fix för att planeraren projicerade nästan noll hushållslast på en mild dag, v0.9.50:s färgöversyn av planeringskortet för ljust/mörkt tema, v0.9.49:s fix för att exekutorn tyst vägrade ladda vid solöverskott, v0.9.48:s Solcast-baserade reserv innan morgondagens priser publicerats, v0.9.47:s exportsiffra-fix i planeringskortet, v0.9.46:s fix för att planeraren reserverade batterikapacitet åt dygnets dyraste slot på bekostnad av en tidigare, billigare men ändå värdefull möjlighet, v0.9.45:s nollställning av batterikostnad vid låg SOC, v0.9.44:s fix som får "idle"-slots att hålla batteriet – vinterbacktesten mer än fördubblade besparingen, 93 → 217 kr, v0.9.43:s städning av beslutssensorn, v0.9.42:s omskrivning av beslutstexter, v0.9.41:s öronmärkningsfix för självkonsumtion, v0.9.40:s billigast-först-nätladdning, v0.9.39:s färgfix i planeringskortet, v0.9.38:s formmedvetna kvällsfyllning, v0.9.37:s fix av dataförlusten i timformen, v0.9.36:s fix av fasskyddets dubbelanrop, v0.9.35:s fix av varmvattendumpens överskottskvot, v0.9.34:s fix av batteriets fasskyddsoscillation, v0.9.33:s fix av charger-kortets batteristapel, v0.9.32:s EV-deadline-schemaläggning, v0.9.31:s varmvattendump-inkoppling, v0.9.30:s inkoppling av pannans soldriftläge, v0.9.29:s veckovisa exportmarginal-uppföljning, v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.57:s standard-körtid för Legionella (110 min), v0.9.56:s Legionella-orsaksattribut, v0.9.55:s rörliga Legionella-intervall på 5–9 dagar med val av billigaste fönster, v0.9.54:s köppris- och V-linjer i planeringskortet, v0.9.53:s fix för att timformens percentil gav en fysiskt omöjlig dygnssumma, v0.9.52:s exponering av planerarens marginalvärdes-bokföring, v0.9.51:s fix för att planeraren projicerade nästan noll hushållslast på en mild dag, v0.9.50:s färgöversyn av planeringskortet för ljust/mörkt tema, v0.9.49:s fix för att exekutorn tyst vägrade ladda vid solöverskott, v0.9.48:s Solcast-baserade reserv innan morgondagens priser publicerats, v0.9.47:s exportsiffra-fix i planeringskortet, v0.9.46:s fix för att planeraren reserverade batterikapacitet åt dygnets dyraste slot på bekostnad av en tidigare, billigare men ändå värdefull möjlighet, v0.9.45:s nollställning av batterikostnad vid låg SOC, v0.9.44:s fix som får "idle"-slots att hålla batteriet – vinterbacktesten mer än fördubblade besparingen, 93 → 217 kr, v0.9.43:s städning av beslutssensorn, v0.9.42:s omskrivning av beslutstexter, v0.9.41:s öronmärkningsfix för självkonsumtion, v0.9.40:s billigast-först-nätladdning, v0.9.39:s färgfix i planeringskortet, v0.9.38:s formmedvetna kvällsfyllning, v0.9.37:s fix av dataförlusten i timformen, v0.9.36:s fix av fasskyddets dubbelanrop, v0.9.35:s fix av varmvattendumpens överskottskvot, v0.9.34:s fix av batteriets fasskyddsoscillation, v0.9.33:s fix av charger-kortets batteristapel, v0.9.32:s EV-deadline-schemaläggning, v0.9.31:s varmvattendump-inkoppling, v0.9.30:s inkoppling av pannans soldriftläge, v0.9.29:s veckovisa exportmarginal-uppföljning, v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 
@@ -285,11 +285,23 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 
 ## Installation via HACS
 
+### Integration
 1. Gå till HACS → Integrationer → ⋮ → Custom repositories
 2. Lägg till `https://github.com/fjonson95/smart_energy_manager`, kategori: Integration
 3. Installera "Smart Energy Manager"
 4. Starta om Home Assistant
 5. Inställningar → Integrationer → Lägg till → Smart Energy Manager
+
+### Lovelace-kort (laddar-kortet + energiplan-kortet)
+HACS plugin-kategori spårar bara en nedladdningsbar fil per repo, så båda korten levereras i en gemensam bundle, `smart-energy-manager-cards.js`, som registrerar både `sem-charger-card` och `sem-energy-plan-card`.
+
+1. Gå till HACS → Frontend → ⋮ → Custom repositories
+2. Lägg till `https://github.com/fjonson95/smart_energy_manager`, kategori: Plugin — samma repo-URL som integrationen, tillagd en andra gång under en annan kategori
+3. Installera "Smart Energy Manager"
+4. Inställningar → Dashboards → ⋮ → Resurser → Lägg till resurs → `/hacsfiles/smart_energy_manager/smart-energy-manager-cards.js`, typ: JavaScript-modul (HACS lägger till det automatiskt på nyare Home Assistant-versioner)
+5. Hårdladda dashboarden (Ctrl+Shift+R) och lägg till valfritt kort som vanligt
+
+Manuell installation (utan HACS) fungerar fortfarande: kopiera `www/sem-charger-card.js` och `www/sem-energy-plan-card.js` till `/config/www/` separat och lägg till varje som sin egen resurs.
 
 ---
 

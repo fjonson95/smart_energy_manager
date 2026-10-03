@@ -122,7 +122,7 @@ Om bil är vald, laddning är beordrad men `charger_power < 50 W` i >5 minuter �
 2. Kopiera `custom_components/smart_energy_manager/` till HA via Samba/SCP
 3. Starta om HA-integrationen (Developer Tools → YAML → Reload) eller starta om hela HA
 4. Kontrollera loggar under `Settings → System → Logs` eller filtrera på `smart_energy_manager`
-5. För kortändringar: kopiera `www/sem-charger-card.js` och hårdladda webbläsaren (Ctrl+Shift+R)
+5. För kortändringar: kopiera `www/sem-charger-card.js`/`www/sem-energy-plan-card.js` och hårdladda webbläsaren (Ctrl+Shift+R). Kör även `python build_hacs_bundle.py` innan commit – HACS-plugin-resursen (`dist/smart-energy-manager-cards.js`) checkas in, byggs inte av HACS vid installation.
 
 **För SEM LM Bridge:**
 - Redigera `C:\Users\Fredrik\Documents\sem_lm_bridge\bridge.py` eller `backtest.py`

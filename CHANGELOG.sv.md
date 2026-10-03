@@ -2,6 +2,17 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.58
+
+Båda Lovelace-korten (`sem-charger-card` och `sem-energy-plan-card`) går nu att installera via HACS, istället för att bara kunna kopiera `www/*.js` manuellt till `/config/www/`.
+
+- **Varför en bundle**: HACS plugin-kategori spårar exakt en nedladdningsbar fil per repo (`hacs.json`:s `filename`), placerad i repots `dist/`-mapp eller rot – aldrig `www/`. Med två separata kort kan en enskild HACS "Frontend"-installation av det här repot bara registrera ett av dem direkt.
+- **Fix**: `build_hacs_bundle.py` slår ihop `www/sem-charger-card.js` och `www/sem-energy-plan-card.js` till `dist/smart-energy-manager-cards.js`, som registrerar båda custom elements `sem-charger-card` och `sem-energy-plan-card` från en enda HACS-hanterad resurs. `hacs.json` pekar nu `filename` dit. De två källfilerna i `www/` är oförändrade och fungerar fortfarande för manuell (icke-HACS) kopieringsinstallation.
+- **Så installeras det via HACS**: lägg till samma repo en andra gång i HACS, under Frontend → Custom repositories, kategori "Plugin" (samma repo-URL som integrationen, bara en annan HACS-kategori) – se README:s avsnitt "Installation via HACS".
+- **Lade till ett saknat `customElements.get()`-skydd i `sem-charger-card.js`**, i linje med det `sem-energy-plan-card.js` redan hade – bundlen laddar nu båda korten i samma skriptkörning, så en resurs-omladdning (dashboardens cacheinvalidering) kunde annars kasta "already defined" specifikt för laddar-kortet.
+- **Underhållsnot**: `build_hacs_bundle.py` måste köras (och `dist/smart-energy-manager-cards.js` checkas in) efter varje ändring i något av korten – HACS laddar ner repots filer som de är, inget byggsteg körs vid installation. Tillagt i CLAUDE.md:s utvecklingsflöde.
+- **Verifierat**: parentesbalans-kontroll på den genererade bundlen (ingen `node` tillgänglig i den här miljön för en riktig JS-syntaxkontroll) och en genomsökning efter kolliderande toppnivånamn mellan de två källfilerna (inga hittades). Inte verifierat mot en skarp HACS-installation än.
+
 ## Nyheter i 0.9.57
 
 Standardvärdet för Legionella-körtid är nu 110 minuter (var 60), i linje med pannprogrammets uppmätta körtid (2026-09-26: 12:30–14:21). Valet av billigaste fönster medelvärdesbildar priset över körtiden, så 60 minuter underskattade slutet av varje körning.

@@ -341,7 +341,9 @@ class SemChargerCard extends HTMLElement {
   }
 }
 
-customElements.define("sem-charger-card", SemChargerCard);
+if (!customElements.get("sem-charger-card")) {
+  customElements.define("sem-charger-card", SemChargerCard);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push({

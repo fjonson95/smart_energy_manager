@@ -2,6 +2,17 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.58
+
+Both Lovelace cards (`sem-charger-card` and `sem-energy-plan-card`) can now be installed via HACS, instead of only by manually copying `www/*.js` to `/config/www/`.
+
+- **Why a bundle**: HACS's plugin category tracks exactly one downloadable file per repository (`hacs.json`'s `filename`), located in the repo's `dist/` folder or root — never `www/`. With two separate cards, a single HACS "Frontend" add of this repository can only register one of them directly.
+- **Fix**: `build_hacs_bundle.py` concatenates `www/sem-charger-card.js` and `www/sem-energy-plan-card.js` into `dist/smart-energy-manager-cards.js`, which registers both `sem-charger-card` and `sem-energy-plan-card` custom elements from one HACS-managed resource. `hacs.json` now points `filename` at it. The two source files in `www/` are unchanged and still work for a manual (non-HACS) copy install.
+- **How to install via HACS**: add this same repository a second time in HACS, under Frontend → Custom repositories, category "Plugin" (it's the same repo URL as the integration, just a different HACS category) — see README's "Installation via HACS" section.
+- **Added a missing `customElements.get()` guard to `sem-charger-card.js`**, matching the one `sem-energy-plan-card.js` already had — the bundle now loads both cards in the same script execution, so a resource reload (dashboard cache-bust) could otherwise throw "already defined" for the charger card specifically.
+- **Maintenance note**: `build_hacs_bundle.py` must be run (and `dist/smart-energy-manager-cards.js` committed) after any edit to either card — HACS downloads repo files as-is, no build step runs on install. Added to CLAUDE.md's dev workflow.
+- **Verified**: bracket-balance check on the generated bundle (no `node` available in this environment for a real JS syntax check) and a scan for top-level identifier collisions between the two source files (none). Not yet verified against a live HACS install.
+
 ## What's New in 0.9.57
 
 The default Legionella run duration is now 110 minutes (was 60), matching the boiler program's measured runtime (2026-09-26: 12:30–14:21). The cheapest-window choice averages price over this duration, so 60 minutes undercounted the tail of each run.
