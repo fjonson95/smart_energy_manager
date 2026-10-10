@@ -92,6 +92,9 @@ Vid uppstart återställs `_takeover_observed_today = True` om `last_obs_date` �
 ### Legionella – rörligt intervall (5–9 dagar), billigaste fönstret
 `LegionellaManager.should_run_now()` jämför *datum*: från `min`-dagen (standard 5) är det dags, och senast slutet av `max`-dagen (standard 9) körs det bästa kända fönstret oavsett pris. Mellan dem väljs billigaste körfönstret (körtid × **effektivt pris**) bland kvartarna i Nordpools kända prisdata, dygnets alla timmar. Effektivt pris = solöverskott (p10 minus husets last, mot 6 kW patron) värderat till säljpris, resten till köppris. Före max-dagen körs bara om bästa fönstret är ≤ 90 % av snittet i det kända; dagar bortom prishorisonten ses via Solcasts `forecast_day_3..7` (härledda ur imorgon-entiteten) och väntas in om de är minst 10 % billigare. Nödstart undviker natten 23–06. `next_due` = senaste körning + min-dagar.
 
+### Nätladdningens solavdrag och planlogg
+Regel 3 räknar nätladdningsbehov = utrymme till max − väntad gratis solpåfyllning. Påfyllningen använder `p10 + _GRID_CHARGE_SOLAR_BLEND × (p50 − p10)` (0,5); reserver, V och merit-ordningens utrymmeskontroll använder fortfarande ren p10. `coordinator._maybe_log_plan()` sparar fyra planögonblicksbilder per dygn (00/06/14/20, 36 h, motivering per slot) i `.storage/smart_energy_manager_plan_log` (senaste 40) – kopiera filen vid granskning istället för att gissa varför ett beslut togs.
+
 ### EV-vakthund
 Om bil är vald, laddning är beordrad men `charger_power < 50 W` i >5 minuter → `_active_cars[charger_name]` återställs till `NO_CAR_SELECTED`. Hanteras i `coordinator._build_charger_states()` via `_charge_command_times`.
 

@@ -30,6 +30,12 @@ _PLAN_HORIZON_H = 48  # v1.0 steg 3, punkt 5: 36-48h. Ingen prisprognos behövs
                        # finns redan på kvällen när kvällsbesluten fattas.
 
 
+# Andel av avståndet p10→p50 som räknas som "gratis solpåfyllning" i regel 3:s
+# nätladdningsbehov. 0 = ren p10 (tidigare beteende), 1 = p50. Gäller BARA
+# beslutet om hur mycket som ska köpas från nätet – reserver, V och
+# merit-ordningens utrymmeskontroll använder fortfarande ren p10.
+_GRID_CHARGE_SOLAR_BLEND = 0.5
+
 _DROUGHT_STICK_TEMP_MIN_C = -5.0  # snö klibbar bara fast inom det här
 _DROUGHT_STICK_TEMP_MAX_C = 5.0   # intervallet (användarens fysik, 2026-09-09)
                                    # – kallare och snön är lätt/pudrig, blåser
@@ -383,6 +389,21 @@ class EnergyPlanner:
                 _running_cap += _increment
             _cap_by_time[s.start] = _running_cap + _banked_extra_kwh
 
+        # Veckogenomgång 2026-10-10: regel 3 nätladdade 20 kWh natten före en
+        # solig dag (9/10, prognos p50 43,6 / p10 12,1 kWh, utfall 40,1) och
+        # 11 kWh exporterades sedan för 0,31 kr. Veckans p50-prognoser låg
+        # bara ~5 % över utfallet - ren p10 var för pessimistisk för just
+        # köpbeslutet (extra el kostar en kväll, inte hela reserven).
+        _fill_gain_kwh = 0.0
+        for s in future_slots:
+            s_h = (s.end - s.start).total_seconds() / 3600.0
+            if s_h <= 0:
+                continue
+            _blend_kwh = s.solar_kwh_p10 + _GRID_CHARGE_SOLAR_BLEND * max(0.0, s.solar_kwh - s.solar_kwh_p10)
+            _s_fill = max(0.0, _blend_kwh - _slot_load_kwh(s, load_shape_p75))
+            _fill_gain_kwh += min(_s_fill, battery_max_power_kw * s_h)
+        _fill_cap_end_kwh = batt_kwh + _fill_gain_kwh
+
         _reserved_kwh = batt_min_kwh + _flat_buffer_kwh
 
         # Live-incident 2026-09-22, del 2: Nordpool publicerar imorgondagens
@@ -704,17 +725,17 @@ class EnergyPlanner:
             # och köps samtidigt, alltid en förlustaffär eftersom köp>sälj).
             if action == "idle":
                 room_kwh = max(0.0, batt_max_kwh - batt_kwh)
-                # Ladda bara den del av room_kwh som solen (pessimistiskt,
-                # p10) INTE redan väntas fylla gratis inom horisonten –
-                # _cap_by_time (rad 336) visar redan hur fullt batteriet
-                # blir av enbart sol vid horisontens slut i värsta fall.
+                # Ladda bara den del av room_kwh som solen (p10 blandat
+                # mot p50, se _GRID_CHARGE_SOLAR_BLEND) INTE redan väntas
+                # fylla gratis inom horisonten – _fill_cap_end_kwh visar
+                # hur fullt batteriet blir av enbart sol vid horisontens slut.
                 # Utan den här spärren nätladdade regel 3 för fullt även
                 # när prognosen samtidigt visade rikligt med sol bara
                 # timmar bort (live-incident 2026-09-10, se
                 # docs/v1_implementation_plan.md) – V-beräkningen VET om
                 # framtida sol (via _cap_by_time/_opportunities), men
                 # regel 3 läste aldrig den kunskapen innan den här fixen.
-                _solar_fills_kwh = max(0.0, _cap_by_time.get(_slot_starts_sorted[-1], batt_kwh) - batt_kwh)
+                _solar_fills_kwh = max(0.0, _fill_cap_end_kwh - batt_kwh)
                 _grid_needed_kwh = max(0.0, room_kwh - _solar_fills_kwh)
                 if slot.buy_sek + self.cycle_cost_sek_kwh < V_charge and _grid_needed_kwh > 0.1:
                     # Laddas INTE här - se _grid_charge_candidates-kommentaren

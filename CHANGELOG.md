@@ -2,6 +2,16 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.59
+
+Three changes from the 2026-10-03…10 weekly review.
+
+- **Grid-charging now counts part of the p50 solar forecast.** Rule 3 (night grid charging) subtracted only the pessimistic p10 solar from the room it fills. On 2026-10-09 that bought 20 kWh at 1.45 SEK/kWh before a sunny day (forecast p50 43.6 / p10 12.1 kWh, actual 40.1) and 11 kWh was then exported at 0.31 SEK/kWh — about 12 SEK lost. The fill estimate now uses `p10 + 0.5 × (p50 − p10)` (`_GRID_CHARGE_SOLAR_BLEND` in `energy_planner.py`). Reserves, `V` and the merit-order headroom check still use pure p10.
+- **Plan log**: four snapshots per day (first plan build after 00, 06, 14 and 20) of the whole plan — 36 h of slots with action, power, SOC, buy/sell price, hold flag and the per-slot reason — plus `V`, `V_charge`, the Solcast p50/p10/p90 totals for tomorrow, and the load inputs. Kept as the last 40 snapshots (~10 days, ~1 MB) in `.storage/smart_energy_manager_plan_log`, so a review can verify why something was decided instead of guessing.
+- **Removed the `DayPlan AVVIKELSE` log line** (and its debug twin) entirely. It fired every 30 s whenever the plan said `solar_charge` but a real house deficit made the executor discharge instead — benign, but ~1,300 of the last 2,000 log lines in six hours.
+- **Not changed**: the round-trip efficiency setting (default 0.87 vs measured 0.848). It is the existing `eta_roundtrip` option, no code change needed.
+- **Verified**: syntax check and backtests. Summer 158.81 → 157.18 SEK (−1.0 %), winter 918.94 → 914.27 SEK (−0.5 %) with weight 0.5 (0.25: 158.71 / 915.78; 1.0: 156.98 / 908.09). The backtest's "p10" is a fixed 0.7 × p50 haircut, not real Solcast spread, so it can only show direction — real days have a far wider p10–p50 gap, which is exactly what the change targets. Not verified live; the plan log's first snapshots will show the effect.
+
 ## What's New in 0.9.58
 
 Both Lovelace cards (`sem-charger-card` and `sem-energy-plan-card`) can now be installed via HACS, instead of only by manually copying `www/*.js` to `/config/www/`.
