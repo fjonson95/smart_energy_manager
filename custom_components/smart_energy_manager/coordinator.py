@@ -87,6 +87,9 @@ _POWER_DEADBAND_W = 50.0
 # göra huslasten trögare någon annanstans (cover_load m.fl. använder
 # fortfarande den snabba, ofiltrerade house_load_w).
 _EVENING_LOAD_AVG_WINDOW = timedelta(minutes=15)
+# Andra integrationer (Sonnen, SMHI) laddas ibland efter SEM vid HA-start;
+# en entitet som saknas eller är unavailable så här tidigt är inte ett fel.
+_STARTUP_GRACE = timedelta(minutes=5)
 
 
 def _migrate_ev_cars_to_chargers(ev_cars: list[dict]) -> list[dict]:
@@ -206,6 +209,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # Varning om batteriets egna driftläge inte står på "manual" – då är
         # alla börvärden SEM skriver verkningslösa utan att något syns.
         self._battery_mode_warning_active: bool = False
+        self._started_at: datetime = dt_util.now()
 
         # Produktionskvot (P3-2): rullande 3-dygns kvot faktisk/prognos
         # solproduktion – upptäcker snötäckta/nedsmutsade paneler som
@@ -1822,6 +1826,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         weather_entity = self._config.get(CONF_WEATHER_ENTITY)
         if not weather_entity:
             return []
+        if self._entity_not_ready_yet(self.hass.states.get(weather_entity)):
+            _LOGGER.debug("Väderprognos: %s inte tillgänglig än efter start", weather_entity)
+            return []
 
         try:
             response = await self.hass.services.async_call(
@@ -1856,6 +1863,13 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Kunde inte tolka väderprognos-dag %s: %s", day, err)
         return result
 
+    def _entity_not_ready_yet(self, state) -> bool:
+        """Inom _STARTUP_GRACE efter start: entiteten finns inte eller är
+        unavailable/unknown – vänta i stället för att varna."""
+        if dt_util.now() - self._started_at >= _STARTUP_GRACE:
+            return False
+        return state is None or state.state in ("unavailable", "unknown")
+
     async def _check_battery_operating_mode(self) -> None:
         """Varna om batteriets egna driftläge inte står på 'manual' – utan detta
         är alla börvärden SEM skriver verkningslösa, tyst."""
@@ -1863,6 +1877,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         if not entity_id:
             return
         state = self.hass.states.get(entity_id)
+        if self._entity_not_ready_yet(state):
+            return
         is_manual = state is not None and state.state.lower() == "manual"
 
         if not is_manual and not self._battery_mode_warning_active:

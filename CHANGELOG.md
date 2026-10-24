@@ -2,6 +2,11 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.65
+
+- **No false warnings at Home Assistant start.** For the first 5 minutes after SEM starts, a battery operating-mode entity or weather entity that is missing or `unavailable` counts as "not ready yet" instead of an error. Seen at the 2026-10-24 18:13 restart: "battery operating mode is not 'manual'" and "could not fetch weather forecast" ~12 s before the Sonnen and SMHI integrations had started. After 5 minutes SEM warns as before, so an integration that has really stopped is still caught. The first plan after a start is built without the weather forecast if it is not available yet; the next rebuild (≤15 min) includes it.
+- **Verified**: `pytest` 21 passed, 3 expected failures; import with HA installed. Not verified live.
+
 ## What's New in 0.9.64
 
 Extra hot water (Extra VV) now knows how the boiler actually heats, and the solar-surplus dump follows stricter rules. Background and measurements: `docs/decisions.md` (2026-10-24).

@@ -2,6 +2,11 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.65
+
+- **Inga falska varningar vid start av Home Assistant.** Under de första 5 minuterna efter att SEM startat räknas en driftläges- eller väderentitet som saknas eller är `unavailable` som "inte klar än" i stället för som ett fel. Sågs vid omstarten 2026-10-24 18:13: "batteriets driftläge står inte på 'manual'" och "kunde inte hämta väderprognos" ~12 s innan Sonnen- och SMHI-integrationerna hade startat. Efter 5 minuter varnar SEM som förut, så en integration som verkligen slutat fungera upptäcks fortfarande. Den första planen efter en start byggs utan väderprognos om den inte finns än; nästa ombyggnad (≤15 min) tar med den.
+- **Verifierat**: `pytest` 21 godkända, 3 förväntade fel; import med HA installerat. Inte verifierat skarpt.
+
 ## Nyheter i 0.9.64
 
 Extra varmvatten (Extra VV) vet nu hur pannan faktiskt värmer, och dumpen av solöverskott följer strängare regler. Bakgrund och mätningar: `docs/decisions.md` (2026-10-24).
