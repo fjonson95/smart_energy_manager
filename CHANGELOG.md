@@ -2,6 +2,25 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.61
+
+Phase A step 2b (HANDOFF.md): two kinds of data that are lost for every day they are not collected.
+
+- **New sensor "Savings Today"** (`unique_id` `sem_daily_savings`): today's savings in SEK compared with the same house without the battery. Resets at midnight.
+  - **Reference**: the grid would have had to take the battery's charging/discharging (`ref_grid = grid − battery power`).
+  - **Prices**: both sides use the buy/sell price in force at that moment.
+  - **Attributes**: import/export kWh and SEK for the actual and reference cases, battery charge/discharge kWh, yesterday's savings, the 30-day sum, and `history` (`[date, SEK]` per day).
+  - **Storage**: kept for 30 days in `.storage/smart_energy_manager_daily_savings`, saved every 15 minutes so a restart only loses minutes.
+  - **Gaps and unavailable sensors**: a step longer than 2 minutes is not integrated, and a cycle is skipped while a grid or battery sensor is unavailable. A 0 W reading would otherwise be booked as a large saving.
+  - **Note**: buy prices still come from the configuration, which according to the September 2026 invoice is about 0.30 SEK/kWh too high. This makes the sensor overstate the value of discharging until the price is corrected together with phase B (`docs/decisions.md`).
+- **Solcast forecast archive**: p50/p10/p90 per 30-minute slot for today and tomorrow, at the first update after 06:00 and after 13:00 each day. The last 120 snapshots (60 days, ~400 kB) are kept in `.storage/smart_energy_manager_solcast_archive`. The backtest's p10 is a fixed 0.7 × actual, so decisions that depend on the real p10–p50 spread (`_GRID_CHARGE_SOLAR_BLEND`, the reserve, the phase-B terminal value) can only be evaluated against this archive.
+- **New pure module** `savings_tracker.py` with 7 tests (`tests/test_savings_tracker.py`).
+- **Verified**:
+  - `pytest`: 14 passed, 3 expected failures
+  - coordinator and sensor import with HA installed
+  - backtests unchanged: summer 157.18 SEK, winter 914.27 SEK (with date filter)
+  - not verified live: the sensor's first value and the archive's first snapshot appear after the integration restarts
+
 ## What's New in 0.9.60
 
 First step of the cleanup plan in HANDOFF.md (phase A): automated tests, and one long-standing bug.

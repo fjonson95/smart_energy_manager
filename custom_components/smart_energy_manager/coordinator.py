@@ -70,6 +70,7 @@ from .energy_controller import (
 )
 from .energy_planner import EnergyPlanner, DayPlan, _PLAN_HORIZON_H
 from .legionella import LegionellaManager
+from .savings_tracker import DailySavingsTracker
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -270,6 +271,16 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._plan_log_store = Store(hass, 1, f"{DOMAIN}_plan_log")
         self._plan_log: list[dict] = []
         self._plan_log_last_key: str = ""
+        # Solcast p10/p50/p90 per 30-minutersslot, två gånger per dygn (första
+        # uppdateringen efter 06 och 13). Backtesten saknar verklig prognos-
+        # spridning (dess p10 = 0,7 × utfall), så allt som hänger på p10/p50
+        # kan bara utvärderas mot det här arkivet.
+        self._solcast_archive_store = Store(hass, 1, f"{DOMAIN}_solcast_archive")
+        self._solcast_archive: list[dict] = []
+        self._solcast_archive_last_key: str = ""
+        self._savings = DailySavingsTracker()
+        self._savings_store = Store(hass, 1, f"{DOMAIN}_daily_savings")
+        self._savings_last_save: Optional[datetime] = None
 
         # Baslinje för steg 7 punkt 2-trimning ("håll elpatronerna utanför"):
         # hur mycket och hur länge elpatronen/eltillskottet faktiskt kör,
@@ -324,6 +335,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         await self._load_daily_consumption_store()
         await self._load_hourly_shape_store()
         await self._load_plan_log_store()
+        await self._load_solcast_archive_store()
+        await self._load_savings_store()
         await self._load_heating_backup_store()
         await self._load_export_margin_store()
         await super().async_config_entry_first_refresh()
@@ -536,6 +549,74 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             self.hass.async_create_task(self._save_plan_log_store())
         except Exception as err:
             _LOGGER.debug("Planlogg: kunde inte spara ögonblicksbild: %s", err)
+
+    async def _load_solcast_archive_store(self) -> None:
+        data = await self._solcast_archive_store.async_load()
+        if isinstance(data, dict) and isinstance(data.get("snapshots"), list):
+            self._solcast_archive = data["snapshots"]
+            if self._solcast_archive:
+                self._solcast_archive_last_key = str(self._solcast_archive[-1].get("key", ""))
+
+    async def _save_solcast_archive_store(self) -> None:
+        await self._solcast_archive_store.async_save({"snapshots": self._solcast_archive})
+
+    def _maybe_archive_solcast(self, now: datetime, today_attrs: Optional[dict], tomorrow_attrs: Optional[dict]) -> None:
+        """Max 120 bilder (60 dygn) × 96 slots ≈ 400 kB."""
+        try:
+            local = now.astimezone()
+            if local.hour < 6:
+                return
+            key = f"{local:%Y-%m-%d}-{1 if local.hour >= 13 else 0}"
+            if key == self._solcast_archive_last_key:
+                return
+            rows = []
+            for attrs in (today_attrs, tomorrow_attrs):
+                for entry in (attrs or {}).get("detailedForecast", []) or []:
+                    start = entry.get("period_start")
+                    if start is None:
+                        continue
+                    rows.append([
+                        start.isoformat() if isinstance(start, datetime) else str(start),
+                        round(float(entry.get("pv_estimate", 0) or 0), 3),
+                        round(float(entry.get("pv_estimate10", 0) or 0), 3),
+                        round(float(entry.get("pv_estimate90", 0) or 0), 3),
+                    ])
+            if not rows:
+                return
+            self._solcast_archive.append({
+                "key": key,
+                "at": local.isoformat(timespec="minutes"),
+                "slot_columns": ["period_start", "p50_kw", "p10_kw", "p90_kw"],
+                "slots": rows,
+            })
+            self._solcast_archive = self._solcast_archive[-120:]
+            self._solcast_archive_last_key = key
+            self.hass.async_create_task(self._save_solcast_archive_store())
+        except Exception as err:
+            _LOGGER.debug("Solcast-arkiv: kunde inte spara prognos: %s", err)
+
+    async def _load_savings_store(self) -> None:
+        data = await self._savings_store.async_load()
+        if isinstance(data, dict):
+            self._savings.load(data)
+
+    async def _save_savings_store(self) -> None:
+        await self._savings_store.async_save(self._savings.to_dict())
+
+    def _update_daily_savings(self, now: datetime, grid_w: float, battery_w: float, buy: float, sell: float) -> None:
+        c = self._config
+        # _get_state_float ger 0 för otillgängliga entiteter; en nolla på nätet
+        # med batteriet igång skulle bokföras som en stor besparing.
+        for entity_id in (c.get(CONF_GRID_POWER_L1), c.get(CONF_GRID_POWER_L2),
+                          c.get(CONF_GRID_POWER_L3), c.get(CONF_BATTERY_INVERTER_POWER)):
+            st = self.hass.states.get(entity_id) if entity_id else None
+            if st is None or st.state in ("unavailable", "unknown"):
+                self._savings.pause()
+                return
+        rolled = self._savings.update(now, grid_w, battery_w, buy, sell)
+        if rolled or self._savings_last_save is None or now - self._savings_last_save >= timedelta(minutes=15):
+            self._savings_last_save = now
+            self.hass.async_create_task(self._save_savings_store())
 
     def _finalize_shape_hour(self) -> None:
         """Skriv in senaste timmens medeleffekt (kWh för den timmen) i
@@ -1160,6 +1241,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
             # Prisschema från Nordpool + Solcast-attributen
             now = dt_util.now()
+            self._update_daily_savings(now, grid_l1 + grid_l2 + grid_l3, battery_pwr_w, buy_price, sell_price)
             house_load_avg_w = self._get_house_load_avg_w(house_load_w, now)
             self._update_hourly_shape(now, house_load_w)
             nordpool_entity = c.get(CONF_NORDPOOL_ENTITY)
@@ -1184,6 +1266,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         st = self.hass.states.get(sc_tomorrow)
                         if st:
                             solcast_tomorrow_attrs = dict(st.attributes)
+                    self._maybe_archive_solcast(now, solcast_today_attrs, solcast_tomorrow_attrs)
 
                     if nordpool_type == NORDPOOL_TYPE_OFFICIAL:
                         official_data = await self._fetch_official_nordpool_slots()
@@ -1717,6 +1800,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "should_wait_for_solar": price_schedule.should_wait_for_solar if price_schedule else False,
                 "day_plan": self._day_plan,
                 "pv_production_ratio": pv_production_ratio,
+                "daily_savings": self._savings.today_summary(),
+                "daily_savings_history": self._savings.history,
             }
 
         except Exception as err:

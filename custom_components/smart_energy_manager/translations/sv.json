@@ -338,6 +338,9 @@
       "legionella_next_due": {
         "name": "Nästa legionella"
       },
+      "daily_savings": {
+        "name": "Besparing idag"
+      },
       "house_load": {
         "name": "Husförbrukning"
       },

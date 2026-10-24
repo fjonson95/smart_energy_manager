@@ -43,6 +43,7 @@ async def async_setup_entry(
         SmartEnergyLegionellaActiveSensor(coordinator, entry),
         SmartEnergyLegionellaDaysSinceSensor(coordinator, entry),
         SmartEnergyLegionellaNextDueSensor(coordinator, entry),
+        DailySavingsSensor(coordinator, entry),
         SmartEnergyLegionellaTempConfirmedSensor(coordinator, entry),
     ]
 
@@ -404,6 +405,35 @@ class SmartEnergyLegionellaNextDueSensor(_BaseEnergySensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         d = self.coordinator.data
         return {"reason": d.get("legionella_reason")} if d else {}
+
+
+class DailySavingsSensor(_BaseEnergySensor):
+    """Dagens besparing (SEK) mot samma hus utan batteri, nollställs vid
+    midnatt. Komponenterna och de senaste 30 dygnen ligger som attribut;
+    beräkningen finns i savings_tracker.py."""
+    _attr_unique_id = "sem_daily_savings"
+    _attr_translation_key = "daily_savings"
+    _attr_native_unit_of_measurement = "SEK"
+    _attr_icon = "mdi:piggy-bank-outline"
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data
+        today = d.get("daily_savings") if d else None
+        return today["savings_sek"] if today else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        d = self.coordinator.data
+        if not d:
+            return {}
+        today = d.get("daily_savings") or {}
+        history = d.get("daily_savings_history") or []
+        attrs = {k: v for k, v in today.items() if k != "savings_sek"}
+        attrs["yesterday_savings_sek"] = history[-1]["savings_sek"] if history else None
+        attrs["last_30_days_savings_sek"] = round(sum(h.get("savings_sek", 0.0) for h in history), 2)
+        attrs["history"] = [[h["date"], h["savings_sek"]] for h in history]
+        return attrs
 
 
 class SmartEnergyHouseLoadSensor(_BaseEnergySensor):

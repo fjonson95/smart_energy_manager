@@ -2,6 +2,25 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.61
+
+Fas A steg 2b (HANDOFF.md): två sorters data som går förlorade för varje dag de inte samlas in.
+
+- **Ny sensor "Besparing idag"** (`unique_id` `sem_daily_savings`): dagens besparing i kr jämfört med samma hus utan batteri. Nollställs vid midnatt.
+  - **Referens**: nätet hade fått ta batteriets laddning/urladdning (`ref_nät = nät − batterieffekt`).
+  - **Priser**: båda leden räknas till det köp-/säljpris som gällde just då.
+  - **Attribut**: import/export i kWh och kr för verkligt utfall och referens, batteriets laddning/urladdning i kWh, gårdagens besparing, summan för 30 dygn och `history` (`[datum, kr]` per dygn).
+  - **Lagring**: sparas i 30 dygn i `.storage/smart_energy_manager_daily_savings`, och var 15:e minut så att en omstart bara tappar minuter.
+  - **Glapp och otillgängliga sensorer**: ett steg längre än 2 minuter integreras inte, och en cykel hoppas över medan en nät- eller batterisensor är otillgänglig. En avläsning på 0 W skulle annars bokföras som en stor besparing.
+  - **Obs**: köppriserna kommer fortfarande från konfigurationen, som enligt fakturan för september 2026 är cirka 0,30 kr/kWh för hög. Det gör att sensorn överskattar värdet av urladdning tills priset rättas tillsammans med fas B (`docs/decisions.md`).
+- **Arkiv över Solcast-prognosen**: p50/p10/p90 per 30-minutersslot för idag och imorgon, vid första uppdateringen efter 06:00 och efter 13:00 varje dygn. De senaste 120 bilderna (60 dygn, ~400 kB) sparas i `.storage/smart_energy_manager_solcast_archive`. Backtestens p10 är ett fast 0,7 × utfall, så beslut som hänger på den verkliga spridningen mellan p10 och p50 (`_GRID_CHARGE_SOLAR_BLEND`, reserven, slutvärdet i fas B) kan bara utvärderas mot det här arkivet.
+- **Ny ren modul** `savings_tracker.py` med 7 tester (`tests/test_savings_tracker.py`).
+- **Verifierat**:
+  - `pytest`: 14 godkända, 3 förväntade fel
+  - koordinatorn och sensorn importeras med HA installerat
+  - backtesterna oförändrade: sommar 157,18 kr, vinter 914,27 kr (med datumfilter)
+  - inte verifierat skarpt: sensorns första värde och arkivets första bild kommer efter att integrationen startats om
+
 ## Nyheter i 0.9.60
 
 Första steget i städplanen i HANDOFF.md (fas A): automatiska tester och en gammal bugg.

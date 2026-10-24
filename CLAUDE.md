@@ -95,6 +95,9 @@ Vid uppstart återställs `_takeover_observed_today = True` om `last_obs_date` �
 ### Nätladdningens solavdrag och planlogg
 Regel 3 räknar nätladdningsbehov = utrymme till max − väntad gratis solpåfyllning. Påfyllningen använder `p10 + _GRID_CHARGE_SOLAR_BLEND × (p50 − p10)` (0,5); reserver, V och merit-ordningens utrymmeskontroll använder fortfarande ren p10. `coordinator._maybe_log_plan()` sparar fyra planögonblicksbilder per dygn (00/06/14/20, 36 h, motivering per slot) i `.storage/smart_energy_manager_plan_log` (senaste 40) – kopiera filen vid granskning istället för att gissa varför ett beslut togs.
 
+### Daglig besparing och Solcast-arkiv
+`savings_tracker.DailySavingsTracker` integrerar varje cykel nät- och batterieffekt till köp-/säljpris mot en referens utan batteri (`ref_nät = nät − batterieffekt`) → sensorn "Besparing idag" (`sem_daily_savings`), 30 dygn i `.storage/smart_energy_manager_daily_savings`. `coordinator._maybe_archive_solcast()` sparar Solcast p50/p10/p90 per slot efter 06 och 13 (60 dygn) i `.storage/smart_energy_manager_solcast_archive` – använd det, inte backtestens syntetiska p10, för att utvärdera prognosberoende beslut.
+
 ### EV-vakthund
 Om bil är vald, laddning är beordrad men `charger_power < 50 W` i >5 minuter → `_active_cars[charger_name]` återställs till `NO_CAR_SELECTED`. Hanteras i `coordinator._build_charger_states()` via `_charge_command_times`.
 

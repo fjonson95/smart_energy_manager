@@ -338,6 +338,9 @@
       "legionella_next_due": {
         "name": "Legionella Next Due"
       },
+      "daily_savings": {
+        "name": "Savings Today"
+      },
       "house_load": {
         "name": "House Load"
       },
