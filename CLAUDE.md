@@ -14,7 +14,7 @@
 
 ## Vad är detta?
 
-Home Assistant custom integration (`custom_components/smart_energy_manager`) som styr energiflöden i hemmet baserat på spotpris (Nordpool), solproduktion (Solcast) och batteristatus. Projektet körs på en riktig HA-instans – det finns inga automatiska tester.
+Home Assistant custom integration (`custom_components/smart_energy_manager`) som styr energiflöden i hemmet baserat på spotpris (Nordpool), solproduktion (Solcast) och batteristatus. Projektet körs på en riktig HA-instans. De rena modulerna testas med `pytest` (`tests/`, körs utan HA), resten verifieras skarpt.
 
 Tillhörande **SEM LM Bridge** (`C:\Users\Fredrik\Documents\sem_lm_bridge\bridge.py`) är ett separat Python-service på en VM med Ollama. Det publicerar laddningsbeslut via MQTT var 300:e sekund. Bridge-koden delas **inte** av detta repo och måste kopieras manuellt till VM:en efter ändringar.
 
@@ -119,7 +119,7 @@ Om bil är vald, laddning är beordrad men `charger_power < 50 W` i >5 minuter �
 
 ## Utvecklingsflöde
 
-**Det finns inga automatiska tester.** Verifiera alltid i en riktig HA-instans.
+Kör `python -m pytest` (≈10 s, inkl. sommarbacktesten som regressionstest) och båda backtesterna före varje commit; skriv siffrorna i CHANGELOG-posten. Vinterbacktesten körs med `--date-from 2026-01-01 --date-to 2026-04-30` (utan filter blir siffran en annan). Allt som rör HA-glue verifieras dessutom i en riktig HA-instans.
 
 1. Redigera filer lokalt
 2. Kopiera `custom_components/smart_energy_manager/` till HA via Samba/SCP

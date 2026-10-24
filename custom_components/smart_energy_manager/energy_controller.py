@@ -841,15 +841,18 @@ class EnergyController:
         # dump_to_hot_water ovan (se dess kommentar) gäller även här – ett
         # löst 500W-golv kunde slå på hela patroneffekten på en bråkdel av
         # vad den faktiskt drar, med resten importerad från nätet.
-        battery_full_dump = (
+        surplus_covers_patron = (
             remaining_surplus >= state.heat_pump_patron_power_kw * 1000 * self.extra_hot_water_min_surplus_ratio
-            and battery_soc >= self.battery_max_soc
         )
-        varmvatten_ok = battery_full_dump or had_negative_today or dump_to_hot_water
+        battery_full_dump = surplus_covers_patron and battery_soc >= self.battery_max_soc
+        # negative_slots_passed_today är sann resten av dygnet efter en negativ
+        # kvart; utan överskottskravet startar patronen på nätel i kvällstoppen.
+        after_negative_dump = had_negative_today and surplus_covers_patron
+        varmvatten_ok = battery_full_dump or after_negative_dump or dump_to_hot_water
         if varmvatten_ok and self._can_start_extra_hot_water(state):
             decision.extra_hot_water = True
             temp_str = f" (tank {state.hot_water_temp_c:.0f}°C)" if state.hot_water_temp_c is not None else ""
-            if had_negative_today and not battery_full_dump:
+            if after_negative_dump and not battery_full_dump:
                 trigger = "passerat neg pris"
             elif not battery_full_dump:
                 trigger = "V_charge<sälj, dumpar överskott"

@@ -2,6 +2,27 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.60
+
+First step of the cleanup plan in HANDOFF.md (phase A): automated tests, and one long-standing bug.
+
+- **Fixed: "extra hot water after a negative-price morning" never worked.** `negative_slots_passed_today` counted negative slots that had already started, but in a slot list that only contained future slots, so it was only ever non-zero *during* a negative slot. It now counts over all of today's slots (`parse_nordpool_attributes(..., include_past=True)`).
+- **New condition on that trigger**: the counter now stays above zero for the rest of the day, so the trigger also needs a solar surplus that covers the heating element (the same surplus check as the other two hot-water dump triggers). Without it the ~6 kW element would have started on grid power in the evening peak after any negative price. No effect expected before spring: negative prices are rare from October to March.
+- **Tests that run without Home Assistant**: `tests/` + `pytest.ini`, plus a CI job (`.github/workflows/tests.yaml`). `tests/conftest.py` stubs `homeassistant` when it is not installed. Covered:
+  - the negative-slot counter
+  - the hot-water trigger with and without surplus
+  - the summer backtest result (157.18 SEK ± 1)
+  - two invariants: never charge and discharge at once, and never discharge at min SOC
+- **Known gaps, kept as expected failures** for phase B:
+  - the planner holds a charged battery through both price peaks (HANDOFF.md 4.1)
+  - the executor never clamps surplus charging to `battery_max_soc`: it commands charging at 100 % SOC, which the Sonnen ignores, so the 99 % setting has no effect on solar charging
+- `testdata/backtest.py`: `run_backtest()` now returns its result, so tests can read it.
+- **Verified**:
+  - `pytest`: 7 passed, 3 expected failures, both with HA installed and in a clean venv without HA
+  - backtests unchanged: summer 157.18 SEK (4.98 cycles); winter 914.27 SEK (24.17 cycles) with `--date-from 2026-01-01 --date-to 2026-04-30`
+  - the 907.75 SEK winter figure in HANDOFF.md is the same run without the date filter, so there is no drift
+  - not verified live
+
 ## What's New in 0.9.59
 
 Three changes from the 2026-10-03…10 weekly review.

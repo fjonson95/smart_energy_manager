@@ -302,10 +302,12 @@ class PriceScheduler:
         attributes: dict,
         now: datetime,
         price_in_cents: Optional[bool] = None,
+        include_past: bool = False,
     ) -> list[PriceSlot]:
         """
         Parsa raw_today och raw_tomorrow från Nordpool-attributen.
-        Returnerar sorterad lista av PriceSlot framåt i tid.
+        Returnerar sorterad lista av PriceSlot framåt i tid (med
+        include_past=True även dagens redan passerade slots).
 
         price_in_cents: None = auto-detect från attribut (bakåtkompatibel),
                         True  = HACS (öre/kWh → ÷100),
@@ -372,6 +374,8 @@ class PriceScheduler:
             return []
 
         slots.sort(key=lambda s: s.start)
+        if include_past:
+            return slots
         future = [s for s in slots if s.end > now_aware]
         _LOGGER.debug(
             "PriceScheduler: %d slots framåt (av %d totalt), nu=%s",
@@ -393,14 +397,18 @@ class PriceScheduler:
         Anropas av koordinatorn varje cykel.
         """
         schedule = PriceSchedule()
-        slots = self.parse_nordpool_attributes(nordpool_attributes, now, price_in_cents=price_in_cents)
+        now_aware = now if now.tzinfo else now.astimezone()
+        # schedule.slots innehåller bara framtida slots, så "redan passerade
+        # negativa idag" måste räknas på den ofiltrerade listan.
+        all_slots = self.parse_nordpool_attributes(
+            nordpool_attributes, now, price_in_cents=price_in_cents, include_past=True
+        )
+        slots = [s for s in all_slots if s.end > now_aware]
         schedule.slots = slots
 
         if not slots:
             _LOGGER.debug("PriceScheduler: inga slots tillgängliga")
             return schedule
-
-        now_aware = now if now.tzinfo else now.astimezone()
 
         # ── Solcast-prognos ───────────────────────────────────────────
         if solcast_today_attrs or solcast_tomorrow_attrs:
@@ -445,10 +453,9 @@ class PriceScheduler:
         schedule.negative_slots_ahead = sum(
             1 for s in next_8h if s.spot_sek < self.negative_threshold
         )
-        # Negativa slots som redan passerat idag (start < nu)
         today_start = now_aware.replace(hour=0, minute=0, second=0, microsecond=0)
         schedule.negative_slots_passed_today = sum(
-            1 for s in slots
+            1 for s in all_slots
             if s.spot_sek < self.negative_threshold and today_start <= s.start < now_aware
         )
         schedule.low_price_slots_ahead = sum(

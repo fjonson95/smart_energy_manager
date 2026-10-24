@@ -2,6 +2,27 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.60
+
+Första steget i städplanen i HANDOFF.md (fas A): automatiska tester och en gammal bugg.
+
+- **Rättat: "extra varmvatten efter en morgon med negativt pris" har aldrig fungerat.** `negative_slots_passed_today` räknade negativa kvartar som redan börjat, men i en lista som bara innehöll framtida kvartar. Den var därför bara större än noll *under* en negativ kvart. Nu räknas dagens alla kvartar (`parse_nordpool_attributes(..., include_past=True)`).
+- **Nytt villkor för samma utlösare**: räknaren ligger nu kvar över noll resten av dygnet, så utlösaren kräver också ett solöverskott som räcker för elpatronen (samma överskottskontroll som de två andra varmvattenvillkoren). Utan det hade patronen på ~6 kW startat på nätel i kvällstoppen efter varje negativt pris. Ingen effekt väntas före våren, eftersom negativa priser är sällsynta oktober–mars.
+- **Tester som körs utan Home Assistant**: `tests/` + `pytest.ini` och ett CI-jobb (`.github/workflows/tests.yaml`). `tests/conftest.py` ersätter `homeassistant` med en stub när HA inte är installerat. Testerna täcker:
+  - räknaren för negativa kvartar
+  - varmvattenutlösaren med och utan överskott
+  - sommarbacktestens resultat (157,18 kr ± 1)
+  - två invarianter: laddar aldrig och laddar ur samtidigt, och laddar aldrig ur vid min-SOC
+- **Kända brister, kvar som förväntade fel** till fas B:
+  - planeraren håller ett laddat batteri genom båda pristopparna (HANDOFF.md 4.1)
+  - exekutorn begränsar aldrig överskottsladdning mot `battery_max_soc`: den beordrar laddning vid 100 % SOC, vilket Sonnen ignorerar, så inställningen 99 % påverkar inte solladdningen
+- `testdata/backtest.py`: `run_backtest()` returnerar nu sitt resultat, så att testerna kan läsa det.
+- **Verifierat**:
+  - `pytest`: 7 godkända, 3 förväntade fel, både med HA installerat och i en ren venv utan HA
+  - backtesterna oförändrade: sommar 157,18 kr (4,98 cykler); vinter 914,27 kr (24,17 cykler) med `--date-from 2026-01-01 --date-to 2026-04-30`
+  - vintersiffran 907,75 kr i HANDOFF.md är samma körning utan datumfilter, så det finns ingen avvikelse
+  - inte verifierat skarpt
+
 ## Nyheter i 0.9.59
 
 Tre ändringar efter veckogenomgången 2026-10-03…10.

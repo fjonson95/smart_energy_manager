@@ -1026,6 +1026,13 @@ def run_backtest(
         "=================================================\n"
     )
     sys.stdout.buffer.write(sim_summary.encode("utf-8"))
+    return {
+        "savings_sek": savings_sek,
+        "full_cycles": full_cycles,
+        "sim_net_cost_sek": sim_net_cost,
+        "ref_net_cost_sek": ref_net_cost,
+        "out_path": out_path,
+    }
 
 
 def main():
