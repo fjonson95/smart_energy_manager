@@ -68,7 +68,6 @@ Usage (from repo root):
 Options:
     --out FILE      Write timeline CSV to FILE (default: backtest_result.csv)
     --min-soc N     Override battery_min_soc (default: from SETTINGS)
-    --percentile N  Override export_sell_percentile (default: from SETTINGS)
     --date-from     YYYY-MM-DD  Filter start date (inclusive)
     --date-to       YYYY-MM-DD  Filter end date (inclusive)
 """
@@ -111,9 +110,6 @@ SETTINGS = {
     "battery_max_power_kw":     8.0,
     "battery_min_soc":          20.0,
     "battery_max_soc":          99.0,
-    "export_sell_percentile":   0.80,
-    "export_min_solar_tomorrow_kwh": 5.0,
-    "export_min_sell_price_sek_kwh": 0.70,
     "eta_roundtrip":            0.87,
     "cycle_cost_sek_kwh":       0.05,
     "grid_scale":               1000.0,   # grid_power_unit = kW
@@ -480,10 +476,6 @@ def run_backtest(
     planner = EnergyPlanner(
         battery_min_soc                = s["battery_min_soc"],
         battery_max_soc                = s["battery_max_soc"],
-        export_sell_percentile         = s["export_sell_percentile"],
-        export_min_sell_price_sek_kwh  = s["export_min_sell_price_sek_kwh"],
-        export_min_solar_tomorrow_kwh  = s["export_min_solar_tomorrow_kwh"],
-        sell_solar_min_price           = 0.80,
         eta_roundtrip                  = s["eta_roundtrip"],
         cycle_cost_sek_kwh             = s["cycle_cost_sek_kwh"],
     )
@@ -1047,7 +1039,6 @@ def main():
     )
     parser.add_argument("--out",        default="backtest_result.csv")
     parser.add_argument("--min-soc",    type=float)
-    parser.add_argument("--percentile", type=float)
     parser.add_argument("--date-from",  help="YYYY-MM-DD")
     parser.add_argument("--date-to",    help="YYYY-MM-DD")
     parser.add_argument(
@@ -1065,7 +1056,6 @@ def main():
 
     overrides = {}
     if args.min_soc    is not None: overrides["battery_min_soc"]           = args.min_soc
-    if args.percentile is not None: overrides["export_sell_percentile"]    = args.percentile
 
     date_from = datetime.fromisoformat(args.date_from).replace(tzinfo=timezone.utc) if args.date_from else None
     date_to   = datetime.fromisoformat(args.date_to  ).replace(tzinfo=timezone.utc) if args.date_to   else None

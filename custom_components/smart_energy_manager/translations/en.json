@@ -60,9 +60,6 @@
           "battery_max_power_kw": "Max power (kW)",
           "battery_min_soc": "Min SOC (%)",
           "battery_max_soc": "Max SOC (%)",
-          "export_sell_percentile": "Proactive export: price percentile (0.75 = top 25%)",
-          "export_min_solar_tomorrow_kwh": "Proactive export: min Solcast tomorrow (kWh)",
-          "export_min_sell_price_sek_kwh": "Proactive export: absolute minimum sell price (SEK/kWh, 0 = disabled)",
           "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
           "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
           "ev_reserve_margin_kwh": "EV reserve margin under low solar (kWh, default 2.5)",
@@ -209,9 +206,6 @@
           "battery_max_power_kw": "Max power (kW)",
           "battery_min_soc": "Min SOC (%)",
           "battery_max_soc": "Max SOC (%)",
-          "export_sell_percentile": "Proactive export: price percentile (0.75 = top 25%)",
-          "export_min_solar_tomorrow_kwh": "Proactive export: min Solcast tomorrow (kWh)",
-          "export_min_sell_price_sek_kwh": "Proactive export: absolute minimum sell price (SEK/kWh, 0 = disabled)",
           "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
           "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
           "ev_reserve_margin_kwh": "EV reserve margin under low solar (kWh, default 2.5)",
@@ -445,14 +439,6 @@
       "battery_max_soc": {
         "name": "Battery Max SOC",
         "description": "Highest allowed battery SOC. Automatically reduced before upcoming negative-price slots to make room for absorption."
-      },
-      "export_sell_percentile": {
-        "name": "Proactive Export Price Percentile",
-        "description": "Export triggers when the sell price is ≥ this percentile of today's prices. 75 = top 25% most expensive hours."
-      },
-      "export_min_sell_price": {
-        "name": "Proactive Export Absolute Min Price",
-        "description": "Export also triggers on individual slots below the percentile threshold if the price is ≥ this value (SEK/kWh). Set to 0 to disable."
       }
     },
     "select": {

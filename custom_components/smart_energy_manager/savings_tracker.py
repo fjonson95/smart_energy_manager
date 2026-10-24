@@ -42,7 +42,8 @@ class DailySavingsTracker:
     def update(self, now: datetime, grid_w: float, battery_w: float, buy_sek: float, sell_sek: float) -> bool:
         """Integrerar en avläsning. grid_w > 0 = import. Returnerar True när
         ett dygn har avslutats och lagts i historiken."""
-        date = now.astimezone().date().isoformat()
+        # Tidsstämpelns egen zon (dt_util.now() = HA:s tidszon), inte värdens.
+        date = (now if now.tzinfo else now.astimezone()).date().isoformat()
         rolled = False
         if self.today is None:
             self.today = _empty_day(date)

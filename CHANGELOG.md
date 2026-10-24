@@ -2,6 +2,32 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.62
+
+Phase A step 3 (HANDOFF.md 5.2): removed settings and entities that had no effect since the v1.0 marginal-value planner (v0.9.8) replaced the percentile exporter.
+
+- **Removed from the options flow**:
+  - "Proactive export: price percentile" (`export_sell_percentile`)
+  - "Proactive export: min Solcast tomorrow" (`export_min_solar_tomorrow_kwh`)
+  - "Proactive export: absolute minimum sell price" (`export_min_sell_price_sek_kwh`)
+  - their constants in `const.py` and their texts in `translations/sv.json`/`en.json`
+- **Removed the two `number` entities** `sem_export_sell_percentile` and `sem_export_min_sell_price` (in Swedish installs: `number.smart_energy_manager_proaktiv_export_prispercentil` and `…_proaktiv_export_absolut_minpris`). **After updating, they show as unavailable in HA: delete them under Settings → Entities.** Remove them from any dashboard as well.
+- **Removed unused constructor parameters**:
+  - in `EnergyPlanner`: `export_sell_percentile`, `export_min_sell_price_sek_kwh`, `export_min_solar_tomorrow_kwh`, `sell_solar_min_price`, `cheap_charge_buy_percentile`
+  - in `EnergyController`: `auto_discharge_threshold_sek`
+  - `EnergyController.sell_solar_min_price` is still used by the executor and is unchanged.
+- **Already saved values** of the three keys stay in the config entry with no effect, and disappear the next time the options are saved.
+- `testdata/backtest.py`: the `--percentile` flag and the three `SETTINGS` keys are gone.
+- **Fixed: the CI test job failed** (it was introduced in 0.9.60).
+  - **Savings sensor**: it picked the day in the host's time zone, not in the timestamp's (HA's) own zone, so in UTC the day rolled over two hours late. It now uses the timestamp's zone, and so does the Solcast archive's 06/13 split.
+  - **Summer backtest**: the planner looks up the load-profile hour in the host's local zone (`dt.astimezone().hour`), and the backtest data has UTC timestamps. CI (UTC) therefore got 160.60 instead of 157.18 SEK. The tests and the CI job now run in `Europe/Stockholm`, reproduced locally with `TZ=UTC0`.
+  - **Not fixed**: the planner itself still depends on the host's time zone, which is correct in HA as long as the container's zone matches HA's. Noted for phase B.
+- **Verified**:
+  - `pytest`: 14 passed, 3 expected failures
+  - backtests unchanged to the öre: summer 157.18 SEK, winter 914.27 SEK (with date filter)
+  - both timeline CSVs byte-identical to the run before the change, which proves the removed code was dead
+  - not verified live
+
 ## What's New in 0.9.61
 
 Phase A step 2b (HANDOFF.md): two kinds of data that are lost for every day they are not collected.

@@ -230,18 +230,12 @@ CONF_EV_RESERVE_MARGIN_KWH   = "ev_reserve_margin_kwh"
 DEFAULT_EV_RESERVE_MARGIN_KWH = 2.5
 CONF_NEGATIVE_PRICE_THRESHOLD = "negative_price_threshold_sek"
 CONF_PROACTIVE_ABSORPTION_SLOTS = "proactive_absorption_slots"
-CONF_EXPORT_SELL_PERCENTILE = "export_sell_percentile"
-CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH = "export_min_solar_tomorrow_kwh"
-CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH = "export_min_sell_price_sek_kwh"
 CONF_BATTERY_POWER_INVERTED = "battery_power_inverted"
 CONF_ETA_ROUNDTRIP = "eta_roundtrip"
 CONF_CYCLE_COST_SEK_KWH = "cycle_cost_sek_kwh"
 
 DEFAULT_NEGATIVE_PRICE_THRESHOLD = 0.0   # SEK/kWh
 DEFAULT_PROACTIVE_ABSORPTION_SLOTS = 4   # Antal negativa kvartstimmar inom 2h för att reagera
-DEFAULT_EXPORT_SELL_PERCENTILE = 0.75    # Urladda/exportera när säljpris ≥ 75:e percentilen av dagens priser
-DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH = 5.0  # Minsta Solcast-prognos imorgon för att tillåta export-urladdning
-DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH = 0.70  # Absolut minimipris – exporterar alltid om ≥ detta (oavsett percentil)
 DEFAULT_ETA_ROUNDTRIP = 0.849            # Batteriets tur-och-retur-verkningsgrad – uppmätt (v1.0 steg 1):
                                           # sensor.sonnen_batt_use_energy / sensor.sonnen_battcharge_energy,
                                           # anläggningens egna AC-räknare, inte en antagen siffra

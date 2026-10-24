@@ -2,6 +2,32 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.62
+
+Fas A steg 3 (HANDOFF.md 5.2): tog bort inställningar och entiteter som inte haft någon effekt sedan marginalvärdesplaneraren i v1.0 (v0.9.8) ersatte percentil-exporten.
+
+- **Borttaget ur alternativen**:
+  - "Proaktiv export: prispercentil" (`export_sell_percentile`)
+  - "Proaktiv export: min Solcast imorgon" (`export_min_solar_tomorrow_kwh`)
+  - "Proaktiv export: absolut minimipris" (`export_min_sell_price_sek_kwh`)
+  - deras konstanter i `const.py` och texter i `translations/sv.json`/`en.json`
+- **De två `number`-entiteterna** `sem_export_sell_percentile` och `sem_export_min_sell_price` (`number.smart_energy_manager_proaktiv_export_prispercentil` och `…_proaktiv_export_absolut_minpris`) är borttagna. **Efter uppdateringen visas de som otillgängliga i HA – ta bort dem under Inställningar → Entiteter.** Ta också bort dem från eventuella dashboards.
+- **Borttagna oanvända konstruktorparametrar**:
+  - i `EnergyPlanner`: `export_sell_percentile`, `export_min_sell_price_sek_kwh`, `export_min_solar_tomorrow_kwh`, `sell_solar_min_price`, `cheap_charge_buy_percentile`
+  - i `EnergyController`: `auto_discharge_threshold_sek`
+  - `EnergyController.sell_solar_min_price` används fortfarande av exekutorn och är oförändrad.
+- **Redan sparade värden** för de tre nycklarna ligger kvar i konfigurationen utan effekt och försvinner nästa gång alternativen sparas.
+- `testdata/backtest.py`: flaggan `--percentile` och de tre `SETTINGS`-nycklarna är borta.
+- **Rättat: CI-testjobbet föll** (det infördes i 0.9.60).
+  - **Besparingssensorn**: den valde dygn i värdens tidszon i stället för i tidsstämpelns (HA:s) egen zon, så på UTC bytte dygnet två timmar för sent. Den använder nu tidsstämpelns zon, och det gör även Solcast-arkivets uppdelning 06/13.
+  - **Sommarbacktesten**: planeraren slår upp lastprofilens timme i värdens lokala zon (`dt.astimezone().hour`), och backtestdatan har UTC-stämplar. CI (UTC) fick därför 160,60 i stället för 157,18 kr. Testerna och CI-jobbet körs nu i `Europe/Stockholm`, återskapat lokalt med `TZ=UTC0`.
+  - **Inte rättat**: planeraren själv är fortfarande beroende av värdens tidszon, vilket är rätt i HA så länge containerns zon stämmer med HA:s. Noterat till fas B.
+- **Verifierat**:
+  - `pytest`: 14 godkända, 3 förväntade fel
+  - backtesterna oförändrade på öret: sommar 157,18 kr, vinter 914,27 kr (med datumfilter)
+  - båda tidslinje-CSV:erna byte-identiska med körningen före ändringen, vilket bevisar att den borttagna koden var död
+  - inte verifierat skarpt
+
 ## Nyheter i 0.9.61
 
 Fas A steg 2b (HANDOFF.md): två sorters data som går förlorade för varje dag de inte samlas in.

@@ -192,29 +192,12 @@ class EnergyPlanner:
         self,
         battery_min_soc: float = 10.0,
         battery_max_soc: float = 95.0,
-        export_sell_percentile: float = 0.80,
-        export_min_sell_price_sek_kwh: float = 0.0,
-        export_min_solar_tomorrow_kwh: float = 20.0,
-        sell_solar_min_price: float = 0.80,
-        cheap_charge_buy_percentile: float = 0.25,
         eta_roundtrip: float = 0.87,
         cycle_cost_sek_kwh: float = 0.05,
     ):
         self.battery_min_soc               = battery_min_soc
         self.battery_max_soc               = battery_max_soc
-        # v1.0 steg 3: export_sell_percentile, export_min_sell_price,
-        # export_min_solar_tomorrow_kwh, sell_solar_min_price och
-        # cheap_charge_buy_percentile används inte längre av build_plan() –
-        # de nio konkurrerande trösklarna är ersatta av V och de fyra
-        # beslutsreglerna (_decide_slot). Kvar i konstruktorn bara för att
-        # coordinator.py fortfarande skickar in dem – tas bort i steg 4
-        # tillsammans med motsvarande CONF_*-nycklar (docs/v1_implementation_plan.md).
-        self.export_sell_percentile        = export_sell_percentile
-        self.export_min_sell_price         = export_min_sell_price_sek_kwh
-        self.export_min_solar_tomorrow_kwh = export_min_solar_tomorrow_kwh
-        self.sell_solar_min_price          = sell_solar_min_price
-        self.cheap_charge_buy_percentile   = cheap_charge_buy_percentile
-        self.eta_roundtrip                 = eta_roundtrip
+        self.eta_roundtrip                = eta_roundtrip
         self.cycle_cost_sek_kwh            = cycle_cost_sek_kwh
 
     def build_plan(

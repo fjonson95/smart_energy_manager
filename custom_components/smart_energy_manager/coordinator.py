@@ -56,9 +56,7 @@ from .const import (
     DEFAULT_HEAT_BALANCE_TEMP, DEFAULT_HEAT_FACTOR_KWH_DD, DEFAULT_BASE_DHW_KWH,
     DEFAULT_DISINFECTING_EXTRA_KWH,
     CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH,
-    CONF_EXPORT_SELL_PERCENTILE, CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, CONF_BATTERY_POWER_INVERTED,
-    CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH,
-    DEFAULT_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH,
+    CONF_BATTERY_POWER_INVERTED,
     CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
     MODE_AUTO, MODE_MANUAL,
     DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH,
@@ -147,9 +145,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._energy_planner = EnergyPlanner(
             battery_min_soc=float(self._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
             battery_max_soc=float(self._config.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)),
-            export_sell_percentile=float(self._config.get(CONF_EXPORT_SELL_PERCENTILE, DEFAULT_EXPORT_SELL_PERCENTILE)),
-            export_min_sell_price_sek_kwh=float(self._config.get(CONF_EXPORT_MIN_SELL_PRICE_SEK_KWH, DEFAULT_EXPORT_MIN_SELL_PRICE_SEK_KWH)),
-            export_min_solar_tomorrow_kwh=float(self._config.get(CONF_EXPORT_MIN_SOLAR_TOMORROW_KWH, DEFAULT_EXPORT_MIN_SOLAR_TOMORROW_KWH)),
             eta_roundtrip=float(self._config.get(CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP)),
             cycle_cost_sek_kwh=float(self._config.get(CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)),
         )
@@ -563,7 +558,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     def _maybe_archive_solcast(self, now: datetime, today_attrs: Optional[dict], tomorrow_attrs: Optional[dict]) -> None:
         """Max 120 bilder (60 dygn) × 96 slots ≈ 400 kB."""
         try:
-            local = now.astimezone()
+            local = now if now.tzinfo else now.astimezone()
             if local.hour < 6:
                 return
             key = f"{local:%Y-%m-%d}-{1 if local.hour >= 13 else 0}"

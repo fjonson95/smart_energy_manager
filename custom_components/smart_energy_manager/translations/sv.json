@@ -60,9 +60,6 @@
           "battery_max_power_kw": "Max effekt (kW)",
           "battery_min_soc": "Min SOC (%)",
           "battery_max_soc": "Max SOC (%)",
-          "export_sell_percentile": "Proaktiv export: prispercentil (0.75 = topp 25%)",
-          "export_min_solar_tomorrow_kwh": "Proaktiv export: min Solcast imorgon (kWh)",
-          "export_min_sell_price_sek_kwh": "Proaktiv export: absolut minimipris (kr/kWh, 0 = inaktivt)",
           "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
           "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
           "ev_reserve_margin_kwh": "EV-marginal i exportgolvet vid låg sol (kWh, standard 2.5)",
@@ -209,9 +206,6 @@
           "battery_max_power_kw": "Max effekt (kW)",
           "battery_min_soc": "Min SOC (%)",
           "battery_max_soc": "Max SOC (%)",
-          "export_sell_percentile": "Proaktiv export: prispercentil (0.75 = topp 25%)",
-          "export_min_solar_tomorrow_kwh": "Proaktiv export: min Solcast imorgon (kWh)",
-          "export_min_sell_price_sek_kwh": "Proaktiv export: absolut minimipris (kr/kWh, 0 = inaktivt)",
           "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
           "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
           "ev_reserve_margin_kwh": "EV-marginal i exportgolvet vid låg sol (kWh, standard 2.5)",
@@ -445,14 +439,6 @@
       "battery_max_soc": {
         "name": "Batteri max SOC",
         "description": "Högsta tillåtna SOC för batteriet. Reduceras automatiskt inför kommande negativpristimmar för att ha rum att absorbera."
-      },
-      "export_sell_percentile": {
-        "name": "Proaktiv export prispercentil",
-        "description": "Export triggas när säljpriset är ≥ denna percentil av dagens alla priser. 75 = topp 25 % dyraste timmarna."
-      },
-      "export_min_sell_price": {
-        "name": "Proaktiv export absolut minpris",
-        "description": "Export triggas även på enstaka slots under percentiltröskeln om priset är ≥ detta värde (SEK/kWh). Satt till 0 för att inaktivera."
       }
     },
     "select": {

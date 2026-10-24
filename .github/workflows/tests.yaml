@@ -11,6 +11,9 @@ permissions:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    env:
+      # Backtestens resultat beror på värdens lokala tidszon (lastprofilens timme).
+      TZ: Europe/Stockholm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

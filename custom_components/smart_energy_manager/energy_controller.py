@@ -351,7 +351,6 @@ class EnergyController:
         max_export_w: float = DEFAULT_MAX_EXPORT_W,
         battery_min_soc: float = 10.0,
         battery_max_soc: float = 95.0,
-        auto_discharge_threshold_sek: float = 0.20,
         sell_solar_min_price_sek: float = 0.80,
         evening_min_soc: float = 90.0,
         extra_hot_water_min_surplus_ratio: float = 0.70,
@@ -363,7 +362,6 @@ class EnergyController:
         self.max_export_w = max_export_w
         self.battery_min_soc = battery_min_soc
         self.battery_max_soc = battery_max_soc
-        self.auto_discharge_threshold = auto_discharge_threshold_sek
         self.sell_solar_min_price = sell_solar_min_price_sek
         self.evening_min_soc = evening_min_soc
         self.extra_hot_water_min_surplus_ratio = extra_hot_water_min_surplus_ratio

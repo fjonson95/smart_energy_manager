@@ -8,12 +8,21 @@ import importlib.abc
 import importlib.machinery
 import os
 import sys
+import time
 import types
 from unittest.mock import MagicMock
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+# Planeraren slår upp lastprofilens timme i värdens lokala zon
+# (dt.astimezone()), och backtestdatan har UTC-stämplar. I HA är processens
+# zon husets; CI kör UTC och fick därför ett 2 h förskjutet resultat.
+# Windows saknar tzset men kör redan i husets zon lokalt.
+if hasattr(time, "tzset"):
+    os.environ["TZ"] = "Europe/Stockholm"
+    time.tzset()
 
 
 class _HAStubFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
