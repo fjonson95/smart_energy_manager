@@ -97,6 +97,9 @@ Regel 3 räknar nätladdningsbehov = utrymme till max − väntad gratis solpåf
 ### Daglig besparing och Solcast-arkiv
 `savings_tracker.DailySavingsTracker` integrerar varje cykel nät- och batterieffekt till köp-/säljpris mot en referens utan batteri (`ref_nät = nät − batterieffekt`) → sensorn "Besparing idag" (`sem_daily_savings`), 30 dygn i `.storage/smart_energy_manager_daily_savings`. `coordinator._maybe_archive_solcast()` sparar Solcast p50/p10/p90 per slot efter 06 och 13 (60 dygn) i `.storage/smart_energy_manager_solcast_archive` – använd det, inte backtestens syntetiska p10, för att utvärdera prognosberoende beslut.
 
+### Extra VV – kompressor eller patron
+`switch.thermostat_dhw_charge…` (Extra VV) startar pannans egen varmvattenladdning; pannan väljer kompressorn (~3,5 kW, `heat_pump_phase`) när tanken är under `DHW_COMPRESSOR_MAX_TANK_TEMP_C` (47 °C) och annars patronen (~5,8 kW mellan `heat_pump_patron_phases`). `EnergyController._hot_water_expected_load()` modellerar det; fasskyddet lägger till förväntad last vid start och drar bara bort uppmätt drag (`heat_pump_phase_current_a`) vid stopp. Dumpen kräver full täckning, lönsamhet mot säljpris (patron: snittköp/3,5) och räknar tillbaka sin egen last; `extra_hot_water_hard_stop` går förbi coordinatorns minimitid. Se `docs/decisions.md` 2026-10-24.
+
 ### EV-vakthund
 Om bil är vald, laddning är beordrad men `charger_power < 50 W` i >5 minuter → `_active_cars[charger_name]` återställs till `NO_CAR_SELECTED`. Hanteras i `coordinator._build_charger_states()` via `_charge_command_times`.
 

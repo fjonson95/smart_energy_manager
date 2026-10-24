@@ -2,6 +2,36 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.64
+
+Extra hot water (Extra VV) now knows how the boiler actually heats, and the solar-surplus dump follows stricter rules. Background and measurements: `docs/decisions.md` (2026-10-24).
+
+- **The boiler picks compressor or heating element itself.** Measured over 21 Extra VV starts:
+  - With the tank below ~47 °C it heats with the compressor (~3.5 kW, one phase).
+  - Above that it goes straight to the heating element (~5.8 kW, between the two other phases).
+  - SEM used to assume the element every time.
+- **Fixed: false phase-limit export and throttled battery discharge.**
+  - When the compressor ran Extra VV on L2 and the minimum runtime held it on, the phase limit subtracted the element (3 kW) from L1 and L3. That predicted 20 A export and cut battery discharge to 39–600 W for ~10 minutes while the house bought 3.9 kW from the grid (2026-10-24 14:24–14:34).
+  - The phase limit now adds the expected load when Extra VV starts and subtracts only what is actually running when it stops. It uses the heat pump's per-phase currents when configured.
+  - Turning Extra VV off for a phase limit is now a hard stop that the minimum runtime cannot override.
+- **New dump rules (only when the solar surplus would otherwise be sold):**
+  - The surplus must cover the whole expected load, not 70 % of the element as before.
+  - The heat must be worth more than the sell price: mean buy price over the next 24 h divided by 3.5 for the element, the full mean buy price for the compressor.
+  - A running dump's own load counts back into the surplus. This stops the 11-minute on/off cycling: 13 starts in 3 hours on 2026-10-14.
+  - If the surplus covers less than half the load, the dump stops at once, even within the minimum runtime.
+  - The minimum-runtime lock is now known to the controller and the phase limit (`extra_hot_water_locked_on`), not just applied afterwards.
+  - The decision text says whether the compressor or the element is expected, and the heat value versus the sell price.
+- **New optional options** under Heat pump: "Heat pump phase current L1/L2/L3 (A)".
+  - In this installation: L1 = `sensor.ivt_phase_b_current`, L2 = `sensor.ivt_phase_a_current`, L3 = `sensor.ivt_phase_c_current`. B and C can be swapped: the element always loads both equally.
+  - Without these sensors SEM uses the expected load.
+- `EnergyController`: the `extra_hot_water_min_surplus_ratio` parameter is removed (replaced by full coverage).
+- **Verified**:
+  - `pytest`: 21 passed, 3 expected failures. The new dump and phase-limit tests (7) fail on the old code.
+  - Backtests: summer 157.18 SEK, unchanged; Extra VV quarter-hours 16 → 4.
+  - Winter 914.27 → 914.83 SEK, 24.17 → 24.12 cycles; Extra VV quarter-hours 328 → 64; battery discharge differs in 45 quarter-hours because the false phase limit is gone.
+  - The backtest does not cost hot water, so only the battery effect shows.
+  - Not verified live.
+
 ## What's New in 0.9.63
 
 Phase A steps 5 and 6 (HANDOFF.md). Documentation only: the code's behaviour is unchanged.

@@ -418,7 +418,7 @@ natt-/morgontimmar, tills v0.9.37s fortlöpande sparning
 hunnit bygga upp riktig historik för dem).
 ```
 
-#### C04 – Varmvattendumpens överskottskrav
+#### C04 – Varmvattendumpens överskottskrav (ersatt 2026-10-24, se posten om Extra VV)
 
 ```text
 v1.0 steg 7 punkt 6 (första halvan): dumpa till varmvatten istället
@@ -530,3 +530,26 @@ anropet hinner läsa föregående cykels VERKLIGA värde (upptäckt
 2026-09-14: gav samma 8000W↔klämt-pendling som v0.9.34 skulle löst,
 fast nu orsakad av anropsordningen istället för Sonnen-sensorlagg).
 ```
+
+---
+
+## 2026-10-24 – Extra VV: kompressor eller patron, och dumpens regler (v0.9.64)
+
+**Mätt (IVT AirModule 9 kW, 21 Extra VV-starter 14–24 okt, ute ~2–15 °C):**
+
+| Tank vid start | Pannan |
+|---|---|
+| 45,0–45,3 °C | bara kompressorn (`hpactivity` = hot water), ~3,5 kW / ~15 A på L2 |
+| 48,0–48,1 °C | kompressorn först, patronen när kompressorn slutat |
+| 48,9–56,5 °C | patronen direkt (~20 s), steg 1+2 = 66 % ≈ 5,8 kW, kopplad mellan L1 och L3 (13,4 A på båda) |
+
+Värmepumpens fasströmsensorer: `sensor.ivt_phase_a_current` = L2 (kompressorn), `_b`/`_c` = L1/L3 (patronen ligger mellan dem, så ordningen spelar ingen roll). Strömmarna kommer ~7 s före EMS-ESP:s stegstatus.
+
+**Fel som rättades:**
+- Fasskyddet räknade alltid Extra VV som patron på L1/L3. När kompressorn gick på L2 och kontrollern ville stänga av (minimitiden höll den på) drogs 3 kW bort från L1 och L3 → falsk "export 20 A" → batteriets urladdning ströps till 39–600 W i ~10 min medan huset köpte 3,9 kW (24 okt 14:24–14:34). Den verkliga överlasten på L2 (18,5 A) syntes inte.
+- Dumpens egen last låg i huslasten, så nästa cykel såg "inget överskott": av/på med minimitiden som takt (14 okt: 13 starter på 3 h).
+- Minimitiden lades på efter fasskyddet.
+
+**Beslut (alternativ 1):** dumpen startar bara om överskottet täcker HELA den last pannan väntas välja (kompressor under 47 °C, annars patron) och värmen är värd mer än säljpriset (patron: snittköp 24 h / 3,5; kompressor: snittköp). Pågående dumps last räknas tillbaka. Täcker överskottet under 50 % av lasten avbryts dumpen förbi minimitiden; fasskyddet stänger av den på samma sätt. Fasskyddet räknar med uppmätt ström när sensorerna finns.
+
+**Kvar:** gränsen 47 °C och COP 3,5 är mätta i milt väder; kontrollera vid kyla. Kompressorn ensam (~15 A) ligger nära fasmarginalen på L2 (17 A − 2 A) när ingen sol går att räkna av.

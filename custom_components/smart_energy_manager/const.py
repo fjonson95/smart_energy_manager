@@ -134,6 +134,24 @@ DEFAULT_HEAT_PUMP_PHASE = "L3"
 DEFAULT_HEAT_PUMP_PATRON_PHASES = ["L1", "L2"]
 DEFAULT_HEAT_PUMP_PATRON_POWER_KW = 6.0
 
+# Värmepumpens uppmätta fasström (A) per elnätsfas – valfritt. Visar vad som
+# faktiskt körs (kompressor på en fas, elpatron mellan två) när Extra VV är på.
+CONF_HEAT_PUMP_CURRENT_L1 = "heat_pump_current_l1_entity"
+CONF_HEAT_PUMP_CURRENT_L2 = "heat_pump_current_l2_entity"
+CONF_HEAT_PUMP_CURRENT_L3 = "heat_pump_current_l3_entity"
+
+# Extra VV: pannan värmer med kompressorn när tanken är svalare än detta och
+# kopplar annars direkt in elpatronen (uppmätt 14–24 okt 2026: ≤45 °C bara
+# kompressor, ≥48,9 °C patron inom ~20 s). Se docs/decisions.md 2026-10-24.
+DHW_COMPRESSOR_MAX_TANK_TEMP_C = 47.0
+DHW_COMPRESSOR_POWER_KW = 3.5
+# Värmen en dump lagrar hade annars gjorts senare av kompressorn med ungefär
+# denna COP; patronens kWh är därför bara värd köppris / COP.
+HEAT_PUMP_DHW_COP = 3.5
+# Pågående dump avbryts förbi minimitiden när mindre än denna andel av lasten
+# täcks av överskottet (resten köps från nätet).
+DUMP_HARD_STOP_SURPLUS_RATIO = 0.5
+
 DEFAULT_LEGIONELLA_ENABLED = True
 DEFAULT_LEGIONELLA_MIN_INTERVAL_DAYS = 5
 DEFAULT_LEGIONELLA_MAX_INTERVAL_DAYS = 9

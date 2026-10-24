@@ -32,6 +32,7 @@ from .const import (
     CONF_EV_CHARGERS, CONF_EV_CARS,
     CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
     CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
+    CONF_HEAT_PUMP_CURRENT_L1, CONF_HEAT_PUMP_CURRENT_L2, CONF_HEAT_PUMP_CURRENT_L3,
     CONF_BOILER_PVMAXCOMP_ENTITY, CONF_BOILER_PVMAXCOMP_MAX_KW, DEFAULT_BOILER_PVMAXCOMP_MAX_KW,
     CONF_GRID_POWER_L1, CONF_GRID_POWER_L2, CONF_GRID_POWER_L3,
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
@@ -1612,6 +1613,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 heat_pump_power_w=self._get_state_float(c.get(CONF_HEAT_PUMP_POWER)),
                 heat_pump_phase=c.get(CONF_HEAT_PUMP_PHASE, DEFAULT_HEAT_PUMP_PHASE),
                 extra_hot_water_on=self._get_state_bool(c.get(CONF_HEAT_PUMP_EXTRA_HOT_WATER)),
+                extra_hot_water_locked_on=self._extra_hot_water_locked(now),
+                heat_pump_phase_current_a=self._get_heat_pump_phase_currents(),
                 heat_pump_patron_phases=c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES),
                 heat_pump_patron_power_kw=float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
                 boiler_pvmaxcomp_max_kw=float(c.get(CONF_BOILER_PVMAXCOMP_MAX_KW, DEFAULT_BOILER_PVMAXCOMP_MAX_KW)),
@@ -2079,6 +2082,28 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             )
             self._last_write_times[pvmaxcomp_entity] = now
 
+    def _extra_hot_water_locked(self, now: datetime) -> bool:
+        """Minimitiden för en pågående Extra VV-körning har inte gått ut."""
+        if not self._extra_hot_water_actual_state or self._extra_hot_water_started_at is None:
+            return False
+        min_runtime_min = float(self._config.get(
+            CONF_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
+            DEFAULT_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES,
+        ))
+        return (now - self._extra_hot_water_started_at).total_seconds() / 60 < min_runtime_min
+
+    def _get_heat_pump_phase_currents(self) -> Optional[dict]:
+        """Värmepumpens uppmätta ström per elnätsfas, eller None om ingen
+        fasströmsensor är konfigurerad och tillgänglig."""
+        c = self._config
+        currents: dict[str, float] = {}
+        for ph, key in (("L1", CONF_HEAT_PUMP_CURRENT_L1), ("L2", CONF_HEAT_PUMP_CURRENT_L2),
+                        ("L3", CONF_HEAT_PUMP_CURRENT_L3)):
+            value = self._get_state_float(c.get(key), default=None)
+            if value is not None:
+                currents[ph] = value
+        return currents or None
+
     def _apply_extra_hot_water_min_runtime(self, decision, now: datetime) -> None:
         """
         Förhindra att extra varmvatten flimrar på/av.
@@ -2094,6 +2119,13 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         ))
 
         wants_on = decision.extra_hot_water
+
+        if decision.extra_hot_water_hard_stop:
+            # Kontrollern eller fasskyddet kräver stopp nu (överskottet borta,
+            # fasgräns) – minimitiden får inte hålla kvar patronen på nätel.
+            self._extra_hot_water_actual_state = False
+            self._extra_hot_water_started_at = None
+            return
 
         if wants_on and not self._extra_hot_water_actual_state:
             # Övergång AV → PÅ: starta timern

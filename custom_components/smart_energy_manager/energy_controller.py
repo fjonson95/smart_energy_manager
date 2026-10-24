@@ -24,6 +24,8 @@ from .const import (
     DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH, DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE,
     DEFAULT_MAX_EXPORT_W, DEFAULT_PHASE_CURRENT_MARGIN,
     DEFAULT_BOILER_PVMAXCOMP_MAX_KW,
+    DHW_COMPRESSOR_MAX_TANK_TEMP_C, DHW_COMPRESSOR_POWER_KW,
+    HEAT_PUMP_DHW_COP, DUMP_HARD_STOP_SURPLUS_RATIO,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -179,6 +181,13 @@ class EnergyState:
     heat_pump_power_w: float = 0.0
     heat_pump_phase: str = DEFAULT_HEAT_PUMP_PHASE
     extra_hot_water_on: bool = False
+    # Coordinatorns minimitid för Extra VV pågår – kontrollern och fasskyddet
+    # ska räkna med att den är på, annars förutsäger fasskyddet en avstängning
+    # som aldrig sker.
+    extra_hot_water_locked_on: bool = False
+    # Uppmätt värmepumpsström (A) per elnätsfas, t.ex. {"L1": 13.4, "L2": 0.2,
+    # "L3": 13.4}. None = inga fasströmsensorer konfigurerade.
+    heat_pump_phase_current_a: Optional[dict] = None
     heat_pump_patron_phases: list[str] = field(default_factory=lambda: list(DEFAULT_HEAT_PUMP_PATRON_PHASES))
     heat_pump_patron_power_kw: float = DEFAULT_HEAT_PUMP_PATRON_POWER_KW
     # v1.0 steg 7 punkt 5: pannans egna soldriftläges maxeffekt (number.boiler_pvmaxcomp-spannet).
@@ -297,6 +306,8 @@ class ControlDecision:
     battery_discharge_power_w: float = 0.0
     charger_decisions: list[ChargerDecision] = field(default_factory=list)
     extra_hot_water: bool = False
+    # Stäng av Extra VV nu, även inom minimitiden (överskottet borta eller fasgräns).
+    extra_hot_water_hard_stop: bool = False
     # Växelriktarens effektbegränsning i % av märkeffekt (P4-2 steg 5).
     # 100 = ostrypt/normal drift. Skrivs bara om en strypningsentitet är
     # konfigurerad (se coordinator._execute_decision).
@@ -353,7 +364,6 @@ class EnergyController:
         battery_max_soc: float = 95.0,
         sell_solar_min_price_sek: float = 0.80,
         evening_min_soc: float = 90.0,
-        extra_hot_water_min_surplus_ratio: float = 0.70,
     ):
         self.max_current = max_current_per_phase
         self.max_current_effective = max(0.0, max_current_per_phase - DEFAULT_PHASE_CURRENT_MARGIN)
@@ -364,7 +374,6 @@ class EnergyController:
         self.battery_max_soc = battery_max_soc
         self.sell_solar_min_price = sell_solar_min_price_sek
         self.evening_min_soc = evening_min_soc
-        self.extra_hot_water_min_surplus_ratio = extra_hot_water_min_surplus_ratio
         # v1.0: SEM:s eget senast skickade batterikommando (laddning-urladdning,
         # W). Används i _apply_phase_limits() istället för Sonnen-batteriets
         # egen statusåterläsning (state.battery_power_w), som uppdaterar
@@ -478,7 +487,7 @@ class EnergyController:
 
             if remaining_w > 100 and self._can_start_extra_hot_water(state):
                 decision.extra_hot_water = True
-                remaining_w = max(0.0, remaining_w - state.heat_pump_patron_power_kw * 1000)
+                remaining_w = max(0.0, remaining_w - self._hot_water_expected_load(state)[0])
                 steps.append("steg 2 varmvatten")
 
             if remaining_w > 100:
@@ -780,40 +789,71 @@ class EnergyController:
             remaining_surplus, max_comp_power_kw=state.boiler_pvmaxcomp_max_kw
         )
 
-        # Dumpen kräver att överskottet täcker större delen av patronens effekt (6 kW-brytare, 2026-09-14). Se docs/decisions.md C04.
+        # Extra VV är en PÅ/AV-brytare och pannan väljer själv kompressor eller
+        # patron (se _hot_water_expected_load). Överskottet måste täcka HELA
+        # den lasten, och värmen måste vara värd mer än säljpriset. Pågående
+        # dumps egen last finns redan i huslasten och räknas tillbaka – annars
+        # ser varje cykel "inget överskott" och dumpen växlar av/på med
+        # minimitiden som takt (14 okt 2026: 13 starter på 3 h). Se docs/decisions.md C04.
+        hw_draw = self._hot_water_draw_w(state) if state.extra_hot_water_on else {}
+        hw_own_w = sum(hw_draw.values())
+        if state.extra_hot_water_on and hw_own_w > 100:
+            hw_required_w = hw_own_w
+            patron_phases = state.heat_pump_patron_phases or DEFAULT_HEAT_PUMP_PATRON_PHASES
+            hw_is_patron = sum(hw_draw.get(p, 0.0) for p in patron_phases) > hw_draw.get(state.heat_pump_phase, 0.0)
+        else:
+            hw_required_w, _, hw_is_patron = self._hot_water_expected_load(state)
+        # Ett underskott får inte klämmas till 0 här – då ser en dump på nätel
+        # ut att täckas av sin egen återlagda last.
+        base_surplus_w = solar_surplus_w if solar_w > house_load_w else solar_w - house_load_w
+        consumed_by_ev_and_battery_w = max(0.0, solar_surplus_w - remaining_surplus)
+        surplus_for_dump_w = base_surplus_w - consumed_by_ev_and_battery_w + hw_own_w
+        surplus_covers_dump = surplus_for_dump_w >= hw_required_w
+        heat_value = self._dump_heat_value_sek_kwh(state, hw_is_patron)
+        dump_profitable = sell_price < 0 or (heat_value is not None and sell_price < heat_value)
+
         dump_to_hot_water = (
-            remaining_surplus >= state.heat_pump_patron_power_kw * 1000 * self.extra_hot_water_min_surplus_ratio
+            surplus_covers_dump
+            and dump_profitable
             and state.plan_marginal_value_charge_sek_kwh is not None
             and should_dump_to_hot_water(
                 state.plan_marginal_value_charge_sek_kwh, sell_price,
                 state.hot_water_temp_c, state.extra_hot_water_min_temp,
             )
         )
-
-        # Extra varmvatten – batteri fullt och solöverskott, vi har passerat
-        # negativt pris idag, eller (punkt 6) överskottet är mer värt att
-        # självkonsumera än att sälja. Samma 6kW-brytarproblem som
-        # dump_to_hot_water ovan (se dess kommentar) gäller även här – ett
-        # löst 500W-golv kunde slå på hela patroneffekten på en bråkdel av
-        # vad den faktiskt drar, med resten importerad från nätet.
-        surplus_covers_patron = (
-            remaining_surplus >= state.heat_pump_patron_power_kw * 1000 * self.extra_hot_water_min_surplus_ratio
-        )
-        battery_full_dump = surplus_covers_patron and battery_soc >= self.battery_max_soc
+        battery_full_dump = surplus_covers_dump and dump_profitable and battery_soc >= self.battery_max_soc
         # negative_slots_passed_today är sann resten av dygnet efter en negativ
         # kvart; utan överskottskravet startar patronen på nätel i kvällstoppen.
-        after_negative_dump = had_negative_today and surplus_covers_patron
+        after_negative_dump = had_negative_today and surplus_covers_dump and dump_profitable
         varmvatten_ok = battery_full_dump or after_negative_dump or dump_to_hot_water
-        if varmvatten_ok and self._can_start_extra_hot_water(state):
+        if (
+            state.extra_hot_water_on and not varmvatten_ok
+            and surplus_for_dump_w < DUMP_HARD_STOP_SURPLUS_RATIO * hw_required_w
+        ):
+            decision.extra_hot_water_hard_stop = True
+            decision.reason += (
+                f" | Extra varmvatten avbryts (överskott {surplus_for_dump_w:.0f}W "
+                f"< {DUMP_HARD_STOP_SURPLUS_RATIO:.0%} av {hw_required_w:.0f}W)"
+            )
+        elif state.extra_hot_water_locked_on and not varmvatten_ok and self._can_start_extra_hot_water(state):
             decision.extra_hot_water = True
-            temp_str = f" (tank {state.hot_water_temp_c:.0f}°C)" if state.hot_water_temp_c is not None else ""
+            decision.reason += " | Extra varmvatten låst PÅ (minimitid)"
+        elif varmvatten_ok and self._can_start_extra_hot_water(state):
+            decision.extra_hot_water = True
+            temp_str = f", tank {state.hot_water_temp_c:.0f}°C" if state.hot_water_temp_c is not None else ""
             if after_negative_dump and not battery_full_dump:
                 trigger = "passerat neg pris"
             elif not battery_full_dump:
                 trigger = "V_charge<sälj, dumpar överskott"
             else:
                 trigger = "batteri fullt"
-            decision.reason += f" | Extra varmvatten ({trigger}{temp_str})"
+            source = "patron" if hw_is_patron else "kompressor"
+            decision.reason += (
+                f" | Extra varmvatten ({trigger}, {source} {hw_required_w:.0f}W"
+                f", värme {heat_value:.2f} > sälj {sell_price:.2f} kr{temp_str})"
+                if heat_value is not None else
+                f" | Extra varmvatten ({trigger}, {source} {hw_required_w:.0f}W{temp_str})"
+            )
 
         # Export styrs av EnergyPlanner via coordinator – plan_action sätts i EnergyState
         # precis innan compute() anropas. Kontrollern respekterar beslutet som guard-flagga
@@ -1222,17 +1262,22 @@ class EnergyController:
 
             ev_phase_loads.append(ph_load_new)
 
-        # Elpatron: applicera delta om beslutet ändrar tillståndet.
-        # Värmepumps-kompressorn ingår redan i elmätarvärdet och styrs inte av SEM.
-        patron_phases = state.heat_pump_patron_phases or DEFAULT_HEAT_PUMP_PATRON_PHASES
-        patron_total_w = state.heat_pump_patron_power_kw * 1000
-        patron_per_phase_w = patron_total_w / len(patron_phases)
+        # Extra VV: bara ändringen räknas. Vid start den last pannan väntas välja
+        # (kompressor eller patron), vid stopp bara det som faktiskt körs – att
+        # dra bort patronen från L1/L3 när kompressorn går på L2 gav falsk
+        # "export" och strypt urladdning (24 okt 2026). hw_contrib = det som
+        # försvinner om Extra VV stängs av nu.
+        hw_contrib: dict[str, float] = {p: 0.0 for p in PHASES}
         if decision.extra_hot_water and not state.extra_hot_water_on:
-            for ph in patron_phases:
-                loads[ph] += patron_per_phase_w
+            hw_load_w, hw_phases, _ = self._hot_water_expected_load(state)
+            for ph in hw_phases:
+                hw_contrib[ph] = hw_load_w / len(hw_phases)
+                loads[ph] += hw_contrib[ph]
+        elif decision.extra_hot_water and state.extra_hot_water_on:
+            hw_contrib.update(self._hot_water_draw_w(state))
         elif not decision.extra_hot_water and state.extra_hot_water_on:
-            for ph in patron_phases:
-                loads[ph] -= patron_per_phase_w
+            for ph, w in self._hot_water_draw_w(state).items():
+                loads[ph] -= w
 
         # Reduktionspass (max 4) – båda riktningar. Marginal mot den konfigurerade
         # fasgränsen eftersom regleringen är trög (30s cykel + Sonnens egen fördröjning).
@@ -1307,13 +1352,14 @@ class EnergyController:
                         loads[p] -= reduce_w_total / 3.0
                     over_w = max(0, (loads[ph] / self.voltage - self.max_current_effective) * self.voltage)
 
-                # Prio 3: elpatron (om den är på – oavsett om den slogs på nu eller var på redan)
-                if over_w > 0 and decision.extra_hot_water:
-                    if ph in patron_phases:
-                        for pp in patron_phases:
-                            loads[pp] -= patron_per_phase_w
-                        decision.extra_hot_water = False
-                        _LOGGER.warning("Stänger av elpatron pga fasgräns på %s", ph)
+                # Prio 3: Extra VV, om den belastar den överbelastade fasen
+                if over_w > 0 and decision.extra_hot_water and hw_contrib.get(ph, 0.0) > 0.0:
+                    for pp, w in hw_contrib.items():
+                        loads[pp] -= w
+                    hw_contrib = {p: 0.0 for p in PHASES}
+                    decision.extra_hot_water = False
+                    decision.extra_hot_water_hard_stop = True
+                    _LOGGER.warning("Stänger av extra varmvatten pga fasgräns på %s", ph)
 
             if not any_violation:
                 break
@@ -1352,6 +1398,43 @@ class EnergyController:
             - max(0, state.battery_power_w)
         ))
 
+
+    def _hot_water_expected_load(self, state) -> tuple[float, list[str], bool]:
+        """(effekt W, faser, är_patron) för Extra VV om det startas nu.
+
+        Pannan tar kompressorn när tanken är svalare än
+        DHW_COMPRESSOR_MAX_TANK_TEMP_C och annars patronen. Okänd tanktemperatur
+        räknas som patron – den större lasten, säkrare för fasskyddet."""
+        temp = state.hot_water_temp_c
+        if temp is not None and temp < DHW_COMPRESSOR_MAX_TANK_TEMP_C:
+            return DHW_COMPRESSOR_POWER_KW * 1000.0, [state.heat_pump_phase], False
+        phases = list(state.heat_pump_patron_phases or DEFAULT_HEAT_PUMP_PATRON_PHASES)
+        return state.heat_pump_patron_power_kw * 1000.0, phases, True
+
+    def _hot_water_draw_w(self, state) -> dict[str, float]:
+        """Vad värmepumpen drar per fas medan Extra VV är på: uppmätt om
+        fasströmmar finns, annars den förväntade lasten."""
+        if state.heat_pump_phase_current_a:
+            return {
+                ph: max(0.0, a) * self.voltage
+                for ph, a in state.heat_pump_phase_current_a.items() if ph in PHASES
+            }
+        load_w, phases, _ = self._hot_water_expected_load(state)
+        return {ph: load_w / len(phases) for ph in phases}
+
+    def _dump_heat_value_sek_kwh(self, state, is_patron: bool) -> Optional[float]:
+        """Värdet av en kWh el lagrad som varmvatten: värmen hade annars gjorts
+        senare av kompressorn, till snittköppriset de kommande 24 h. Patronen
+        ger 1 kWh värme per kWh el, kompressorn ~HEAT_PUMP_DHW_COP."""
+        ps = state.price_schedule
+        if not ps or not ps.slots:
+            return None
+        now = state.now or datetime.now().astimezone()
+        future = [s.buy_sek for s in ps.slots if s.end > now][:96]
+        if not future:
+            return None
+        mean_buy = sum(future) / len(future)
+        return mean_buy / HEAT_PUMP_DHW_COP if is_patron else mean_buy
 
     def _can_start_extra_hot_water(self, state) -> bool:
         """Returnera True om extra varmvatten är tillåtet baserat på temperatur.

@@ -21,6 +21,7 @@ from .const import (
     CONF_EV_CHARGERS,
     CONF_HEAT_PUMP_POWER, CONF_HEAT_PUMP_EXTRA_HOT_WATER,
     CONF_HEAT_PUMP_PHASE, CONF_HEAT_PUMP_PATRON_PHASES, CONF_HEAT_PUMP_PATRON_POWER_KW,
+    CONF_HEAT_PUMP_CURRENT_L1, CONF_HEAT_PUMP_CURRENT_L2, CONF_HEAT_PUMP_CURRENT_L3,
     CONF_BOILER_PVMAXCOMP_ENTITY, CONF_BOILER_PVMAXCOMP_MAX_KW, DEFAULT_BOILER_PVMAXCOMP_MAX_KW,
     CONF_GRID_POWER_L1, CONF_GRID_POWER_L2, CONF_GRID_POWER_L3,
     CONF_GRID_CURRENT_L1, CONF_GRID_CURRENT_L2, CONF_GRID_CURRENT_L3,
@@ -190,6 +191,9 @@ def _heat_pump_schema(d: dict) -> vol.Schema:
             selector.SelectSelectorConfig(options=EV_PHASES_OPTIONS, mode=selector.SelectSelectorMode.LIST)
         ),
         vol.Optional(CONF_HEAT_PUMP_PATRON_POWER_KW, default=_d(d, CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)): vol.Coerce(float),
+        vol.Optional(CONF_HEAT_PUMP_CURRENT_L1, default=_d(d, CONF_HEAT_PUMP_CURRENT_L1, "")): _opt_entity_selector(),
+        vol.Optional(CONF_HEAT_PUMP_CURRENT_L2, default=_d(d, CONF_HEAT_PUMP_CURRENT_L2, "")): _opt_entity_selector(),
+        vol.Optional(CONF_HEAT_PUMP_CURRENT_L3, default=_d(d, CONF_HEAT_PUMP_CURRENT_L3, "")): _opt_entity_selector(),
         vol.Optional(CONF_HOT_WATER_TEMP_ENTITY, default=_d(d, CONF_HOT_WATER_TEMP_ENTITY, "")): _opt_entity_selector(),
         vol.Optional(CONF_EXTRA_HOT_WATER_MAX_TEMP, default=_d(d, CONF_EXTRA_HOT_WATER_MAX_TEMP, DEFAULT_EXTRA_HOT_WATER_MAX_TEMP)): vol.Coerce(float),
         vol.Optional(CONF_EXTRA_HOT_WATER_MIN_TEMP, default=_d(d, CONF_EXTRA_HOT_WATER_MIN_TEMP, DEFAULT_EXTRA_HOT_WATER_MIN_TEMP)): vol.Coerce(float),

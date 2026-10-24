@@ -2,6 +2,36 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.64
+
+Extra varmvatten (Extra VV) vet nu hur pannan faktiskt värmer, och dumpen av solöverskott följer strängare regler. Bakgrund och mätningar: `docs/decisions.md` (2026-10-24).
+
+- **Pannan väljer själv kompressor eller elpatron.** Uppmätt vid 21 Extra VV-starter:
+  - Med tanken under ~47 °C värmer den med kompressorn (~3,5 kW, en fas).
+  - Över det går den direkt på elpatronen (~5,8 kW, mellan de två andra faserna).
+  - SEM antog tidigare elpatronen varje gång.
+- **Rättat: falsk exportprognos i fasskyddet och strypt batteriurladdning.**
+  - När kompressorn körde Extra VV på L2 och minimitiden höll den på drog fasskyddet bort patronen (3 kW) från L1 och L3. Det gav en prognos på 20 A export och strypte batteriets urladdning till 39–600 W i ~10 minuter medan huset köpte 3,9 kW från nätet (2026-10-24 14:24–14:34).
+  - Fasskyddet lägger nu till den förväntade lasten när Extra VV startar och drar bara bort det som faktiskt körs när den stängs av. Det använder värmepumpens fasströmmar när de är konfigurerade.
+  - Att stänga av Extra VV för fasgräns är nu ett hårt stopp som minimitiden inte kan häva.
+- **Nya regler för dumpen (bara när solöverskottet annars hade sålts):**
+  - Överskottet måste täcka hela den förväntade lasten, inte 70 % av patronen som förut.
+  - Värmen måste vara värd mer än säljpriset: snittköppriset de kommande 24 h delat med 3,5 för patronen, hela snittköppriset för kompressorn.
+  - En pågående dumps egen last räknas tillbaka i överskottet. Det stoppar växlingen av/på var 11:e minut: 13 starter på 3 timmar den 2026-10-14.
+  - Täcker överskottet mindre än halva lasten avbryts dumpen direkt, även inom minimitiden.
+  - Minimitidens spärr är nu känd för kontrollern och fasskyddet (`extra_hot_water_locked_on`) och läggs inte bara på efteråt.
+  - Beslutstexten säger om kompressorn eller patronen väntas, och värmens värde mot säljpriset.
+- **Nya valfria inställningar** under Värmepump: "Värmepumpens fasström L1/L2/L3 (A)".
+  - I den här installationen: L1 = `sensor.ivt_phase_b_current`, L2 = `sensor.ivt_phase_a_current`, L3 = `sensor.ivt_phase_c_current`. B och C kan bytas: patronen belastar alltid båda lika.
+  - Utan sensorerna använder SEM den förväntade lasten.
+- `EnergyController`: parametern `extra_hot_water_min_surplus_ratio` är borttagen (ersatt av krav på full täckning).
+- **Verifierat**:
+  - `pytest`: 21 godkända, 3 förväntade fel. De nya testerna för dumpen och fasskyddet (7) faller på den gamla koden.
+  - Backtester: sommar 157,18 kr, oförändrat; Extra VV-kvartar 16 → 4.
+  - Vinter 914,27 → 914,83 kr, 24,17 → 24,12 cykler; Extra VV-kvartar 328 → 64; batteriets urladdning skiljer sig i 45 kvartar eftersom den falska fasbegränsningen är borta.
+  - Backtesten räknar inte varmvattnets kostnad, så bara effekten på batteriet syns.
+  - Inte verifierat skarpt.
+
 ## Nyheter i 0.9.63
 
 Fas A steg 5 och 6 (HANDOFF.md). Bara dokumentation: kodens beteende är oförändrat.

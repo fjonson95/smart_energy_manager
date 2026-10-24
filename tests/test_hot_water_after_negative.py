@@ -13,7 +13,8 @@ NOW = datetime(2026, 6, 14, 18, 0, tzinfo=TZ)
 
 
 def _state(solar_w: float) -> EnergyState:
-    slot = PriceSlot(start=NOW, end=NOW + timedelta(minutes=15), spot_sek=1.50, buy_sek=3.10, sell_sek=1.57)
+    # Lågt säljpris: patronens värme (köp/COP ≈ 0,89 kr) är då värd mer än att sälja.
+    slot = PriceSlot(start=NOW, end=NOW + timedelta(minutes=15), spot_sek=0.10, buy_sek=3.10, sell_sek=0.17)
     return EnergyState(
         solar_power_w=solar_w,
         house_load_w=1000.0,
@@ -21,10 +22,11 @@ def _state(solar_w: float) -> EnergyState:
         battery_capacity_kwh=30.69,
         battery_max_power_kw=5.0,
         hot_water_temp_c=50.0,
-        spot_price_sek_kwh=1.50,
+        spot_price_sek_kwh=0.10,
         buy_price_sek_kwh=3.10,
-        sell_price_sek_kwh=1.57,
+        sell_price_sek_kwh=0.17,
         price_schedule=PriceSchedule(slots=[slot], negative_slots_passed_today=8),
+        now=NOW,
     )
 
 
