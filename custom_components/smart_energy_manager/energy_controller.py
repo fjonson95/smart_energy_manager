@@ -465,22 +465,7 @@ class EnergyController:
                 _charge_max_soc = effective_max_soc
                 decision.reason += f" | Håller {ps.recommended_headroom*100:.0f}% headroom"
 
-        # ── Negativt säljpris just nu: absorptionstrappan (P4-2) ────────
-        # Steg, KASKADVIS (varje steg äter av det som blir kvar efter
-        # föregående, inte ömsesidigt uteslutande – annars nås steg 2+
-        # aldrig så länge batteriet bara är under 100% SOC, vilket är nästan
-        # alltid, oavsett om batteriets maxeffekt räcker för hela överskottet):
-        # OBS: remaining_w räknas mot vad EV-steget BER om (MAX_EV_CURRENT), inte
-        # vad _apply_phase_limits() i slutändan faktiskt beviljar – i sällsynta fall
-        # med samtidig fasbegränsning kan strypningen därför bli något för snäll
-        # (kvarvarande export missas), men aldrig farlig: fasskyddet klämmer ändå
-        # till den verkliga effekten oavsett vad trappan trodde skulle absorberas.
-        #   1. Batteri – full effekt (nät ELLER sol, oavsett – man får betalt för att äta)
-        #   2. Varmvatten
-        #   3. Värme (etapp 5 – kräver P5-3:s börvärdesförskjutning, ej implementerat än)
-        #   4. Bil
-        #   5. Strypning av växelriktaren (P4-1-kalibrerad: procent räknas mot
-        #      märkeffekt, ~30-50s svarstid)
+        # Negativt pris: kaskad batteri → varmvatten → bil → strypning, varje steg äter av resten. Se docs/decisions.md C01.
         if negative_price:
             remaining_w = max(0.0, solar_surplus_w)
             steps: list[str] = []
@@ -619,15 +604,7 @@ class EnergyController:
         ps = state.price_schedule
         now_aware = state.now or datetime.now().astimezone()
 
-        # Kvällsfylling: Solcast-prognosen för platsen avgör om solen räcker
-        # för att fylla batteriet innan solnedgång.
-        #
-        # Logik: summera förväntad solenergi (kWh) från Solcast-slots fram till
-        # solnedgång. Om den summan understiger vad batteriet behöver för att nå
-        # evening_min_soc → starta kvällsfylling nu, oavsett säljpris.
-        #
-        # Fungerar automatiskt för alla årstider eftersom Solcast känner till
-        # exakt panelvinkel och plats.
+        # Kvällsfylling: Solcasts sol fram till solnedgång mot behovet upp till kvällsmålet. Se docs/decisions.md C02.
         solar_until_sunset_kwh = 0.0
         sun_set: Optional[datetime] = None
         if state.sun_next_setting is not None:
@@ -696,17 +673,7 @@ class EnergyController:
             if solar_covers_at is not None:
                 hours_dark = max(0.0, (solar_covers_at - _dark_start).total_seconds() / 3600)
 
-                # Formad prognos istället för platt snitt: samma _load_kw_at-
-                # mönster som energy_planner.py redan använder för V/V_charge
-                # (load_shape_p75, 21-dygns rullande P75 per timme). Ett platt
-                # hourly_load_kw × hours_dark sprider förbrukningen jämnt över
-                # hela mörkret - missar morgontoppen helt och underskattar
-                # behovet (upptäckt 2026-09-15: evening_target_soc räknades
-                # till 11,5% trots att verklig förbrukning tömde batteriet
-                # till 5%-golvet timmar innan solen tog över). Faller tillbaka
-                # på det platta snittet per timme utan formdata (idag alla
-                # natt-/morgontimmar, tills v0.9.37s fortlöpande sparning
-                # hunnit bygga upp riktig historik för dem).
+                # Formad lastprognos (P75) i stället för platt snitt (missade morgontoppen, 2026-09-15). Se docs/decisions.md C03.
                 def _load_kw_at(dt: datetime) -> float:
                     if state.load_shape_p75 is not None and state.predicted_daily_kwh > 0:
                         h = state.load_shape_p75[dt.astimezone().hour]
@@ -813,17 +780,7 @@ class EnergyController:
             remaining_surplus, max_comp_power_kw=state.boiler_pvmaxcomp_max_kw
         )
 
-        # v1.0 steg 7 punkt 6 (första halvan): dumpa till varmvatten istället
-        # för att sälja, när V_charge < sälj_nu - regel 1:s ELSE-gren (samma
-        # jämförelse som avgör om batteriet laddas, se heat_planner.
-        # should_dump_to_hot_water()s docstring). extra_hot_water är en ren
-        # PÅ/AV-brytare som drar elpatronens FULLA effekt oavsett hur litet
-        # överskottet var vid triggertillfället - ett tidigare 100W-golv
-        # kunde slå på en 6 kW-brytare på ett par hundra watt sol, vilket i
-        # praktiken importerade resten från nät/batteri (upptäckt 2026-09-14,
-        # flimrade på/av i skymningen). Kräv därför att överskottet täcker
-        # en stor andel (self.extra_hot_water_min_surplus_ratio) av elpatronens
-        # verkliga effekt innan dumpen tillåts.
+        # Dumpen kräver att överskottet täcker större delen av patronens effekt (6 kW-brytare, 2026-09-14). Se docs/decisions.md C04.
         dump_to_hot_water = (
             remaining_surplus >= state.heat_pump_patron_power_kw * 1000 * self.extra_hot_water_min_surplus_ratio
             and state.plan_marginal_value_charge_sek_kwh is not None
@@ -933,14 +890,7 @@ class EnergyController:
                                 f" sol {_trigger}"
                             )
 
-        # EV billigast-timmar-laddning: vintern har ofta för lite sol för att
-        # sol-loopen ovan (som bara laddar bilen från solöverskott) någonsin
-        # aktiverar den. Speglar CLAUDE.md:s vinter-mål ("billigast-timmar-
-        # laddning av batteri OCH bil") utan ett separat driftläge – körs
-        # alltid i auto när sol är låg och priset just nu är billigt. Måttlig
-        # ström (inte MAX_EV_CURRENT): batteriet har fortfarande prioritet
-        # (CLAUDE.md prioritet #2), och fasskyddet (_apply_phase_limits)
-        # klämmer till om fas 1 (EV + batteri + elpatron) blir för belastad.
+        # EV billigast-timmar på vintern; måttlig ström så att batteriet behåller prioritet. Se docs/decisions.md C05.
         if not export_active and not _economic_peak and (_low_solar_today or _low_solar_tomorrow) and ps and ps.slots:
             _ev_sorted_prices = sorted(s.buy_sek for s in ps.slots if s.end > now_aware)
             if _ev_sorted_prices:
@@ -1092,18 +1042,7 @@ class EnergyController:
             return decision
 
         if state.sell_price_sek_kwh < NEGATIVE_PRICE_THRESHOLD:
-            # P4-2: negativt-pris-trappan i _auto_mode() har redan satt det
-            # fullständiga beslutet (batteri/varmvatten/bil/strypning i
-            # kaskad). Dagsplanen känner inte till negativa priser alls (den
-            # planerar mot percentiler av dagens EGNA priser) - utan den här
-            # spärren skrev raderna nedan blint över trappans beslut med
-            # planens vanliga cover_load/export-logik varje cykel.
-            # _auto_mode()s eget fasskyddsanrop körde med update_memory=False
-            # (se dess kommentar) eftersom DEN HÄR funktionen äger det
-            # slutgiltiga minnesskrivandet i auto-läge - så det måste göras
-            # här på varje returväg, annars fryser minnet kvar på ett gammalt
-            # värde (eller, värre, på ett värde från en tidigare cykel vars
-            # eget minnesskrivande också hoppades över).
+            # Trappans beslut får inte skrivas över av planen; fasminnet skrivs här på varje returväg. Se docs/decisions.md C06.
             self._last_battery_command_w = decision.battery_charge_power_w - decision.battery_discharge_power_w
             return decision
 
@@ -1145,19 +1084,7 @@ class EnergyController:
         decision.battery_discharge_power_w = 0.0
 
         if now_slot.action == "solar_charge":
-            # Live-incident 2026-09-22: batteriet stod stilla på 16% SOC i
-            # 40+ minuter med 7+ kW solöverskott tillgängligt, trots att
-            # planen sa solar_charge. `prefer_sell` (menat för idle/
-            # cover_load-grenen nedan, där PLANEN inte alls räknat med
-            # överskott just nu) jämförde säljpriset mot ett statiskt,
-            # föråldrat golv (evening_target ~11,5%, bara min-SOC+EV-
-            # marginal) - helt orelaterat till planens FAKTISKA mål för
-            # dagen (t.ex. 99% SOC). Eftersom batteriet redan råkade ligga
-            # över det gamla golvet och säljpriset var över 0,80 kr,
-            # river exekutorn tyst upp planens egen, betydligt bättre
-            # informerade V_charge>sälj-bedömning för just den här sloten.
-            # Planen har redan avgjort att spara är mer värt än sälja här -
-            # exekutorn ska inte lägga ett eget, kruddare veto ovanpå det.
+            # Ingen prefer_sell här – planen har redan valt att spara (2026-09-22). Se docs/decisions.md C07.
             battery_surplus_w = max(0.0, solar_surplus_w - ev_total_w)
             decision.battery_charge_power_w = min(battery_surplus_w, batt_max_w)
             if decision.battery_charge_power_w == 0.0 and house_def_w > 0.0 and self_consume_ok:
@@ -1249,18 +1176,7 @@ class EnergyController:
     def _apply_phase_limits(
         self, state: EnergyState, decision: ControlDecision, update_memory: bool = True,
     ) -> ControlDecision:
-        # Elmätarens avläsningar innehåller redan alla nuvarande laster:
-        # sol, batteri, EV, värmepump, elpatron.
-        # Vi applicerar bara delta för det som beslutet ändrar.
-        #
-        # Baslasten byggs från VERKLIG uppmätt ström (grid_current_lX) när den
-        # finns, inte bara effekt/spänning - en riktig CSV-jämförelse
-        # (2026-09-11) visade att effekt-approximationen missar reaktiv/
-        # tomgångsström (upp till +8,7A avvikelse vid låg effekt, konvergerar
-        # mot korrekt vid hög last). Strömsensorn rapporterar bara magnitud,
-        # så importriktningen (tecken) tas fortfarande från effekten.
-        # current_a <= 0 (ej konfigurerad/inget state) faller tillbaka på
-        # gamla beteendet: effekt rakt av.
+        # Baslast från uppmätt fasström; effekt/spänning missar tomgångsström (2026-09-11). Se docs/decisions.md C08.
         loads: dict[str, float] = {}
         for ph, power_w, current_a in (
             ("L1", state.grid_power_l1, state.grid_current_l1),
@@ -1273,20 +1189,7 @@ class EnergyController:
             else:
                 loads[ph] = power_w
 
-        # Batteri: ta bort nuvarande effekt, lägg till beslutets effekt (per fas).
-        # Baslinjen är SEM:s EGET senast skickade kommando (_last_battery_command_w),
-        # inte Sonnen-batteriets egen statusåterläsning (state.battery_power_w).
-        # Den sensorn uppdaterar oregelbundet (uppmätt 2026-09-14: 422/465
-        # mellanrum = 30s, men 14 st 60s, en 120s) och är inte synkad med
-        # SEM:s egen 30s-cykel eller med elmatare_current_lX (baslasten ovan),
-        # som hinner med snabbare. Diskrepansen gjorde att fasskyddet
-        # systematiskt underskattade batteriets redan pågående bidrag -
-        # loads[ph] fick både den redan-höjda verkliga strömmen OCH nästan
-        # hela det nya 8000W-målet ovanpå, vilket gav falska 20A+-utslag och
-        # en självförstärkande pendling mellan fullt 8000W och hårt klämt
-        # värde var 30:e sekund. SEM:s eget kommando är känt med noll
-        # fördröjning och alltid exakt en cykel gammalt (konsekvent),
-        # istället för en extern sensor vars ålder varierar oförutsägbart.
+        # Baslinje = SEM:s eget senaste kommando, inte Sonnens fördröjda sensor (pendling 2026-09-14). Se docs/decisions.md C09.
         current_batt_per_phase = self._last_battery_command_w / 3.0  # positiv=laddning, negativ=urladdning
         new_batt_per_phase = (
             decision.battery_charge_power_w - decision.battery_discharge_power_w
@@ -1432,14 +1335,7 @@ class EnergyController:
             L2=loads.get("L2", 0.0),
             L3=loads.get("L3", 0.0),
         )
-        # Spara det FAKTISKT klämda kommandot till nästa cykels baslinje
-        # (se kommentaren vid current_batt_per_phase ovan). update_memory=False
-        # för anrop vars beslut kan skrivas över senare SAMMA cykel (_auto_mode()s
-        # egna anrop, när apply_plan_executor() sedan ersätter batteridelen) -
-        # annars stör det preliminära beslutet minnet innan det slutgiltiga
-        # anropet hinner läsa föregående cykels VERKLIGA värde (upptäckt
-        # 2026-09-14: gav samma 8000W↔klämt-pendling som v0.9.34 skulle löst,
-        # fast nu orsakad av anropsordningen istället för Sonnen-sensorlagg).
+        # Minnet uppdateras bara av cykelns slutgiltiga anrop (pendling 2026-09-14). Se docs/decisions.md C10.
         if update_memory:
             self._last_battery_command_w = decision.battery_charge_power_w - decision.battery_discharge_power_w
         return decision

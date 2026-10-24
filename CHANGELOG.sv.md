@@ -2,6 +2,26 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.63
+
+Fas A steg 5 och 6 (HANDOFF.md). Bara dokumentation: kodens beteende är oförändrat.
+
+- **Incidentberättelserna är flyttade ur koden**: 26 kommentarsblock (367 rader) i `energy_planner.py` och `energy_controller.py` ligger nu ordagrant i `docs/decisions.md` (posterna P01–P16 och C01–C10). Varje block är ersatt av en rad som säger varför koden gör som den gör, plus en hänvisning. Verifierat genom att jämföra syntaxträdet (AST) före och efter: identiskt.
+- **README (en + sv) uppdaterad**:
+  - borttaget: vinterläget, `switch.sem_winter_mode`, `number.sem_winter_*`-entiteterna, `number.sem_ev_soc_target` och exempelautomationen för vinterläge (inget av dem finns)
+  - batteriet beskrivs som planstyrt i stället för det gamla "laddar ur över 0,20 kr/kWh"
+  - Legionella beskrivs med intervall 5–9 dagar, billigaste fönstret och körtid 110 min
+  - tillagt: `switch.sem_opportunistic_charge` och sensorn "Besparing idag"
+- **CLAUDE.md**:
+  - repo-layouten tar nu med `energy_planner.py`, `heat_planner.py`, `savings_tracker.py`, `tests/`, `testdata/backtest.py`, `docs/decisions.md` och HACS-bundlen
+  - pipelinen beskriver planeraren och exekutorn
+  - läget `winter` är borta
+  - avsnitten om den gamla percentil-exporten (exportgolv, absolut minimipris) är ersatta av en kort beskrivning av V och regel 1–4
+- **Inte gjort – steg 4 är överhoppat**: batteripolicyn i `_auto_mode` är inte död. Den styr överskottet som blir kvar till pannan och varmvattnet, fasbegränsningen av bil och elpatron, och batteriet när ingen plan finns, och backtesten täcker inte de delarna. Den flyttas till fas B tillsammans med omskrivningen av exekutorn.
+- **Verifierat**:
+  - `pytest`: 14 godkända, 3 förväntade fel
+  - AST för båda ändrade modulerna identiskt med före
+
 ## Nyheter i 0.9.62
 
 Fas A steg 3 (HANDOFF.md 5.2): tog bort inställningar och entiteter som inte haft någon effekt sedan marginalvärdesplaneraren i v1.0 (v0.9.8) ersatte percentil-exporten.

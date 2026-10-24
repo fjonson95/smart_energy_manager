@@ -1,16 +1,16 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.62-blue)
+![Version](https://img.shields.io/badge/version-0.9.63-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.62
+## What's New in 0.9.63
 
-Removed three proactive-export settings and their two `number` entities, which have had no effect since v0.9.8. After updating, delete `number.smart_energy_manager_proaktiv_export_prispercentil` and `…_absolut_minpris` under Settings → Entities. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
+Documentation only: the README no longer describes a winter mode and entities that do not exist, Legionella is described as it works since v0.9.55, and long incident narratives have moved from the code to `docs/decisions.md`. Behaviour is unchanged. See [CHANGELOG.md](CHANGELOG.md) for the full writeup.
 
-See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.61's daily savings sensor and Solcast forecast archive, v0.9.60's tests without Home Assistant and the negative-price hot-water fix, v0.9.59's grid-charging solar blend and plan log, v0.9.58's HACS-installable Lovelace card bundle, v0.9.57's default Legionella run duration (110 min), v0.9.56's Legionella reason attribute, v0.9.55's flexible 5–9 day Legionella interval with cheapest-window choice, v0.9.54's buy-price and V lines in the plan card, v0.9.53's fix for the load-shape percentile producing a physically impossible daily total, v0.9.52's exposure of the planner's marginal-value bookkeeping, v0.9.51's fix for the planner projecting near-zero household load on a mild day, v0.9.50's plan-card color pass for light/dark themes, v0.9.49's fix for the executor silently refusing to charge on solar surplus, v0.9.48's Solcast-based reserve before tomorrow's prices are published, v0.9.47's export-figure fix in the plan card, v0.9.46's fix for the planner reserving battery capacity for the day's most expensive slot at the expense of an earlier, cheaper-but-still-valuable one, v0.9.45's battery-cost reset at low SOC, v0.9.44's hold-battery fix for "idle" plan slots — winter backtest savings more than doubled, 93 → 217 SEK, v0.9.43's decision-sensor de-noising, v0.9.42's decision-text rewrite, v0.9.41's merit-order earmark fix for self-consumption, v0.9.40's cheapest-first grid charging, v0.9.39's plan-card color fix, v0.9.38's shape-aware evening-fill wiring, v0.9.37's hourly-shape data-loss fix, v0.9.36's phase-limit double-call fix, v0.9.35's hot-water-dump surplus-ratio fix, v0.9.34's battery phase-limit oscillation fix, v0.9.33's charger card battery bar fix, v0.9.32's EV deadline scheduling, v0.9.31's hot-water-dump wiring, v0.9.30's boiler solar-mode wiring, v0.9.29's weekly export-margin tracking, v0.9.28's auxiliary heater baseline tracking, v0.9.27's drought-risk markup wiring, v0.9.26's real-current phase-limit fix, v0.9.25's step 7 points 2 & 5, v0.9.24's solar_charge self-consumption fallback fix, v0.9.23's export-history service, v0.9.22's dead-config cleanup, v0.9.21's damped-temp crash fix, v0.9.20's Solcast entity split, v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
+See [CHANGELOG.md](CHANGELOG.md) for older releases (including v0.9.62's removal of dead proactive-export settings, v0.9.61's daily savings sensor and Solcast forecast archive, v0.9.60's tests without Home Assistant and the negative-price hot-water fix, v0.9.59's grid-charging solar blend and plan log, v0.9.58's HACS-installable Lovelace card bundle, v0.9.57's default Legionella run duration (110 min), v0.9.56's Legionella reason attribute, v0.9.55's flexible 5–9 day Legionella interval with cheapest-window choice, v0.9.54's buy-price and V lines in the plan card, v0.9.53's fix for the load-shape percentile producing a physically impossible daily total, v0.9.52's exposure of the planner's marginal-value bookkeeping, v0.9.51's fix for the planner projecting near-zero household load on a mild day, v0.9.50's plan-card color pass for light/dark themes, v0.9.49's fix for the executor silently refusing to charge on solar surplus, v0.9.48's Solcast-based reserve before tomorrow's prices are published, v0.9.47's export-figure fix in the plan card, v0.9.46's fix for the planner reserving battery capacity for the day's most expensive slot at the expense of an earlier, cheaper-but-still-valuable one, v0.9.45's battery-cost reset at low SOC, v0.9.44's hold-battery fix for "idle" plan slots — winter backtest savings more than doubled, 93 → 217 SEK, v0.9.43's decision-sensor de-noising, v0.9.42's decision-text rewrite, v0.9.41's merit-order earmark fix for self-consumption, v0.9.40's cheapest-first grid charging, v0.9.39's plan-card color fix, v0.9.38's shape-aware evening-fill wiring, v0.9.37's hourly-shape data-loss fix, v0.9.36's phase-limit double-call fix, v0.9.35's hot-water-dump surplus-ratio fix, v0.9.34's battery phase-limit oscillation fix, v0.9.33's charger card battery bar fix, v0.9.32's EV deadline scheduling, v0.9.31's hot-water-dump wiring, v0.9.30's boiler solar-mode wiring, v0.9.29's weekly export-margin tracking, v0.9.28's auxiliary heater baseline tracking, v0.9.27's drought-risk markup wiring, v0.9.26's real-current phase-limit fix, v0.9.25's step 7 points 2 & 5, v0.9.24's solar_charge self-consumption fallback fix, v0.9.23's export-history service, v0.9.22's dead-config cleanup, v0.9.21's damped-temp crash fix, v0.9.20's Solcast entity split, v0.9.19's rule 3/4 grid-charge/export fix, v0.9.7's reserve trajectory floor, v0.9.6's shape×level load model, v0.9.5's reworked dump-energy detection, v0.9.4's equivalent-cycles sensor, v0.9.3's measured round-trip efficiency, and v0.9.2's executor-veto fix).
 
 ## System Overview
 
@@ -57,12 +57,12 @@ Grid (3-phase, max 20A/phase)
 2. **Charge cars from solar** – when solar surplus ≥ 1,400 W (1-phase) or 4,140 W (3-phase); current adjusted dynamically
 3. **Charge battery from solar surplus**
 4. **Extra hot water via heating element** – when the battery is full, solar surplus remains, and tank temperature is below the configured maximum (default 70°C)
-5. **Discharge the battery** – when the buy price exceeds SEK 0.20/kWh, *or* when it is the best discharge hour in the coming 12h according to the price planning
+5. **Battery charge/discharge follows a 48 h plan** – the planner values a stored kWh (the marginal value V, merit order over coming price slots and Solcast forecast) and decides per quarter-hour whether to store solar, cover the house from the battery, charge from the grid or export. See `sensor.sem_day_plan_*` and the energy plan card
 6. **Negative electricity prices** – absorb all possible solar power into battery, cars, and hot water
 
 ### Price Planning (quarter-hours ahead)
 Based on Nord Pool's `raw_today`/`raw_tomorrow` attributes, the following are calculated each cycle:
-- **Best charging/discharging hour** for the coming 12h – governs battery decisions in both auto and winter mode
+- **Best charging/discharging hour** for the coming 12h
 - **Proactive absorption** – if ≥ 4 quarter-hours with negative sell price are expected within 2h, the battery holds headroom (up to 30%) to make room for solar. Extra hot water and EV charging are **not** started proactively; they wait until the price is actually negative
 - Results are exposed via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price`, and `sensor.sem_best_charge_price`
 
@@ -73,11 +73,6 @@ If Solcast sensors are configured, the `detailedForecast` attribute (30-minute `
 - **Solar aggregates** – rolling forecasts for the next 2 h, 4 h, and 8 h exposed as sensors
 - **Peak solar** – the expected peak power (kW) within 8 h and how many hours until it occurs
 - `sensor.sem_wait_for_solar` turns `on` when the system is holding back grid charging in anticipation of solar
-
-### Winter Mode
-- Charge battery overnight when the price is below a configurable limit
-- Discharge battery during expensive hours (evening peak)
-- Always charge from solar when possible
 
 ### Force Modes
 - **Force EV Charge** – charge all connected cars from the grid (max current, phase-limited)
@@ -167,7 +162,7 @@ To prevent the heating element from switching on/off every 30-second cycle, extr
 
 ## Legionella Disinfection
 
-The boiler's built-in Legionella program runs automatically about once a week to heat the hot water to ≥ 65°C (configurable) and eliminate Legionella bacteria.
+The boiler's built-in Legionella program is started every 5–9 days to heat the hot water to ≥ 65°C (configurable) and eliminate Legionella bacteria.
 
 ### How It Works
 
@@ -182,9 +177,8 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 
 | Priority | Condition | Description |
 |---|---|---|
-| 1 | Solar surplus ≥ 3,000 W within the desired time window | Free solar power drives the program |
-| 2 | Electricity price ≤ configured max price within the desired time window | Runs on cheap grid power |
-| 3 | Interval exceeded by 50% (emergency run) | Runs regardless of price, avoids the night 23:00–06:00 |
+| 1 | From the min day: the cheapest run window in the known prices (solar surplus valued at sell price, the rest at buy price) | Runs only if the window is ≤ 90 % of the average; waits for a sunnier day (Solcast day 3–7) if one is ≥ 10 % cheaper |
+| 2 | Max day reached | Runs the best known window regardless of price, avoids the night 23:00–06:00 |
 
 ### Settings
 
@@ -193,10 +187,9 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 | Enabled | Yes | Turn the feature on/off |
 | Legionella switch | – | The boiler's digital program switch |
 | Confirmation temp | 65°C | Temperature that confirms a successful run |
-| Interval | 7 days | How often disinfection should occur |
-| Desired time window | 10–15 | Hours when solar is normally available |
-| Max price | SEK 1.50/kWh | Do not run on grid power if more expensive |
-| Run time | 60 min | Reference time (the boiler controls the actual time) |
+| Min interval | 5 days | Earliest day a run is considered |
+| Max interval | 9 days | A run happens by the end of this day at the latest |
+| Run time | 110 min | Length of the window the price is averaged over (the boiler controls the actual time) |
 
 ---
 
@@ -244,6 +237,7 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 | `sensor.sem_wait_for_solar` | `on` when the system is holding back grid charging in anticipation of solar |
 | `sensor.sem_battery_accumulated_cost` | Accumulated cost (SEK) of energy currently in the battery – attributes: `solar_kwh_total`, `grid_kwh_total`, `average_price_sek_kwh`, `last_sell_price` |
 | `sensor.sem_battery_average_price` | Average cost per kWh of energy currently in the battery (SEK/kWh) |
+| `sensor.sem_daily_savings` | Savings today (SEK) compared with the same house without the battery – attributes: components, yesterday, last 30 days |
 
 **Per charger** (replace `<charger>` with the charger's name in lowercase):
 
@@ -261,14 +255,14 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 | Entity | Function |
 |---|---|
 | `switch.sem_force_ev_charge_from_grid` | Force EV charging from the grid |
-| `switch.sem_winter_mode` | Enable winter mode |
+| `switch.sem_opportunistic_charge` | Allow opportunistic grid charging of the battery |
 | `switch.sem_force_charge_battery_from_grid` | Force battery charging |
 
 ### Select
 
 | Entity | Function |
 |---|---|
-| `select.sem_operating_mode` | Select operating mode: `auto` / `winter` / `force_charge_ev` / `force_charge_battery` / `manual` |
+| `select.sem_operating_mode` | Select operating mode: `auto` / `force_charge_ev` / `force_charge_battery` / `manual` |
 | `select.sem_charger_<charger>_active_car` | Select which car is connected to the charger |
 
 ### Number (adjustable in real time)
@@ -277,11 +271,6 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 |---|---|
 | `number.sem_battery_min_soc` | Battery min SOC % |
 | `number.sem_battery_max_soc` | Battery max SOC % |
-| `number.sem_ev_soc_target` | Global default charging target % |
-| `number.sem_winter_cheap_threshold` | Cheap price threshold (SEK/kWh) |
-| `number.sem_winter_expensive_threshold` | Expensive price threshold (SEK/kWh) |
-| `number.sem_winter_min_soc` | Winter min SOC % |
-| `number.sem_winter_max_soc` | Winter max SOC % |
 
 ---
 
@@ -358,10 +347,8 @@ Configuration takes place in six steps:
 - Enable/disable the feature
 - **Legionella switch** (the boiler's digital program switch)
 - **Confirmation temp** (default 65°C – the run is approved when the tank reaches this temp)
-- Interval in days (default 7)
-- Desired time window (default 10–15)
-- Max electricity price for running on grid power (default SEK 1.50/kWh)
-- Run time in minutes (reference time)
+- Min/max interval in days (default 5/9)
+- Run time in minutes (default 110)
 
 **Step 6 – EV Charger**
 - Add one or more chargers
@@ -393,25 +380,6 @@ logger:
 ```
 
 ---
-
-## Example: Automation for Winter Mode
-
-```yaml
-automation:
-  - alias: "Winter mode October–March"
-    trigger:
-      - platform: time
-        at: "00:01:00"
-    condition:
-      - condition: template
-        value_template: "{{ now().month in [10,11,12,1,2,3] }}"
-    action:
-      - service: select.select_option
-        target:
-          entity_id: select.sem_operating_mode
-        data:
-          option: winter
-```
 
 ## Example: Dashboard (Lovelace)
 

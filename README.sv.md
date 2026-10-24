@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.62-blue)
+![Version](https://img.shields.io/badge/version-0.9.63-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.62
+## Nyheter i 0.9.63
 
-Tre inställningar för proaktiv export och deras två `number`-entiteter är borttagna – de har inte haft någon effekt sedan v0.9.8. Ta bort `number.smart_energy_manager_proaktiv_export_prispercentil` och `…_absolut_minpris` under Inställningar → Entiteter efter uppdateringen. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
+Bara dokumentation: README beskriver inte längre ett vinterläge och entiteter som inte finns, Legionella beskrivs som det fungerar sedan v0.9.55, och långa incidentberättelser är flyttade från koden till `docs/decisions.md`. Beteendet är oförändrat. Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för hela genomgången.
 
-Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.61:s sensor för daglig besparing och Solcast-arkiv, v0.9.60:s tester utan Home Assistant och rättningen av varmvatten efter negativt pris, v0.9.59:s solavdrag i nätladdningen och planlogg, v0.9.58:s HACS-installerbara kortbundle, v0.9.57:s standard-körtid för Legionella (110 min), v0.9.56:s Legionella-orsaksattribut, v0.9.55:s rörliga Legionella-intervall på 5–9 dagar med val av billigaste fönster, v0.9.54:s köppris- och V-linjer i planeringskortet, v0.9.53:s fix för att timformens percentil gav en fysiskt omöjlig dygnssumma, v0.9.52:s exponering av planerarens marginalvärdes-bokföring, v0.9.51:s fix för att planeraren projicerade nästan noll hushållslast på en mild dag, v0.9.50:s färgöversyn av planeringskortet för ljust/mörkt tema, v0.9.49:s fix för att exekutorn tyst vägrade ladda vid solöverskott, v0.9.48:s Solcast-baserade reserv innan morgondagens priser publicerats, v0.9.47:s exportsiffra-fix i planeringskortet, v0.9.46:s fix för att planeraren reserverade batterikapacitet åt dygnets dyraste slot på bekostnad av en tidigare, billigare men ändå värdefull möjlighet, v0.9.45:s nollställning av batterikostnad vid låg SOC, v0.9.44:s fix som får "idle"-slots att hålla batteriet – vinterbacktesten mer än fördubblade besparingen, 93 → 217 kr, v0.9.43:s städning av beslutssensorn, v0.9.42:s omskrivning av beslutstexter, v0.9.41:s öronmärkningsfix för självkonsumtion, v0.9.40:s billigast-först-nätladdning, v0.9.39:s färgfix i planeringskortet, v0.9.38:s formmedvetna kvällsfyllning, v0.9.37:s fix av dataförlusten i timformen, v0.9.36:s fix av fasskyddets dubbelanrop, v0.9.35:s fix av varmvattendumpens överskottskvot, v0.9.34:s fix av batteriets fasskyddsoscillation, v0.9.33:s fix av charger-kortets batteristapel, v0.9.32:s EV-deadline-schemaläggning, v0.9.31:s varmvattendump-inkoppling, v0.9.30:s inkoppling av pannans soldriftläge, v0.9.29:s veckovisa exportmarginal-uppföljning, v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
+Se [CHANGELOG.sv.md](CHANGELOG.sv.md) för äldre versioner (inklusive v0.9.62:s borttagning av döda inställningar för proaktiv export, v0.9.61:s sensor för daglig besparing och Solcast-arkiv, v0.9.60:s tester utan Home Assistant och rättningen av varmvatten efter negativt pris, v0.9.59:s solavdrag i nätladdningen och planlogg, v0.9.58:s HACS-installerbara kortbundle, v0.9.57:s standard-körtid för Legionella (110 min), v0.9.56:s Legionella-orsaksattribut, v0.9.55:s rörliga Legionella-intervall på 5–9 dagar med val av billigaste fönster, v0.9.54:s köppris- och V-linjer i planeringskortet, v0.9.53:s fix för att timformens percentil gav en fysiskt omöjlig dygnssumma, v0.9.52:s exponering av planerarens marginalvärdes-bokföring, v0.9.51:s fix för att planeraren projicerade nästan noll hushållslast på en mild dag, v0.9.50:s färgöversyn av planeringskortet för ljust/mörkt tema, v0.9.49:s fix för att exekutorn tyst vägrade ladda vid solöverskott, v0.9.48:s Solcast-baserade reserv innan morgondagens priser publicerats, v0.9.47:s exportsiffra-fix i planeringskortet, v0.9.46:s fix för att planeraren reserverade batterikapacitet åt dygnets dyraste slot på bekostnad av en tidigare, billigare men ändå värdefull möjlighet, v0.9.45:s nollställning av batterikostnad vid låg SOC, v0.9.44:s fix som får "idle"-slots att hålla batteriet – vinterbacktesten mer än fördubblade besparingen, 93 → 217 kr, v0.9.43:s städning av beslutssensorn, v0.9.42:s omskrivning av beslutstexter, v0.9.41:s öronmärkningsfix för självkonsumtion, v0.9.40:s billigast-först-nätladdning, v0.9.39:s färgfix i planeringskortet, v0.9.38:s formmedvetna kvällsfyllning, v0.9.37:s fix av dataförlusten i timformen, v0.9.36:s fix av fasskyddets dubbelanrop, v0.9.35:s fix av varmvattendumpens överskottskvot, v0.9.34:s fix av batteriets fasskyddsoscillation, v0.9.33:s fix av charger-kortets batteristapel, v0.9.32:s EV-deadline-schemaläggning, v0.9.31:s varmvattendump-inkoppling, v0.9.30:s inkoppling av pannans soldriftläge, v0.9.29:s veckovisa exportmarginal-uppföljning, v0.9.28:s eltillskotts-baslinjeinsamling, v0.9.27:s inkoppling av torkrisk-påslaget, v0.9.26:s riktig-ström-fix för fasskyddet, v0.9.25:s steg 7 punkt 2 & 5, v0.9.24:s fix för solar_charge-egenförbrukningen, v0.9.23:s export-history-tjänst, v0.9.22:s städning av död config, v0.9.21:s krasch-fix för dämpad temp, v0.9.20:s uppdelning av Solcast-entiteten, v0.9.19:s regel 3/4-fix för nätladdning/export, v0.9.7:s reservbana-golv, v0.9.6:s form×nivå-lastmodell, v0.9.5:s omgjorda dump-energi-detektering, v0.9.4:s ekvivalenta-cykler-sensor, v0.9.3:s uppmätta rundgångsverkningsgrad, och v0.9.2:s executor-veto-fix).
 
 ## Systemöversikt
 
@@ -55,12 +55,12 @@ Elnät (3-fas, max 20A/fas)
 2. **Ladda bilar från sol** – när solöverskott ≥ 1 400 W (1-fas) eller 4 140 W (3-fas); ström justeras dynamiskt
 3. **Ladda batteri från solöverskott**
 4. **Extra varmvatten via elpatron** – när batteriet är fullt, sol finns kvar och tanktemperaturen är under konfigurerat max (standard 70°C)
-5. **Ladda ur batteriet** – när köppriset överstiger 0,20 SEK/kWh, *eller* när det är den bästa urladdningstimmen kommande 12h enligt prisplaneringen
+5. **Batteriets laddning/urladdning följer en plan för 48 h** – planeraren värderar en lagrad kWh (marginalvärdet V, merit-ordning över kommande prisslots och Solcast-prognosen) och bestämmer per kvart om sol ska lagras, huset täckas från batteriet, batteriet nätladdas eller el exporteras. Se `sensor.sem_day_plan_*` och planeringskortet
 6. **Negativa elpriser** – absorbera all möjlig solel i batteri, bilar och varmvatten
 
 ### Prisplanering (kvartstimmar framåt)
 Baserat på Nordpools `raw_today`/`raw_tomorrow`-attribut beräknas varje cykel:
-- **Bästa laddnings-/urladdningstimme** kommande 12h – styr batteribeslut i både auto- och vinterläge
+- **Bästa laddnings-/urladdningstimme** kommande 12h
 - **Proaktiv absorption** – om ≥ 4 kvartstimmar med negativt säljpris väntar inom 2h hålls headroom i batteriet (upp till 30%) för att ge plats åt solelen. Extra varmvatten och EV-laddning startas **inte** proaktivt; de väntar tills priset faktiskt är negativt
 - Resultatet exponeras via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price` och `sensor.sem_best_charge_price`
 
@@ -71,11 +71,6 @@ Om Solcast-sensorer är konfigurerade läses `detailedForecast`-attributet (30-m
 - **Solaggregat** – rullande prognos för kommande 2 h, 4 h och 8 h exponeras som sensorer
 - **Soltopp** – förväntad toppeffekt (kW) inom 8 h och antal timmar tills den inträffar
 - `sensor.sem_wait_for_solar` slår på `on` när systemet håller tillbaka elnätsladdning i väntan på sol
-
-### Vinterläge
-- Ladda batteri nattetid när priset underskrider konfigurerbar gräns
-- Ladda ur batteri under dyra timmar (kvällspeak)
-- Ladda alltid från sol när möjligt
 
 ### Forcelägen
 - **Force EV Charge** – ladda alla anslutna bilar från elnät (max ström, fasbegränsad)
@@ -165,7 +160,7 @@ För att förhindra att elpatronen slås på/av varje 30-sekunderscykel tvingas 
 
 ## Legionella-desinficering
 
-Pannans inbyggda legionellaprogram körs automatiskt ca 1 gång/vecka för att värma varmvattnet till ≥ 65°C (konfigurerbart) och eliminera legionellabakterier.
+Pannans inbyggda legionellaprogram startas var 5:e–9:e dag för att värma varmvattnet till ≥ 65°C (konfigurerbart) och eliminera legionellabakterier.
 
 ### Hur det fungerar
 
@@ -180,9 +175,8 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 
 | Prioritet | Villkor | Beskrivning |
 |---|---|---|
-| 1 | Solöverskott ≥ 3 000 W inom önskat tidsfönster | Gratis solel driver programmet |
-| 2 | Elpris ≤ konfigurerat maxpris inom önskat tidsfönster | Körs på billig nätström |
-| 3 | Intervallet överskridits med 50% (nödkörning) | Kör oavsett pris, undviker natten 23–06 |
+| 1 | Från min-dagen: billigaste körfönstret i kända priser (solöverskott värderat till säljpris, resten till köppris) | Körs bara om fönstret är ≤ 90 % av snittet; väntar in en soligare dag (Solcast dag 3–7) om den är ≥ 10 % billigare |
+| 2 | Max-dagen nådd | Kör bästa kända fönster oavsett pris, undviker natten 23–06 |
 
 ### Inställningar
 
@@ -191,10 +185,9 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 | Aktiverad | Ja | Slå av/på funktionen |
 | Legionella-switch | – | Pannans digitala programswitch |
 | Bekräftelsetemp | 65°C | Temperatur som bekräftar lyckad körning |
-| Intervall | 7 dagar | Hur ofta desinficering ska ske |
-| Önskat tidsfönster | 10–15 | Timmar då sol normalt är tillgänglig |
-| Max pris | 1,50 SEK/kWh | Kör ej på nätström om dyrare |
-| Körtid | 60 min | Referenstid (pannan styr faktisk tid) |
+| Min-intervall | 5 dagar | Tidigaste dag en körning övervägs |
+| Max-intervall | 9 dagar | Senast i slutet av den här dagen körs det |
+| Körtid | 110 min | Fönstrets längd som priset medelvärdesbildas över (pannan styr faktisk tid) |
 
 ---
 
@@ -242,6 +235,7 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 | `sensor.sem_wait_for_solar` | `on` när systemet håller tillbaka elnätsladdning i väntan på sol |
 | `sensor.sem_battery_accumulated_cost` | Ackumulerad kostnad (SEK) för energin i batteriet – attribut: `solar_kwh_total`, `grid_kwh_total`, `average_price_sek_kwh`, `last_sell_price` |
 | `sensor.sem_battery_average_price` | Genomsnittlig kostnad per kWh för energin i batteriet (SEK/kWh) |
+| `sensor.sem_daily_savings` | Besparing idag (kr) jämfört med samma hus utan batteri – attribut: delbelopp, igår, senaste 30 dygnen |
 
 **Per laddare** (ersätt `<laddare>` med laddarens namn i gemener):
 
@@ -259,14 +253,14 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 | Entitet | Funktion |
 |---|---|
 | `switch.sem_force_ev_charge_from_grid` | Forcera EV-laddning från nät |
-| `switch.sem_winter_mode` | Aktivera vinterläge |
+| `switch.sem_opportunistic_charge` | Tillåt opportunistisk nätladdning av batteriet |
 | `switch.sem_force_charge_battery_from_grid` | Forcera batteriladdning |
 
 ### Select
 
 | Entitet | Funktion |
 |---|---|
-| `select.sem_operating_mode` | Välj driftläge: `auto` / `winter` / `force_charge_ev` / `force_charge_battery` / `manual` |
+| `select.sem_operating_mode` | Välj driftläge: `auto` / `force_charge_ev` / `force_charge_battery` / `manual` |
 | `select.sem_charger_<laddare>_active_car` | Välj vilken bil som är inkopplad på laddaren |
 
 ### Number (justerbart i realtid)
@@ -275,11 +269,6 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 |---|---|
 | `number.sem_battery_min_soc` | Batteri min SOC % |
 | `number.sem_battery_max_soc` | Batteri max SOC % |
-| `number.sem_ev_soc_target` | Global standard laddningsmål % |
-| `number.sem_winter_cheap_threshold` | Prisgräns billigt (SEK/kWh) |
-| `number.sem_winter_expensive_threshold` | Prisgräns dyrt (SEK/kWh) |
-| `number.sem_winter_min_soc` | Vinter min SOC % |
-| `number.sem_winter_max_soc` | Vinter max SOC % |
 
 ---
 
@@ -356,10 +345,8 @@ Konfigurationen sker i sex steg:
 - Aktivera/avaktivera funktionen
 - **Legionella-switch** (pannans digitala programswitch)
 - **Bekräftelsetemp** (standard 65°C – körningen godkänns när tanken nått denna temp)
-- Intervall i dagar (standard 7)
-- Önskat tidsfönster (standard 10–15)
-- Max elpris för körning på nätström (standard 1,50 SEK/kWh)
-- Körtid i minuter (referenstid)
+- Min-/max-intervall i dagar (standard 5/9)
+- Körtid i minuter (standard 110)
 
 **Steg 6 – EV-laddare**
 - Lägg till en eller flera laddare
@@ -391,25 +378,6 @@ logger:
 ```
 
 ---
-
-## Exempel: Automation för vinterläge
-
-```yaml
-automation:
-  - alias: "Winter mode October–March"
-    trigger:
-      - platform: time
-        at: "00:01:00"
-    condition:
-      - condition: template
-        value_template: "{{ now().month in [10,11,12,1,2,3] }}"
-    action:
-      - service: select.select_option
-        target:
-          entity_id: select.sem_operating_mode
-        data:
-          option: winter
-```
 
 ## Exempel: Dashboard (Lovelace)
 

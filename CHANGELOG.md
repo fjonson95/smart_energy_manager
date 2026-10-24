@@ -2,6 +2,26 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.63
+
+Phase A steps 5 and 6 (HANDOFF.md). Documentation only: the code's behaviour is unchanged.
+
+- **Incident narratives moved out of the code**: 26 comment blocks (367 lines) in `energy_planner.py` and `energy_controller.py` now live verbatim in `docs/decisions.md` (entries P01–P16 and C01–C10). Each block is replaced by one line saying why the code does what it does, plus a pointer. Verified by comparing the syntax tree (AST) before and after: identical.
+- **README (en + sv) brought up to date**:
+  - removed the winter mode, `switch.sem_winter_mode`, the `number.sem_winter_*` entities, `number.sem_ev_soc_target` and the winter-mode example automation (none of them exist)
+  - the battery is described as plan-driven instead of the old "discharge above SEK 0.20/kWh"
+  - Legionella is described with the 5–9 day interval, cheapest window and 110 min run time
+  - added `switch.sem_opportunistic_charge` and the "Savings Today" sensor
+- **CLAUDE.md**:
+  - the repo layout now includes `energy_planner.py`, `heat_planner.py`, `savings_tracker.py`, `tests/`, `testdata/backtest.py`, `docs/decisions.md` and the HACS bundle
+  - the pipeline describes the planner and the executor
+  - the `winter` mode is gone
+  - the sections on the old percentile exporter (export floor, absolute minimum price) are replaced by a short description of V and rules 1–4
+- **Not done – step 4 is skipped**: the battery policy in `_auto_mode` is not dead. It controls the surplus left for the boiler and hot water, the phase limiting of EV and heating element, and the battery when there is no plan, and the backtest does not cover those. It moves to phase B together with the executor rewrite.
+- **Verified**:
+  - `pytest`: 14 passed, 3 expected failures
+  - AST of both changed modules identical to before
+
 ## What's New in 0.9.62
 
 Phase A step 3 (HANDOFF.md 5.2): removed settings and entities that had no effect since the v1.0 marginal-value planner (v0.9.8) replaced the percentile exporter.

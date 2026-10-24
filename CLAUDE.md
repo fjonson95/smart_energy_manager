@@ -24,9 +24,12 @@ Tillhörande **SEM LM Bridge** (`C:\Users\Fredrik\Documents\sem_lm_bridge\bridge
 
 ```
 custom_components/smart_energy_manager/
-  coordinator.py        # DataUpdateCoordinator – hämtar state, kör controller, applicerar beslut
-  energy_controller.py  # Ren logik – EnergyState → ControlDecision (inga HA-beroenden)
+  coordinator.py        # DataUpdateCoordinator – hämtar state, bygger plan, kör controller, applicerar beslut
+  energy_planner.py     # Ren logik – DayPlan för 48 h (marginalvärdet V, regel 1–4, EV-schema)
+  energy_controller.py  # Ren logik – EnergyState → ControlDecision; apply_plan_executor() skriver batteriet
   price_scheduler.py    # Nordpool-schemaläggning, headroom, negativt-pris-logik
+  heat_planner.py       # Rena funktioner för värmepump/varmvatten (steg 7)
+  savings_tracker.py    # Daglig besparing mot hus utan batteri
   sensor.py             # Alla HA-sensorer inkl. batterikostnadsackumulatorer
   legionella.py         # Legionella-schemaläggning för varmvatten
   select.py             # Bilvals-entitet per laddare
@@ -35,7 +38,13 @@ custom_components/smart_energy_manager/
   config_flow.py        # UI-konfigurering i HA
 
 www/
-  sem-charger-card.js   # Custom Lovelace-kort för laddare (kopieras till HA /www/)
+  sem-charger-card.js       # Lovelace-kort för laddare
+  sem-energy-plan-card.js   # Lovelace-kort för dagsplanen
+dist/smart-energy-manager-cards.js  # HACS-bundle av båda korten (byggs med build_hacs_bundle.py)
+
+tests/                  # pytest utan HA (stub i conftest.py), inkl. sommarbacktesten
+testdata/backtest.py    # Spelar upp historik genom planerare + controller + executor
+docs/decisions.md       # Daterade beslut och flyttade incidentberättelser (P01…, C01…)
 ```
 
 ---
@@ -43,8 +52,7 @@ www/
 ## Nyckelbegrepp
 
 ### Driftlägen (`operating_mode`)
-- `auto` – normalt solöverskottsstyrt läge
-- `winter` – billigast-timmar-laddning av batteri och bil
+- `auto` – planstyrt läge (DayPlan + exekutor); det finns inget separat vinterläge, säsong är indata
 - `force_charge_ev` – tvångsladdning av bil
 - `force_charge_battery` – tvångsladdning av batteri
 - `manual` – inga automatiska beslut
@@ -52,8 +60,10 @@ www/
 ### Beslutspipeline (var 30:e sekund)
 1. `coordinator._async_update_data()` hämtar alla sensor-states
 2. Bygger `EnergyState` med laddare, batteri, sol, priser
-3. `EnergyController.compute()` returnerar `ControlDecision`
-4. Coordinator applicerar beslut via HA-tjänster
+3. `EnergyPlanner.build_plan()` bygger om DayPlan (var 15:e min eller när priserna ändras)
+4. `EnergyController.compute()` returnerar `ControlDecision` (EV, varmvatten, fasskydd, preliminärt batteri)
+5. `EnergyController.apply_plan_executor()` ersätter batteridelen med planens slot, klämd mot verkligheten – enda stället som skriver batterieffekt (delas med backtesten)
+6. Coordinator applicerar beslut via HA-tjänster
 
 ### Fasströmsgräns
 `20A × 3 faser × 230V = 13 800 W` total faskapacitet. `_apply_phase_limits()` i energy_controller ser till att summan håller sig under `max_current_per_phase`.
@@ -68,19 +78,8 @@ www/
 ### Proaktiv absorption
 Håller bara headroom (reducerar `battery_max_soc`) inför kommande negativt pris. Startar **inte** varmvatten eller EV-laddning proaktivt – det sker först när priset är faktiskt negativt eller redan passerat (`had_negative_today`).
 
-### Proaktiv export – prisväktad dispatch över kväll + morgon
-Exportfönstret inkluderar **båda** kväll och imorgon bitti. Gränsen är solproduktion (`solar_kw < 2 kW` per Solcast-slot) istället för ett tidsklocksklipp vid `solar_takeover_dt`. Natt- och tidiga morgonslots (sol < 2 kW) ingår alltid; middagsslots utesluts automatiskt.
-
-Urladdningseffekten viktas mot aktuellt pris relativt summan av alla kvarvarande slots i fönstret:
-```
-discharge_w = (sell_price / sum(remaining_high_slot_prices)) × exportable_kwh / 0.25h × 1000
-```
-Om imorgon bittis pris är 1,20 kr och kvällens är 0,80 kr allokeras proportionellt mer kWh till morgonen – utan att den totala exporterade volymen förändras. Fallback (utan Solcast-data) använder `solar_takeover_dt` som klipp. Fallback till jämn fördelning om prissumman är noll.
-
-**Absolut minimipris – trigger men inte dispatchfönster**: `export_min_sell_price_sek_kwh` (0,70 kr) fungerar som en extra trigger för enstaka slots under percentilen. Dispatchen (`_high_slots`) använder alltid percentiltröskeln, inte abs-minimum. Är det absoluta minimumet den enda orsaken till exporten och inga höga prisslots återstår i fönstret → `export_active = False`. Utan detta skulle `_effective_threshold = 0,70` skapa ett 8–10 timmar långt natt-fönster, batteri tömmes till min-SOC.
-
-### Exportgolvets referenstid – låst till fönstrets start
-`_hours_dark` i exportgolvsberäkningen (`_export_floor_kwh = _hours_dark × last + 2 kWh`) räknas från den **tidigaste prisslotens starttid** (eller nu, om vi redan passerat den) fram till solar takeover – **inte från klockan nu**. Utan denna fix krymper golvet under hela exportfönstret (t.ex. 3.5h × 1.05 kW ≈ 3.7 kWh extra utrymme per kväll), vilket gör att systemet exporterar mer än planerat och batteriet når Sonnenbatteriets 20%-minimum innan solen tar över.
+### Batteriplanen – marginalvärdet V och regel 1–4
+`energy_planner.build_plan()` allokerar batteriets energi i merit-ordning mot framtida möjligheter (täcka underskott till köppris, exportera till säljpris) inom effekt- och solgränser; V = värdet i billigaste tilldelade möjlighet × (1 + osäkerhetspåslag). Regler per slot: 1 lagra sol om `V_charge > sälj`; 2 täck huset om `köp > V + cykel` (inom slotens öronmärkning); 3 nätladda billigast först om `köp + cykel < V_charge`; 4 exportera om `sälj > max(V, batterikostnad) + cykel`. Den gamla percentil-exporten (exportgolv, `export_min_sell_price`, `_high_slots`) finns inte längre. Känd brist: planen kan hålla ett laddat batteri genom dyra timmar (HANDOFF.md 4.1, `tests/test_planner_probe.py`) – åtgärdas i fas B. Bakgrund per mekanism: `docs/decisions.md` P01–P16.
 
 ### Observerad solar takeover – Store-format
 `coordinator._takeover_store` (`{DOMAIN}_solar_takeover`) sparar:
