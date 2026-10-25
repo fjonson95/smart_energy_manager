@@ -465,12 +465,25 @@ def run_backtest(
     date_to:   Optional[datetime] = None,
     drought_oracle: bool = False,
     temp_oracle: bool = False,
+    load_level: str = "floor",
     planner_kind: str = "v",
     load_oracle: bool = False,
+    dp_options: Optional[dict] = None,
 ):
     s = {**SETTINGS, **overrides}
+    dp_options = dp_options or {}
 
     controller = EnergyController(
+        battery_min_soc             = s["battery_min_soc"],
+        battery_max_soc             = s["battery_max_soc"],
+        max_current_per_phase       = s["max_current_per_phase"],
+        grid_voltage                = s["grid_voltage"],
+        max_export_w                = s["max_export_w"],
+    )
+    # Simuleringen har eget minne (fasskyddets senaste kommando, varmvattnets
+    # minimitid) – delat med körningen på historikens SOC skrev den ena över
+    # den andras baslinje varje slot.
+    sim_controller = EnergyController(
         battery_min_soc             = s["battery_min_soc"],
         battery_max_soc             = s["battery_max_soc"],
         max_current_per_phase       = s["max_current_per_phase"],
@@ -482,6 +495,7 @@ def run_backtest(
         battery_max_soc                = s["battery_max_soc"],
         eta_roundtrip                  = s["eta_roundtrip"],
         cycle_cost_sek_kwh             = s["cycle_cost_sek_kwh"],
+        **(dp_options if planner_kind == "dp" else {}),
     )
 
     sys.stdout.buffer.write(f"Laddar {data_path} ...\n".encode("utf-8"))
@@ -558,11 +572,14 @@ def run_backtest(
             if lv is not None:
                 hourly_house_load_w[ts] = lv
 
+    # Lokal timme och lokalt dygn, som coordinator._update_hourly_shape() och
+    # planerarnas uppslag (dt.astimezone().hour). Med UTC låg formen 1 h (vinter)
+    # respektive 2 h (sommar) fel – kvällstoppen hamnade i fel prisslots (B3).
     _day_hour_totals: dict = {}
     for t, w in hourly_house_load_w.items():
-        d = t.astimezone(timezone.utc).date()
-        h = t.astimezone(timezone.utc).hour
-        _day_hour_totals.setdefault(d, {})[h] = w
+        lt = t.astimezone()
+        _day_hour_totals.setdefault(lt.date(), {}).setdefault(lt.hour, []).append(w)
+    _day_hour_totals = {d: {h: sum(v) / len(v) for h, v in hrs.items()} for d, hrs in _day_hour_totals.items()}
     _daily_load_fractions: dict = {}
     for d, hours in _day_hour_totals.items():
         day_total = sum(hours.values())
@@ -602,7 +619,43 @@ def run_backtest(
 
     # --temp-oracle: verklig dygnsmedeltemperatur för kommande dygn som
     # "prognos" (övre gräns för vad SMHI-prognosen i lastnivån kan ge).
+    # --load-level calib (B3): dygnsnivå = 7 dygns faktiska snitt +
+    # k × (graddagar för dygnet − snittgraddagar de 7 dygnen). Kalibrerad mot
+    # jan–apr + aug–sep 2026 (helhus, t_bal 15 °C). Dygnets temperatur är
+    # verklig med --temp-oracle, annars gårdagens (persistens).
+    _CAL_TBAL, _CAL_K = 15.0, 2.53
+    _daily_load_actual: dict = {}
+    for d, hrs in _day_hour_totals.items():
+        if len(hrs) >= 20:
+            _daily_load_actual[d] = sum(hrs.values()) / len(hrs) * 24.0 / 1000.0
+    _daily_temp_local: dict = {}
+    for t, row in pivot.items():
+        tv = _safe(row.get("sensor.boiler_outdoortemp") or "", float)
+        if tv is not None:
+            _daily_temp_local.setdefault(t.astimezone().date(), []).append(tv)
+    _daily_temp_local = {d: sum(v) / len(v) for d, v in _daily_temp_local.items()}
+
+    def _calib_levels(ts: datetime) -> Optional[dict]:
+        day0 = ts.astimezone().date()
+        past = [day0 - timedelta(days=i) for i in range(1, 8)]
+        loads = [_daily_load_actual[d] for d in past if d in _daily_load_actual]
+        temps = [_daily_temp_local[d] for d in past if d in _daily_temp_local]
+        if not loads or not temps:
+            return None
+        dd = lambda tc: max(0.0, _CAL_TBAL - tc)
+        dd7 = sum(dd(tc) for tc in temps) / len(temps)
+        base = sum(loads) / len(loads)
+        y_temp = _daily_temp_local.get(day0 - timedelta(days=1), temps[0])
+        out = {}
+        for offset in (0, 1, 2):
+            d = day0 + timedelta(days=offset)
+            tc = _daily_temp_local.get(d, y_temp) if temp_oracle else y_temp
+            out[d] = max(0.0, base + _CAL_K * (dd(tc) - dd7))
+        return out
+
     def _daily_load_by_date(ts: datetime) -> Optional[dict]:
+        if load_level == "calib":
+            return _calib_levels(ts)
         if not temp_oracle:
             return None
         day0 = ts.astimezone().date()
@@ -614,7 +667,7 @@ def run_backtest(
         return out or None
 
     def _load_shape_at(ts: datetime, percentile: float) -> Optional[list]:
-        day0 = ts.astimezone(timezone.utc).date()
+        day0 = ts.astimezone().date()
         window_days = [d for d in _sorted_load_days if d < day0][-21:]
         if not window_days:
             return None
@@ -698,6 +751,8 @@ def run_backtest(
     total_ref_export_kwh   = 0.0
     total_ref_cost_sek     = 0.0
     total_ref_rev_sek      = 0.0
+    buy_price_sum          = 0.0
+    sim_soc_start: Optional[float] = None
 
     # P7-2 modellvalidering: spela upp historikens EGNA batteribeslut (inte
     # SEM:s) genom samma modell. sim_* ovan använder SEM:s nya beslut och
@@ -719,6 +774,7 @@ def run_backtest(
         "decision_extra_hot_water", "reason",
         "actual_grid_import_kwh", "actual_grid_export_kwh",
         "actual_grid_cost_sek", "actual_export_rev_sek",
+        "sim_plan_action", "sim_reason",
         "sim_battery_soc_pct", "sim_bat_charge_w", "sim_bat_discharge_w",
         "sim_grid_import_kwh", "sim_grid_export_kwh",
         "sim_cost_sek", "sim_export_rev_sek",
@@ -814,6 +870,7 @@ def run_backtest(
             # historiska mätvärdena – ingen väder-/lastmodell finns.
             if sim_soc is None:
                 sim_soc = state.battery_soc_pct  # startvillkor: verklig SOC vid periodens start
+                sim_soc_start = sim_soc
             if sim_prev_battery_power_w is None:
                 sim_prev_battery_power_w = state.battery_power_w  # startvillkor: verklig effekt
 
@@ -823,8 +880,17 @@ def run_backtest(
             # beslutet (rad ~980 i energy_controller.py). Läcker den verkliga
             # historiska effekten in här blir den deltan inkonsekvent så fort
             # den simulerade banan avviker från historiken.
+            # Fasmätarna innehåller det verkliga batteriets effekt; fasskyddet
+            # ska se simuleringens. Utan bytet låg historikens laddning (t.ex.
+            # 5 kW) kvar ovanpå simuleringens och laddningen ströps till 0 –
+            # 409 av 2 225 nätladdningsslots i vinterkörningen (B3).
+            _bat_shift = (sim_prev_battery_power_w - state.battery_power_w) / 3.0
             sim_state = dataclasses.replace(state, battery_soc_pct=sim_soc,
                                              battery_power_w=sim_prev_battery_power_w,
+                                             grid_power_l1=state.grid_power_l1 + _bat_shift,
+                                             grid_power_l2=state.grid_power_l2 + _bat_shift,
+                                             grid_power_l3=state.grid_power_l3 + _bat_shift,
+                                             grid_current_l1=0.0, grid_current_l2=0.0, grid_current_l3=0.0,
                                              plan_action=None, plan_export_floor_kwh=None)
             sim_day_plan = None
             if ps and ps.slots:
@@ -856,9 +922,9 @@ def run_backtest(
                 sim_state.plan_action = _sim_cs.action if _sim_cs else None
                 sim_state.plan_export_floor_kwh = sim_day_plan.export_floor_kwh
 
-            sim_decision = controller.compute(sim_state)
+            sim_decision = sim_controller.compute(sim_state)
             sim_solar_surplus_w = max(0.0, sim_state.solar_power_w - sim_state.house_load_w)
-            sim_decision = controller.apply_plan_executor(
+            sim_decision = sim_controller.apply_plan_executor(
                 sim_day_plan, "auto", sim_state, sim_decision, ts, sim_solar_surplus_w,
             )
 
@@ -916,6 +982,7 @@ def run_backtest(
             total_ref_export_kwh   += ref_export_kwh
             total_ref_cost_sek     += ref_cost_sek
             total_ref_rev_sek      += ref_rev_sek
+            buy_price_sum          += state.buy_price_sek_kwh
 
             sim_soc_this_slot = sim_soc
             sim_soc = new_sim_soc
@@ -956,6 +1023,8 @@ def run_backtest(
                 "actual_grid_export_kwh":  _n(round(export_kwh, 3)),
                 "actual_grid_cost_sek":    _n(round(cost_sek, 4)),
                 "actual_export_rev_sek":   _n(round(rev_sek, 4)),
+                "sim_plan_action":         sim_state.plan_action or "",
+                "sim_reason":              sim_decision.reason,
                 "sim_battery_soc_pct":     _n(round(sim_soc_this_slot, 1)),
                 "sim_bat_charge_w":        _n(round(sim_decision.battery_charge_power_w, 0)),
                 "sim_bat_discharge_w":     _n(round(sim_decision.battery_discharge_power_w, 0)),
@@ -1004,6 +1073,15 @@ def run_backtest(
     savings_pct  = (savings_sek / ref_net_cost * 100.0) if ref_net_cost > 0 else 0.0
     full_cycles  = total_sim_discharge_kwh / s["battery_capacity_kwh"] if s["battery_capacity_kwh"] else 0.0
     final_sim_soc = sim_soc if sim_soc is not None else float("nan")
+    # Energi kvar i batteriet vid periodens slut är inte gratis och inte värdelös:
+    # en planerare som slutar fullt (DP: sommar 98 %, vinter 65 %) mot en som
+    # slutar tomt (V vinter 22 %) jämfördes annars orättvist (B3). Ändringen i
+    # lagrad energi värderas till periodens snittköp × η per ben – samma
+    # värdering som oracle_dp.py.
+    stock_price = (buy_price_sum / len(timestamps)) * s["eta_roundtrip"] ** 0.5 if timestamps else 0.0
+    stock_adj_sek = ((final_sim_soc - sim_soc_start) / 100.0 * s["battery_capacity_kwh"] * stock_price
+                     if sim_soc_start is not None else 0.0)
+    savings_adj_sek = savings_sek + stock_adj_sek
 
     validation_note = ""
     if has_actual_power_data:
@@ -1046,12 +1124,15 @@ def run_backtest(
         f"    Nettokostnad      : {ref_net_cost:8.2f} SEK  ({ref_net_cost / n_days:.2f} SEK/dygn)\n"
         "\n"
         f"  Besparing vs referens : {savings_sek:8.2f} SEK  ({savings_sek / n_days:.2f} SEK/dygn, {savings_pct:.1f}%)\n"
+        f"  Lagerjusterad         : {savings_adj_sek:8.2f} SEK  (SOC {sim_soc_start or 0:.1f} → {final_sim_soc:.1f} %, "
+        f"{stock_adj_sek:+.2f} SEK à {stock_price:.2f} kr/kWh)\n"
         f"{validation_note}"
         "=================================================\n"
     )
     sys.stdout.buffer.write(sim_summary.encode("utf-8"))
     return {
         "savings_sek": savings_sek,
+        "savings_adj_sek": savings_adj_sek,
         "full_cycles": full_cycles,
         "sim_net_cost_sek": sim_net_cost,
         "ref_net_cost_sek": ref_net_cost,
@@ -1092,17 +1173,30 @@ def main():
         "--temp-oracle", action="store_true",
         help="Lastnivå per dygn från verklig dygnsmedeltemperatur (perfekt temperaturprognos).",
     )
+    parser.add_argument("--dp", action="append", default=[], metavar="NYCKEL=VÄRDE",
+                        help="Konstruktorparameter till DPPlanner, t.ex. --dp reserve_margin_kwh=0 --dp terminal_mode=repeat")
+    parser.add_argument("--cycle-cost", type=float)
+    parser.add_argument("--load-level", choices=["floor", "calib"], default="floor",
+                        help="calib = kalibrerad dygnsnivå (7 d + temperaturdelta), se _calib_levels")
     args = parser.parse_args()
 
     overrides = {}
     if args.min_soc    is not None: overrides["battery_min_soc"]           = args.min_soc
+    if args.cycle_cost is not None: overrides["cycle_cost_sek_kwh"]        = args.cycle_cost
+    dp_options = {}
+    for kv in args.dp:
+        k, v = kv.split("=", 1)
+        try:
+            dp_options[k] = float(v)
+        except ValueError:
+            dp_options[k] = v
 
     date_from = datetime.fromisoformat(args.date_from).replace(tzinfo=timezone.utc) if args.date_from else None
     date_to   = datetime.fromisoformat(args.date_to  ).replace(tzinfo=timezone.utc) if args.date_to   else None
 
     run_backtest(args.input, args.out, overrides, date_from, date_to, drought_oracle=args.drought_oracle,
-                 temp_oracle=args.temp_oracle, planner_kind=args.planner,
-                 load_oracle=args.load_oracle)
+                 temp_oracle=args.temp_oracle, planner_kind=args.planner, load_level=args.load_level,
+                 load_oracle=args.load_oracle, dp_options=dp_options)
 
 
 if __name__ == "__main__":

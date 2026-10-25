@@ -599,3 +599,39 @@ Cykler: sommar 6,89 (V 5,53), vinter 43,87 (V 25,60; med perfekt last 49,30). Ex
 
 **Slutsatser:** DP slår V tydligt på vintern (strukturfelet 4.1 är borta – proben laddar ur genom båda topparna) men når inte acceptansmålet 1 330 kr. Lastprognosfelet kostar ~140 kr; temperaturnivån per dygn ger ingenting (≈ 0), så den förblir urkopplad. Resterande gap mot oraklet ligger i horisont/slutvärde/reserv → B3.
 
+## 2026-10-25 – Fas B, steg B3: mätfel, lastnivå, reserv (v0.9.69)
+
+**Mätfel i backtesten (påverkade båda planerarna):**
+1. *Fasbas:* simuleringen delade controller med körningen på historikens SOC och fasskyddet utgick från uppmätt faseffekt, inklusive det verkliga batteriet. Exempel 3 jan 01:45–04:00: historiken laddade 4,3–5 kW, simuleringen ville ladda 7,8 kW, fasskyddet såg ~13 kW batteri och ströp till 0; SOC stod på 51,6 %. 409 av 2 225 DP-grid_charge-slots (vinter). Efter rättning (egen `sim_controller`, fas += (sim_förra − verklig)/3, strömmar nollade så att effektvägen används) återstår 2 – verkliga fasgränser.
+2. *Lastformens timme:* byggdes per UTC-timme, slogs upp per lokal timme (`dt.astimezone().hour`, samma i produktion); dessutom skrev varje kvart över den förra så formen var timmens :45-kvart. Nu lokalt, medel per timme. Produktionen (`_update_hourly_shape`, `now.hour`) var rätt.
+3. *Slutlager:* lagerjusterad besparing = besparing + (E_slut − E_start) × snittköp × √η. Oraklet har samma slutvärdering (`value = −(E − E_start) × snittköp × √η`).
+
+Rättningarna 1–2 ändrar baslinjerna: V sommar 146,25 → 147,80, vinter 833,81 → 880,64.
+
+**Lastnivå:** dygnsnivån i drift är i praktiken max(gårdag, 7 d), eftersom gradtimmodellen (bas 1, k 2,39, t_bal 12) ligger ~20 kWh/dygn under helhusförbrukningen (snitt 45,8 kWh vintertid). Uppmätt fel per dygn (jan–apr + aug–sep):
+
+| Nivå | Bias | MAE (kWh) |
+|---|---|---|
+| gårdagens last | +0,15 | 5,59 |
+| 7 d snitt | +0,76 | 6,33 |
+| max(gårdag, 7 d) – drift | +3,05 | 6,70 |
+| 7 d + 2,53 × ΔDD (t_bal 15) | +0,05 | 3,23 |
+
+Kalibreringen (bas 13,2, k 2,53 vid t_bal 15) är gjord på samma data den mäts på (2 parametrar, ~160 dygn). I DP används nivån utan golv (`daily_load_kwh_by_date` är auktoritativ i `DPPlanner`).
+
+**Backtest, DP, kalibrerad nivå** (besparing / lagerjusterad):
+
+| Variant | Sommar | Vinter | Cykler vinter |
+|---|---|---|---|
+| reserv 0, cykel 0,05 | 172,55 / 207,27 | 1 324,89 / 1 336,45 | 57,8 |
+| + `--temp-oracle` | 172,45 / 207,18 | 1 326,88 / 1 338,46 | 57,5 |
+| reserv 2 | 166,62 / 201,35 | 1 302,25 / 1 313,76 | 56,5 |
+| reserv 0, cykel 0,10 | 170,07 / 204,80 | 1 325,29 / 1 337,00 | 53,5 |
+| reserv 0, perfekt last | 175,53 / 209,67 | 1 359,10 / 1 369,78 | 58,4 |
+| V (jämförelse) | 147,80 / 171,37 | 880,64 / 872,30 | 27,6 |
+| Orakel | – / 237,82 | – / 1 898,72 | |
+
+Utan kalibrerad nivå (golvet kvar): reserv 0 1 222,20, reserv 2 1 196,02; före lastformsrättningen reserv 4 1 160,27 och syntetiskt tredje dygn −22 kr mot snittköp-slutvärdet.
+
+**Slutsatser:** acceptansmålet (70 % av oraklet vintertid) är nått med kalibrerad nivå. Kvarvarande gap mot oraklet (~530 kr) är horisonten (DP ser ≤ 36 h priser) och exekutorns verklighetsklämning – inte lastprognosen (33 kr kvar). Slutvärde = snittköp sista 24 h behålls. Öppna beslut (användaren): reservmarginal (fråga 1) och cykelkostnad – besparingen i backtesten räknar inte slitage, så 0,10 med 4 färre cykler är i praktiken bättre om slitaget är verkligt.
+

@@ -36,11 +36,18 @@ class DPPlanner:
         battery_max_soc: float = 95.0,
         eta_roundtrip: float = 0.87,
         cycle_cost_sek_kwh: float = 0.05,
+        reserve_margin_kwh: float = 2.0,
+        terminal_mode: str = "mean24",
     ):
+        """terminal_mode: "mean24" = kvarvarande energi till snittköp sista
+        24 h; "repeat" = sista 24 h:s priser, sol och last upprepas ett dygn
+        till innan snittvärdet sätts (syntetiskt tredje dygn)."""
         self.battery_min_soc = battery_min_soc
         self.battery_max_soc = battery_max_soc
         self.eta_roundtrip = eta_roundtrip
         self.cycle_cost_sek_kwh = cycle_cost_sek_kwh
+        self.reserve_margin_kwh = reserve_margin_kwh
+        self.terminal_mode = terminal_mode
 
     def build_plan(
         self,
@@ -71,7 +78,7 @@ class DPPlanner:
         e_min = cap * self.battery_min_soc / 100.0
         e_max = cap * self.battery_max_soc / 100.0
         e_now = min(max(cap * battery_soc_pct / 100.0, e_min), e_max)
-        reserve_kwh = min(e_max, e_min + 2.0 + max(0.0, ev_reserve_margin_kwh))
+        reserve_kwh = min(e_max, e_min + self.reserve_margin_kwh + max(0.0, ev_reserve_margin_kwh))
 
         floor_kwh = rolling_consumption_kwh or yesterday_consumption_kwh or 0.0
         eff_daily = max(predicted_daily_kwh, floor_kwh)
@@ -80,9 +87,12 @@ class DPPlanner:
 
         def level_on(dt: datetime) -> float:
             if daily_load_kwh_by_date:
+                # Nivån per dygn är redan en kalibrerad prognos (7 dygns snitt +
+                # temperaturdelta, docs/decisions.md B3); golvet max(gårdag, 7 d)
+                # låg i snitt 3 kWh/dygn för högt och läggs inte ovanpå.
                 level = daily_load_kwh_by_date.get(dt.astimezone().date())
                 if level is not None:
-                    return max(level, floor_kwh)
+                    return level
             return eff_daily
 
         def load_kw_at(dt: datetime) -> float:
@@ -120,6 +130,15 @@ class DPPlanner:
             buy[t] = s.buy_sek
             sell[t] = s.sell_sek
 
+        n_real = n
+        if self.terminal_mode == "repeat":
+            tail_idx = [t for t, s in enumerate(slots) if s.start >= slots[-1].end - timedelta(hours=24)]
+            hours = np.concatenate([hours, hours[tail_idx]])
+            net = np.concatenate([net, net[tail_idx]])
+            buy = np.concatenate([buy, buy[tail_idx]])
+            sell = np.concatenate([sell, sell[tail_idx]])
+            n = len(hours)
+
         eta_leg = math.sqrt(self.eta_roundtrip)
         n_states = int(round((e_max - e_min) / _STEP_KWH)) + 1
         energies = e_min + np.arange(n_states) * _STEP_KWH
@@ -131,7 +150,7 @@ class DPPlanner:
         # slutar vid midnatt) värderas energin upp till morgondagens väntade
         # underskott till dagens högsta köppris – samma skydd som V-planerarens
         # golv före prispubliceringen (docs/decisions.md P05).
-        tail = [b for b, s in zip(buy, slots) if s.start >= slots[-1].end - timedelta(hours=24)]
+        tail = [b for b, s in zip(buy[:n_real], slots) if s.start >= slots[-1].end - timedelta(hours=24)]
         ref_buy = float(np.mean(tail)) if tail else float(np.mean(buy))
         terminal = (energies - e_min) * ref_buy * eta_leg
         tomorrow_start = (now_a + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)

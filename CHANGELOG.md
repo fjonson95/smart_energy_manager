@@ -2,6 +2,29 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.69
+
+Phase B, step B3 (HANDOFF.md): backtest measurement fixes and DP tuning. Behaviour in Home Assistant is unchanged; the DP planner is still not used live.
+
+- **Three backtest errors fixed** (all made the numbers wrong, not the live system):
+  - The simulation's phase limiter started from the measured phase power, which includes the *real* battery's power. The real 5 kW charge sat on top of the simulated 8 kW and charging was cut to 0: 409 of 2,225 DP grid-charge slots in winter. The simulation now has its own controller, and the phase baseline swaps the real battery for the simulated one. Only 2 slots are still cut, by real phase limits.
+  - The load shape was built per UTC hour but looked up per local hour, 1 h off in winter and 2 h in summer. It also used only the last quarter of each hour. It now uses the local hour, averaged over the hour's quarters, like `coordinator._update_hourly_shape()`.
+  - Energy left in the battery at the end was worth nothing (DP ended at 98 %/65 %, V at 79 %/22 %). There is a new **stock-adjusted** saving, valued at the period's mean buy price × √η; `oracle_dp.py` values it the same way.
+- **Calibrated daily load level** (`--load-level calib`, DP only): 7-day actual mean + 2.53 kWh × (degree days for the day − 7-day mean degree days), balance temperature 15 °C.
+  - Error on the daily level: MAE 3.2 kWh, against 6.7 kWh and +3 kWh bias for today's max(yesterday, 7 days).
+  - The live degree-day model (base 1 kWh, 2.39 kWh/DD) sits about 20 kWh/day too low and is always overridden by the floor. That is why the temperature forecast gave nothing in B1.
+- **Results** (savings / stock-adjusted, SEK):
+
+  | | V | DP B2 | DP + calibrated level, reserve 0 | Perfect load | Oracle |
+  |---|---|---|---|---|---|
+  | Summer | 147.80 / 171.37 | 144.88 / 178.64 | **172.55 / 207.27** | 175.53 / 209.67 | – / 237.82 |
+  | Winter | 880.64 / 872.30 | 1196.02 / 1211.32 | **1324.89 / 1336.45** | 1359.10 / 1369.78 | – / 1898.72 |
+
+  - Winter DP reaches 70 % of the oracle, which was the acceptance target; V reaches 46 %. The calibrated level gets within 33 SEK of a perfect load forecast.
+  - Real temperature instead of yesterday's barely matters (1326.88 SEK).
+  - Reserve 2 kWh instead of 0 costs 23 SEK in winter and 6 SEK in summer. A synthetic third day as terminal value is worse (−22 SEK). Cycle cost 0.10 instead of 0.05 gives the same saving with 54 instead of 58 full cycles in winter.
+- **Verified**: `pytest` 26 passed, 3 expected failures; the summer regression test now expects 147.80 SEK.
+
 ## What's New in 0.9.68
 
 Phase B, step B2 (HANDOFF.md): a new DP planner, measured in the backtest. Behaviour in Home Assistant is unchanged; the planner is not used live yet.

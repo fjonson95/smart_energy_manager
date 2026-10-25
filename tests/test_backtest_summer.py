@@ -12,7 +12,7 @@ import pytest
 from conftest import REPO_ROOT
 from testdata import backtest
 
-EXPECTED_SUMMER_SAVINGS_SEK = 146.25  # baslinje B0 (faktura-pris, min-SOC 8, η 0,848)
+EXPECTED_SUMMER_SAVINGS_SEK = 147.80  # B3: B0 + rättad fasbas och lastform i backtesten
 TOLERANCE_SEK = 1.0
 
 

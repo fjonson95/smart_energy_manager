@@ -2,6 +2,29 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.69
+
+Fas B, steg B3 (HANDOFF.md): mätfel i backtesten rättade och DP-planeraren trimmad. Beteendet i Home Assistant är oförändrat; DP-planeraren används fortfarande inte i drift.
+
+- **Tre fel i backtesten rättade** (alla gav fel siffror, inte fel i drift):
+  - Simuleringens fasskydd utgick från uppmätt faseffekt, där det *verkliga* batteriets effekt ingår. Den verkliga laddningen på 5 kW låg ovanpå simuleringens 8 kW, och laddningen ströps till 0: 409 av 2 225 nätladdningsslots för DP på vintern. Simuleringen har nu en egen controller, och fasbasen byter ut det verkliga batteriet mot det simulerade. Bara 2 slots stryps fortfarande, av verkliga fasgränser.
+  - Lastformen byggdes per UTC-timme men slogs upp per lokal timme, 1 h fel på vintern och 2 h på sommaren. Den använde dessutom bara timmens sista kvart. Nu används lokal timme med medel över timmens kvartar, som `coordinator._update_hourly_shape()`.
+  - Energi kvar i batteriet vid slutet var värd noll (DP slutade på 98 %/65 %, V på 79 %/22 %). Nytt mått: **lagerjusterad** besparing, värderad till periodens snittköp × √η; `oracle_dp.py` värderar likadant.
+- **Kalibrerad dygnsnivå för lasten** (`--load-level calib`, bara DP): faktiskt snitt för 7 dygn + 2,53 kWh × (graddagar för dygnet − snittgraddagar för de 7 dygnen), balanstemperatur 15 °C.
+  - Fel på dygnsnivån: MAE 3,2 kWh, mot 6,7 kWh och +3 kWh bias för dagens max(gårdag, 7 dygn).
+  - Gradtimmodellen i drift (bas 1 kWh, 2,39 kWh/graddag) ligger ungefär 20 kWh/dygn för lågt och slås alltid ut av golvet. Det är därför temperaturprognosen inte gav något i B1.
+- **Resultat** (besparing / lagerjusterad, kr):
+
+  | | V | DP B2 | DP + kalibrerad nivå, reserv 0 | Perfekt last | Orakel |
+  |---|---|---|---|---|---|
+  | Sommar | 147,80 / 171,37 | 144,88 / 178,64 | **172,55 / 207,27** | 175,53 / 209,67 | – / 237,82 |
+  | Vinter | 880,64 / 872,30 | 1 196,02 / 1 211,32 | **1 324,89 / 1 336,45** | 1 359,10 / 1 369,78 | – / 1 898,72 |
+
+  - DP når 70 % av oraklet på vintern, vilket var acceptansmålet; V når 46 %. Den kalibrerade nivån hamnar 33 kr från en perfekt lastprognos.
+  - Verklig temperatur i stället för gårdagens gör nästan ingen skillnad (1 326,88 kr).
+  - Reserv 2 kWh i stället för 0 kostar 23 kr på vintern och 6 kr på sommaren. Ett syntetiskt tredje dygn som slutvärde är sämre (−22 kr). Cykelkostnad 0,10 i stället för 0,05 ger samma besparing med 54 i stället för 58 fullcykler på vintern.
+- **Verifierat**: `pytest` 26 godkända, 3 förväntade fel; sommarens regressionstest förväntar nu 147,80 kr.
+
 ## Nyheter i 0.9.68
 
 Fas B, steg B2 (HANDOFF.md): en ny DP-planerare, mätt i backtesten. Beteendet i Home Assistant är oförändrat; planeraren används inte i drift än.
