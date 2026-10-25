@@ -2,6 +2,24 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.70
+
+Fas B, steg B4 (HANDOFF.md): DP-planeraren körs live i **skuggläge**. Den planerar bredvid dagens planerare, med samma indata och samma tidpunkter, men styr ingenting; exekutorn följer fortfarande dagens plan.
+
+- **Nya sensorer** `Plan B: åtgärd`, `Plan B: laddningseffekt`, `Plan B: urladdningseffekt` och `Plan B: anledning`.
+  - `Plan B: anledning` har samma attribut som `Plan: anledning` (`slots`, `marginal_value_…`, `notes`), plus `daily_load_kwh_by_date` med den dygnsnivå för lasten som DP räknat med.
+  - För att jämföra planerna sida vid sida: lägg till ett andra planeringskort med `day_plan_sensor:` satt till plan B:s anledningssensor. Ingen kortändring behövs.
+- **Kalibrerad dygnsnivå för lasten i DP** (från B3), delad mellan integrationen och backtesten: `dp_planner.calibrated_daily_levels()` ger snittet för 7 dygn av nettoförbrukningen (exklusive dump) + 2,53 kWh × graddagsskillnaden, med balanstemperatur 15 °C.
+  - Dygnets temperatur tas från SMHI-prognosen, annars senaste dygnsmedel.
+  - Dygnshistoriken sparar nu också dygnets medeltemperatur ute (`mean_temp_c`, uppmätt, inte dämpad). Äldre poster utan den räknas ändå med i snittet.
+  - Temperaturtermen börjar verka när historiken har temperaturer, efter 1–7 dygn.
+- **DP-inställningar beslutade i B3**: reserv 0 kWh över min-SOC och cykelkostnad 0,10 kr/kWh, bara för DP. Dagens planerare och inställningen `cycle_cost_sek_kwh` (0,05) är oförändrade tills DP tar över (B5).
+- **Planloggen**: var och en av de fyra ögonblicksbilderna per dygn (00/06/14/20) i `.storage/smart_energy_manager_plan_log` innehåller även plan B (`plan_b`), för att kunna jämföra besluten i efterhand.
+- **Säkerhet**: plan B byggs i en arbetstråd (~15–25 ms) med egen felhantering. Ett fel loggas som `Plan B (DP): kunde inte byggas` och påverkar aldrig dagens plan eller exekutorn.
+- **Verifierat**:
+  - `pytest` 33 godkända, 3 förväntade fel (7 nya tester för dygnsnivån)
+  - backtester oförändrade: DP sommar 170,07, vinter 1 325,29 kr; V sommar 147,80 kr
+
 ## Nyheter i 0.9.69
 
 Fas B, steg B3 (HANDOFF.md): mätfel i backtesten rättade och DP-planeraren trimmad. Beteendet i Home Assistant är oförändrat; DP-planeraren används fortfarande inte i drift.

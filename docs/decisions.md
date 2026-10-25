@@ -635,3 +635,17 @@ Utan kalibrerad nivå (golvet kvar): reserv 0 1 222,20, reserv 2 1 196,02; före
 
 **Slutsatser:** acceptansmålet (70 % av oraklet vintertid) är nått med kalibrerad nivå. Kvarvarande gap mot oraklet (~530 kr) är horisonten (DP ser ≤ 36 h priser) och exekutorns verklighetsklämning – inte lastprognosen (33 kr kvar). Slutvärde = snittköp sista 24 h behålls. Öppna beslut (användaren): reservmarginal (fråga 1) och cykelkostnad – besparingen i backtesten räknar inte slitage, så 0,10 med 4 färre cykler är i praktiken bättre om slitaget är verkligt.
 
+**Beslut 2026-10-25 (användaren):** reservmarginal **0 kWh** över min-SOC och cykelkostnad **0,10 kr/kWh** för DP. Införda som `DPPlanner`-standard; backtesten ger DP 0,10 om inte `--cycle-cost` anges, V behåller driftens 0,05. Driftens `cycle_cost_sek_kwh` (HA-inställning, 0,05) ändras först när DP tar över (B5) – den styr V-planeraren i dag. Utfall med kalibrerad nivå: sommar 170,07 / 204,80, vinter 1 325,29 / 1 337,00 kr, 53,5 fullcykler vintertid.
+
+## 2026-10-25 – Fas B, steg B4: skuggläge (v0.9.70)
+
+**Vad:** `coordinator` bygger `_day_plan_b` med `DPPlanner` direkt efter V-planen (samma utlösare: var 15:e min eller när prisschemat ändras), i `hass.async_add_executor_job` och egen `try`. Exekutorn och alla befintliga sensorer läser bara `_day_plan`. Sensorer `plan_b_*` (unique_id `sem_plan_b_*`) delar klass med V-planens via `_plan()`.
+
+**Indata som skiljer sig från V:** `daily_load_kwh_by_date` = `calibrated_daily_levels(_daily_consumption_history, idag, _forecast_mean_temp_by_date)` – samma funktion som backtestens `--load-level calib` (backtesten anropar den nu, siffrorna oförändrade 170,07 / 1 325,29). Inget EV-schema (`ev_energy_needed_kwh`), ingen `load_shape_p75`, inget torkriskpåslag – DP har inga motsvarigheter än. Reserv 0, cykel 0,10 (DP-standard).
+
+**Temperatur i dygnshistoriken:** `_temp_samples`/`_yesterday_avg_temp` fylls bara när ingen dämpad utetempsensor finns, och live finns en (`sensor.thermostat_dampedoutdoortemp`). Därför en egen ackumulator av momentan utetemp (`sensor.boiler_outdoortemp`, samma som kalibreringen) som skrivs som `mean_temp_c` vid dygnsskiftet. En omstart mitt på dygnet ger medel av resten av dygnet – godtaget.
+
+**Skillnad backtest–drift:** backtesten kalibrerades och körs mot total huslast; drift använder `net_kwh` (exkl. dump). Dumpen är SEM-styrd last som inte ska planeras in, så drift är det riktiga – nivån kan ligga något lägre än i backtesten dumpdagar.
+
+**Utvärdering före B5:** jämför plan A/B i planloggen (`plan_b` per ögonblicksbild) och `daily_load_kwh_by_date` mot faktisk dygnsförbrukning under minst en–två veckor.
+

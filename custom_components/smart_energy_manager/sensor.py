@@ -110,6 +110,10 @@ async def async_setup_entry(
         DayPlanReasonSensor(coordinator, entry),
         PlanExecutorChargeSensor(coordinator, entry),
         PlanExecutorDischargeSensor(coordinator, entry),
+        PlanBActionSensor(coordinator, entry),
+        PlanBChargePowerSensor(coordinator, entry),
+        PlanBDischargePowerSensor(coordinator, entry),
+        PlanBReasonSensor(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -1094,8 +1098,11 @@ class NordpoolPriceScheduleSensor(_BaseEnergySensor):
 class _DayPlanBase(_BaseEnergySensor):
     """Bas för plan-sensorer – hämtar aktuell planslott."""
 
+    def _plan(self):
+        return self.coordinator.day_plan
+
     def _current_slot(self):
-        plan = self.coordinator.day_plan
+        plan = self._plan()
         if not plan:
             return None
         return plan.slot_at(dt_util.now())
@@ -1156,7 +1163,7 @@ class DayPlanReasonSensor(_DayPlanBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        plan = self.coordinator.day_plan
+        plan = self._plan()
         s = self._current_slot()
         if not plan:
             return {}
@@ -1192,6 +1199,45 @@ class DayPlanReasonSensor(_DayPlanBase):
                 if slot.start < dt_util.now() + timedelta(hours=24)
             ],
         }
+
+
+# ── Fas B4: DP-planeraren i skuggläge ───────────────────────────────────────
+# Samma sensorer och attribut som V-planens, så att planeringskortet kan visa
+# plan B med day_plan_sensor: sensor.smart_energy_manager_plan_b_reason.
+# Exekutorn läser aldrig plan B.
+
+class _PlanBMixin:
+    def _plan(self):
+        return self.coordinator.day_plan_b
+
+
+class PlanBActionSensor(_PlanBMixin, DayPlanActionSensor):
+    _attr_unique_id = "sem_plan_b_action"
+    _attr_translation_key = "plan_b_action"
+
+
+class PlanBChargePowerSensor(_PlanBMixin, DayPlanChargePowerSensor):
+    _attr_unique_id = "sem_plan_b_charge_power"
+    _attr_translation_key = "plan_b_charge_power"
+
+
+class PlanBDischargePowerSensor(_PlanBMixin, DayPlanDischargePowerSensor):
+    _attr_unique_id = "sem_plan_b_discharge_power"
+    _attr_translation_key = "plan_b_discharge_power"
+
+
+class PlanBReasonSensor(_PlanBMixin, DayPlanReasonSensor):
+    _attr_unique_id = "sem_plan_b_reason"
+    _attr_translation_key = "plan_b_reason"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs = super().extra_state_attributes
+        if attrs:
+            attrs["daily_load_kwh_by_date"] = {
+                str(d): round(v, 1) for d, v in self.coordinator.day_plan_b_levels.items()
+            }
+        return attrs
 
 
 class PlanExecutorChargeSensor(_DayPlanBase):

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import csv
+import functools
 import logging
 import os
 import re
 import statistics
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -68,6 +70,7 @@ from .energy_controller import (
     ChargerConfig, CarConfig, ChargerState,
 )
 from .energy_planner import EnergyPlanner, DayPlan, _PLAN_HORIZON_H
+from .dp_planner import DPPlanner, calibrated_daily_levels
 from .legionella import LegionellaManager
 from .savings_tracker import DailySavingsTracker
 
@@ -153,6 +156,20 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             cycle_cost_sek_kwh=float(self._config.get(CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)),
         )
         self._day_plan: Optional[DayPlan] = None
+        # Fas B4 skuggläge: DP-planeraren byggs parallellt och exponeras som
+        # plan_b_*-sensorer, men exekutorn läser bara _day_plan. Reserv och
+        # cykelkostnad är DP:s egna (B3-beslut), inte HA-inställningen som V använder.
+        self._dp_planner = DPPlanner(
+            battery_min_soc=float(self._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
+            battery_max_soc=float(self._config.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)),
+            eta_roundtrip=float(self._config.get(CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP)),
+        )
+        self._day_plan_b: Optional[DayPlan] = None
+        self._day_plan_b_levels: dict = {}
+        # Dygnsmedel av momentan utetemp för dygnshistoriken (DP:s lastnivå).
+        # Egen ackumulator: _temp_samples fylls bara när ingen dämpad sensor finns.
+        self._outdoor_temp_day_sum = 0.0
+        self._outdoor_temp_day_n = 0
         # v1.0 steg 6: vilken laddare (om någon) senaste DayPlan schemalade en
         # deadline-garanti för. Se _compute_ev_schedule_inputs().
         self._ev_scheduled_charger_name: Optional[str] = None
@@ -504,23 +521,45 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             local = now.astimezone()
             bucket = sum(1 for h in (6, 14, 20) if local.hour >= h)
             key = f"{local:%Y-%m-%d}-{bucket}"
-            if key == self._plan_log_last_key:
-                return
 
             buy_by_start = {s.start: (s.buy_sek, s.sell_sek) for s in price_schedule.slots}
             cutoff = local + timedelta(hours=36)
-            rows = []
-            for s in plan.slots:
-                if s.start >= cutoff:
-                    break
-                buy, sell = buy_by_start.get(s.start, (None, None))
-                rows.append([
-                    s.start.astimezone().strftime("%d %H:%M"), s.action,
-                    round(s.target_power_w), round(s.battery_soc_est_pct, 1),
-                    round(buy, 3) if buy is not None else None,
-                    round(sell, 3) if sell is not None else None,
-                    1 if s.hold_battery else 0, s.reason,
-                ])
+
+            def _rows(p):
+                out = []
+                for s in p.slots:
+                    if s.start >= cutoff:
+                        break
+                    buy, sell = buy_by_start.get(s.start, (None, None))
+                    out.append([
+                        s.start.astimezone().strftime("%d %H:%M"), s.action,
+                        round(s.target_power_w), round(s.battery_soc_est_pct, 1),
+                        round(buy, 3) if buy is not None else None,
+                        round(sell, 3) if sell is not None else None,
+                        1 if s.hold_battery else 0, s.reason,
+                    ])
+                return out
+
+            def _plan_b_entry():
+                pb = self._day_plan_b
+                if pb is None or pb.generated_at < plan.generated_at:
+                    return None
+                return {
+                    "notes": pb.notes,
+                    "v": round(pb.marginal_value_sek_kwh, 3),
+                    "daily_load_kwh_by_date": {str(d): round(v, 2) for d, v in self._day_plan_b_levels.items()},
+                    "slots": _rows(pb),
+                }
+
+            if key == self._plan_log_last_key:
+                last = self._plan_log[-1] if self._plan_log else None
+                if last is not None and last.get("key") == key and "plan_b" not in last:
+                    entry = _plan_b_entry()
+                    if entry is not None:
+                        last["plan_b"] = entry
+                        self.hass.async_create_task(self._save_plan_log_store())
+                return
+            rows = _rows(plan)
 
             def _attr(entity_id, name):
                 st = self.hass.states.get(entity_id) if entity_id else None
@@ -547,6 +586,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "slot_columns": ["start", "action", "power_w", "soc_pct", "buy", "sell", "hold_battery", "reason"],
                 "slots": rows,
             })
+            _pb = _plan_b_entry()
+            if _pb is not None:
+                self._plan_log[-1]["plan_b"] = _pb
             self._plan_log = self._plan_log[-40:]
             self._plan_log_last_key = key
             self.hass.async_create_task(self._save_plan_log_store())
@@ -1523,6 +1565,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         "total_kwh": round(yesterday_kwh, 3),
                         "dump_kwh": round(self._dump_energy_today_kwh, 3),
                         "net_kwh": round(net_kwh, 3),
+                        "mean_temp_c": (
+                            round(self._outdoor_temp_day_sum / self._outdoor_temp_day_n, 2)
+                            if self._outdoor_temp_day_n else None
+                        ),
                     })
                     self._daily_consumption_history = self._daily_consumption_history[-7:]
                     self.hass.async_create_task(self._save_daily_consumption_store())
@@ -1533,6 +1579,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 self._dump_energy_today_kwh = 0.0
                 self._daily_consumption_date = today_str
                 self._dump_last_update = now
+                self._outdoor_temp_day_sum = 0.0
+                self._outdoor_temp_day_n = 0
+            if outdoor_temp is not None:
+                self._outdoor_temp_day_sum += outdoor_temp
+                self._outdoor_temp_day_n += 1
 
             if self._dump_last_update is not None:
                 _dt_h = (now - self._dump_last_update).total_seconds() / 3600.0
@@ -1674,6 +1725,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 )
                 plan_expired = self._day_plan is None or now >= self._day_plan.valid_until
                 if plan_expired or ps_sig != self._last_plan_ps_sig:
+                    ev_reserve_margin_kwh = 0.0
                     try:
                         # EV-marginal: flat buffert om NÅGON laddare har en vald
                         # bil under sitt SOC-mål och sol inte räcker idag/imorgon
@@ -1730,6 +1782,38 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                         self._maybe_log_plan(now, state, price_schedule)
                     except Exception as _plan_err:
                         _LOGGER.warning("DayPlan: kunde inte byggas: %s", _plan_err)
+
+                    try:
+                        self._day_plan_b_levels = calibrated_daily_levels(
+                            self._daily_consumption_history, now.date(), self._forecast_mean_temp_by_date,
+                        ) or {}
+                        _t0 = time.monotonic()
+                        self._day_plan_b = await self.hass.async_add_executor_job(functools.partial(
+                            self._dp_planner.build_plan,
+                            now=now,
+                            battery_soc_pct=state.battery_soc_pct,
+                            battery_capacity_kwh=state.battery_capacity_kwh,
+                            battery_max_power_kw=state.battery_max_power_kw,
+                            ps=price_schedule,
+                            predicted_daily_kwh=state.predicted_daily_kwh,
+                            solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
+                            solar_takeover_dt=state.solar_takeover_dt,
+                            house_load_w=state.house_load_w,
+                            pv_production_ratio=pv_production_ratio,
+                            yesterday_consumption_kwh=state.yesterday_consumption_kwh,
+                            house_load_avg_w=state.house_load_avg_w,
+                            ev_reserve_margin_kwh=ev_reserve_margin_kwh,
+                            rolling_consumption_kwh=state.rolling_consumption_kwh,
+                            load_shape_p50=self._get_load_shape(0.5),
+                            daily_load_kwh_by_date=self._day_plan_b_levels or None,
+                        ))
+                        _LOGGER.info(
+                            "Plan B (DP) byggd på %.0f ms: %s",
+                            (time.monotonic() - _t0) * 1000.0, self._day_plan_b.notes,
+                        )
+                        self._maybe_log_plan(now, state, price_schedule)
+                    except Exception as _plan_b_err:
+                        _LOGGER.warning("Plan B (DP): kunde inte byggas: %s", _plan_b_err)
 
             if self._day_plan:
                 _cs = self._day_plan.slot_at(now)
@@ -2227,3 +2311,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     @property
     def day_plan(self) -> Optional[DayPlan]:
         return self._day_plan
+
+    @property
+    def day_plan_b(self) -> Optional[DayPlan]:
+        return self._day_plan_b
+
+    @property
+    def day_plan_b_levels(self) -> dict:
+        return self._day_plan_b_levels

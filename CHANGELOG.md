@@ -2,6 +2,24 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.70
+
+Phase B, step B4 (HANDOFF.md): the DP planner runs live in **shadow mode**. It plans next to today's planner, with the same inputs and the same timing, but controls nothing; the executor still follows today's plan.
+
+- **New sensors** `Plan B: action`, `Plan B: charge power`, `Plan B: discharge power` and `Plan B: reason`.
+  - `Plan B: reason` has the same attributes as `Plan: reason` (`slots`, `marginal_value_…`, `notes`), plus `daily_load_kwh_by_date` showing the daily load level DP used.
+  - To compare the plans side by side, add a second plan card with `day_plan_sensor:` set to the plan B reason sensor. No card change is needed.
+- **Calibrated daily load level for DP** (from B3), shared by the integration and the backtest: `dp_planner.calibrated_daily_levels()` returns the 7-day mean of net consumption (excluding dump) + 2.53 kWh × degree-day difference, with a 15 °C balance temperature.
+  - The day's temperature comes from the SMHI forecast, otherwise the latest daily mean.
+  - The daily consumption history now also stores each day's mean outdoor temperature (`mean_temp_c`, measured, not damped). Older entries without it are still counted in the mean.
+  - The temperature term starts working once the history has temperatures, after 1–7 days.
+- **DP settings decided in B3**: reserve 0 kWh above min SOC and cycle cost 0.10 SEK/kWh, for DP only. Today's planner and the `cycle_cost_sek_kwh` setting (0.05) are unchanged until DP takes over (B5).
+- **Plan log**: each of the four daily snapshots (00/06/14/20) in `.storage/smart_energy_manager_plan_log` also holds plan B (`plan_b`), for comparing decisions afterwards.
+- **Safety**: plan B is built in a worker thread (~15–25 ms) in its own error handling. A failure is logged as `Plan B (DP): kunde inte byggas` and never affects today's plan or the executor.
+- **Verified**:
+  - `pytest` 33 passed, 3 expected failures (7 new tests for the daily level)
+  - backtests unchanged: DP summer 170.07, winter 1325.29 SEK; V summer 147.80 SEK
+
 ## What's New in 0.9.69
 
 Phase B, step B3 (HANDOFF.md): backtest measurement fixes and DP tuning. Behaviour in Home Assistant is unchanged; the DP planner is still not used live.

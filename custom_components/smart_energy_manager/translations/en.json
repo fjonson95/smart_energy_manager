@@ -416,6 +416,18 @@
       "day_plan_reason": {
         "name": "Plan: reason"
       },
+      "plan_b_action": {
+        "name": "Plan B: action"
+      },
+      "plan_b_charge_power": {
+        "name": "Plan B: charge power"
+      },
+      "plan_b_discharge_power": {
+        "name": "Plan B: discharge power"
+      },
+      "plan_b_reason": {
+        "name": "Plan B: reason"
+      },
       "plan_executor_charge": {
         "name": "Plan executor: charge"
       },

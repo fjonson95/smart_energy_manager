@@ -241,6 +241,12 @@ DEFAULT_HEAT_FACTOR_KWH_DD   = 2.39   # kWh per gradddag
 DEFAULT_BASE_DHW_KWH         = 1.0    # kWh/dag – fast varmvattenbas
 DEFAULT_DISINFECTING_EXTRA_KWH = 5.0  # kWh extra vid desinficering/legionella
 
+# DP-planerarens dygnsnivå (fas B3): 7 dygns faktiska snitt + k × graddagsdelta.
+# Helhus, kalibrerad mot jan–apr + aug–sep 2026 (docs/decisions.md B3) – inte
+# samma modell som heat_factor_kwh_dd ovan, som bara beskriver uppvärmningen.
+DP_LOAD_BALANCE_TEMP_C = 15.0
+DP_LOAD_K_KWH_DD       = 2.53
+
 # EV-marginal i exportgolvet: flat säkerhetsbuffert (inte hela vägen till
 # soc_target) när en bil är vald och kan behöva ladda under ett mörkt/lågsol-
 # fönster. Se energy_planner.py::build_plan().

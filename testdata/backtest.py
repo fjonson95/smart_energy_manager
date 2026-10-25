@@ -91,7 +91,7 @@ from custom_components.smart_energy_manager.energy_controller import (
     EnergyController, EnergyState, ChargerState, ChargerConfig, CarConfig,
 )
 from custom_components.smart_energy_manager.energy_planner import EnergyPlanner
-from custom_components.smart_energy_manager.dp_planner import DPPlanner
+from custom_components.smart_energy_manager.dp_planner import DPPlanner, calibrated_daily_levels
 from custom_components.smart_energy_manager.price_scheduler import (
     PriceSchedule, PriceSlot,
 )
@@ -494,7 +494,9 @@ def run_backtest(
         battery_min_soc                = s["battery_min_soc"],
         battery_max_soc                = s["battery_max_soc"],
         eta_roundtrip                  = s["eta_roundtrip"],
-        cycle_cost_sek_kwh             = s["cycle_cost_sek_kwh"],
+        # DP har egen standard (0,10, B3); V behåller driftens 0,05 tills DP tar över.
+        **({"cycle_cost_sek_kwh": s["cycle_cost_sek_kwh"]}
+           if planner_kind != "dp" or "cycle_cost_sek_kwh" in overrides else {}),
         **(dp_options if planner_kind == "dp" else {}),
     )
 
@@ -619,11 +621,9 @@ def run_backtest(
 
     # --temp-oracle: verklig dygnsmedeltemperatur för kommande dygn som
     # "prognos" (övre gräns för vad SMHI-prognosen i lastnivån kan ge).
-    # --load-level calib (B3): dygnsnivå = 7 dygns faktiska snitt +
-    # k × (graddagar för dygnet − snittgraddagar de 7 dygnen). Kalibrerad mot
-    # jan–apr + aug–sep 2026 (helhus, t_bal 15 °C). Dygnets temperatur är
-    # verklig med --temp-oracle, annars gårdagens (persistens).
-    _CAL_TBAL, _CAL_K = 15.0, 2.53
+    # --load-level calib (B3): samma funktion som coordinatorn använder i drift
+    # (dp_planner.calibrated_daily_levels). Dygnets temperatur är verklig med
+    # --temp-oracle, annars gårdagens (persistens).
     _daily_load_actual: dict = {}
     for d, hrs in _day_hour_totals.items():
         if len(hrs) >= 20:
@@ -637,21 +637,15 @@ def run_backtest(
 
     def _calib_levels(ts: datetime) -> Optional[dict]:
         day0 = ts.astimezone().date()
-        past = [day0 - timedelta(days=i) for i in range(1, 8)]
-        loads = [_daily_load_actual[d] for d in past if d in _daily_load_actual]
-        temps = [_daily_temp_local[d] for d in past if d in _daily_temp_local]
-        if not loads or not temps:
-            return None
-        dd = lambda tc: max(0.0, _CAL_TBAL - tc)
-        dd7 = sum(dd(tc) for tc in temps) / len(temps)
-        base = sum(loads) / len(loads)
-        y_temp = _daily_temp_local.get(day0 - timedelta(days=1), temps[0])
-        out = {}
-        for offset in (0, 1, 2):
-            d = day0 + timedelta(days=offset)
-            tc = _daily_temp_local.get(d, y_temp) if temp_oracle else y_temp
-            out[d] = max(0.0, base + _CAL_K * (dd(tc) - dd7))
-        return out
+        history = [
+            {"net_kwh": _daily_load_actual[d], "mean_temp_c": _daily_temp_local.get(d)}
+            for d in (day0 - timedelta(days=i) for i in range(7, 0, -1))
+            if d in _daily_load_actual
+        ]
+        forecast = ({day0 + timedelta(days=o): _daily_temp_local[day0 + timedelta(days=o)]
+                     for o in (0, 1, 2) if day0 + timedelta(days=o) in _daily_temp_local}
+                    if temp_oracle else None)
+        return calibrated_daily_levels(history, day0, forecast)
 
     def _daily_load_by_date(ts: datetime) -> Optional[dict]:
         if load_level == "calib":

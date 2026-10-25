@@ -26,6 +26,7 @@ Tillhörande **SEM LM Bridge** (`C:\Users\Fredrik\Documents\sem_lm_bridge\bridge
 custom_components/smart_energy_manager/
   coordinator.py        # DataUpdateCoordinator – hämtar state, bygger plan, kör controller, applicerar beslut
   energy_planner.py     # Ren logik – DayPlan för 48 h (marginalvärdet V, regel 1–4, EV-schema)
+  dp_planner.py         # Ren logik – DayPlan med dynamisk programmering (fas B, skuggläge i B4)
   energy_controller.py  # Ren logik – EnergyState → ControlDecision; apply_plan_executor() skriver batteriet
   price_scheduler.py    # Nordpool-schemaläggning, headroom, negativt-pris-logik
   heat_planner.py       # Rena funktioner för värmepump/varmvatten (steg 7)
@@ -61,6 +62,7 @@ docs/decisions.md       # Daterade beslut och flyttade incidentberättelser (P01
 1. `coordinator._async_update_data()` hämtar alla sensor-states
 2. Bygger `EnergyState` med laddare, batteri, sol, priser
 3. `EnergyPlanner.build_plan()` bygger om DayPlan (var 15:e min eller när priserna ändras)
+   - Skuggläge (fas B4): `DPPlanner.build_plan()` (`dp_planner.py`) bygger plan B direkt efteråt i en arbetstråd → `plan_b_*`-sensorer och `plan_b` i planloggen. Exekutorn läser aldrig plan B. Dygnsnivån för lasten kommer från `calibrated_daily_levels()` (delad med backtestens `--load-level calib`).
 4. `EnergyController.compute()` returnerar `ControlDecision` (EV, varmvatten, fasskydd, preliminärt batteri)
 5. `EnergyController.apply_plan_executor()` ersätter batteridelen med planens slot, klämd mot verkligheten – enda stället som skriver batterieffekt (delas med backtesten)
 6. Coordinator applicerar beslut via HA-tjänster

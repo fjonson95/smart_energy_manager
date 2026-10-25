@@ -16,14 +16,51 @@ diskretiseras i _STEP_KWH; en åtgärd flyttar ett helt antal steg per kvart.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import numpy as np
 
+from .const import DP_LOAD_BALANCE_TEMP_C, DP_LOAD_K_KWH_DD
 from .energy_planner import DayPlan, PlannedSlot, _PLAN_HORIZON_H
 
 _STEP_KWH = 0.1
+
+
+def calibrated_daily_levels(
+    history: list[dict],
+    today: date,
+    forecast_mean_temp_by_date: Optional[dict] = None,
+    days_ahead: int = 2,
+) -> Optional[dict]:
+    """Dygnsnivå (kWh) för idag och days_ahead dygn framåt.
+
+    history: avslutade dygn, äldst först, med net_kwh och (valfritt)
+    mean_temp_c. Nivå = snittet av de senaste 7 dygnens net_kwh +
+    k × (graddagar för dygnet − snittgraddagar för de dygn som har
+    temperatur). Dygnets temperatur tas ur prognosen, annars senast kända
+    dygnsmedel (persistens – i backtesten lika bra som perfekt temperatur).
+    """
+    recent = [h for h in history[-7:] if h.get("net_kwh") is not None]
+    if not recent:
+        return None
+    base = sum(float(h["net_kwh"]) for h in recent) / len(recent)
+    temps = [float(h["mean_temp_c"]) for h in recent if h.get("mean_temp_c") is not None]
+
+    def dd(temp_c: float) -> float:
+        return max(0.0, DP_LOAD_BALANCE_TEMP_C - temp_c)
+
+    forecast = forecast_mean_temp_by_date or {}
+    out = {}
+    for offset in range(days_ahead + 1):
+        d = today + timedelta(days=offset)
+        if not temps:
+            out[d] = base
+            continue
+        dd_mean = sum(dd(t) for t in temps) / len(temps)
+        temp_c = forecast.get(d, temps[-1])
+        out[d] = max(0.0, base + DP_LOAD_K_KWH_DD * (dd(temp_c) - dd_mean))
+    return out
 # Prisskillnader under detta (kr/kWh) räknas som lika – annars väljer DP:n
 # slumpmässiga små laddningar/urladdningar mellan nästan identiska kvartar.
 _TIE_EPS = 1e-6
@@ -35,11 +72,14 @@ class DPPlanner:
         battery_min_soc: float = 10.0,
         battery_max_soc: float = 95.0,
         eta_roundtrip: float = 0.87,
-        cycle_cost_sek_kwh: float = 0.05,
-        reserve_margin_kwh: float = 2.0,
+        cycle_cost_sek_kwh: float = 0.10,
+        reserve_margin_kwh: float = 0.0,
         terminal_mode: str = "mean24",
     ):
-        """terminal_mode: "mean24" = kvarvarande energi till snittköp sista
+        """Standardvärden beslutade i B3 (docs/decisions.md): reserv 0 kWh över
+        min-SOC (Sonnen stannar själv vid 8 %), cykelkostnad 0,10 kr/kWh.
+
+        terminal_mode: "mean24" = kvarvarande energi till snittköp sista
         24 h; "repeat" = sista 24 h:s priser, sol och last upprepas ett dygn
         till innan snittvärdet sätts (syntetiskt tredje dygn)."""
         self.battery_min_soc = battery_min_soc
