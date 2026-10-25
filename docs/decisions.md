@@ -570,3 +570,14 @@ Fel hittat på vägen: `number.smart_energy_manager_battery_min_soc` återställ
 | Vinter (`history_jan_apr2026`, 2026-01-01…04-30) | 833,81 kr | 25,60 | 1 899,91 kr | 44 % |
 
 Besparingen sjönk mot förut (157 / 914 kr) för att köpet nu är ~0,30 kr/kWh billigare – lagrad energi är mindre värd. **Godkänt för DP-planeraren (B2/B3): vinter ≥ 1 330 kr (≈ 70 % av oraklet), sommar ≥ 146 kr.**
+
+---
+
+## 2026-10-25 – Fas B, steg B1: indata (v0.9.67)
+
+**Batteriets effekt mot SOC** (timstatistik jan–apr och aug–okt 2026, ~2 700 timmar):
+- Laddning: full effekt (~8 kW) ända upp till 98 % SOC; vid 99 % ~3,9 kW. Max-SOC är 99, så ingen effektkurva behövs.
+- Urladdning: följer beordrad effekt fullt ned till ~10 %; 8–10 % ungefär 70 % av beordrat; vid 8 % stopp (5 W, sett i flera timmar 20–21 sep).
+- ⇒ DP-planeraren räknar med konstant 8 kW åt båda hållen inom 8–98 %, hård nedre gräns 8 %.
+
+**Lastnivå per dygn från väderprognosen:** `coordinator._daily_load_kwh_by_date()` räknar gradtimmodellen per prognosdygn (SMHI dygnsmedel (max+min)/2, bara kommande dygn – idag behåller dämpad temperatur + desinficeringstillägg); `EnergyPlanner.build_plan(daily_load_kwh_by_date=…)` skalar lastformen per dygn med förbrukningsgolvet kvar. Backtest `--temp-oracle` (verklig dygnsmedeltemp som perfekt prognos): sommar 146,25 → 146,25 kr, vinter 833,81 → **825,56 kr (−1 %)**. En kallare morgondag höjer V och V-planeraren håller/köper mer – samma strukturfel som HANDOFF 4.1. **Beslut: inte inkopplad i drift med V-planeraren; kopplas in med DP-planeraren och mäts där.**

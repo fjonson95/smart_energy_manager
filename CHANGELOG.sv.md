@@ -2,6 +2,22 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.67
+
+Fas B, steg B1 (HANDOFF.md): indata till den kommande DP-planeraren. Beteendet i Home Assistant är oförändrat.
+
+- **Batteriets effekt mot SOC uppmätt** (~2 700 timmar historik):
+  - full laddning, 8 kW, upp till 98 % SOC
+  - urladdningen följer beordrat ned till ~10 %, ungefär 70 % av det vid 8–10 %, och stannar vid 8 %
+  - DP-planeraren räknar med 8 kW åt båda hållen inom 8–98 % och 8 % som hård gräns
+- **Lastnivå per dygn från väderprognosen** (förberedd, inte aktiv): `EnergyPlanner.build_plan(daily_load_kwh_by_date=…)` och `coordinator._daily_load_kwh_by_date()` skalar lastformen per dygn med SMHI:s prognostiserade dygnsmedeltemperatur.
+  - Ny backtestflagga `--temp-oracle`: verklig temperatur som perfekt prognos.
+  - Resultat: sommar oförändrad, vinter 833,81 → 825,56 kr (−1 %). En kallare morgondag höjer V och dagens planerare håller och köper mer.
+  - Den är därför inte inkopplad i dagens planerare; den kopplas in och mäts med DP-planeraren.
+- **Verifierat**:
+  - `pytest` 21 godkända, 3 förväntade fel
+  - backtester utan flaggan identiska med B0 (146,25 / 833,81 kr)
+
 ## Nyheter i 0.9.66
 
 Fas B, steg B0 (HANDOFF.md): ny baslinje innan planeraren byts ut.

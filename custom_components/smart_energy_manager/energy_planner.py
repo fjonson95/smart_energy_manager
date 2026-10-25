@@ -224,6 +224,7 @@ class EnergyPlanner:
         ev_max_power_kw: float = 0.0,
         current_outdoor_temp_c: Optional[float] = None,
         weather_forecast: Optional[list] = None,
+        daily_load_kwh_by_date: Optional[dict] = None,
     ) -> DayPlan:
         # solar_forecast_tomorrow_kwh/solar_takeover_dt används inte längre (V ser morgondagens sol via ps.slots). Se docs/decisions.md P01.
         now_a = now if now.tzinfo else now.astimezone()
@@ -233,17 +234,28 @@ class EnergyPlanner:
         batt_max_kwh = battery_capacity_kwh * self.battery_max_soc / 100.0
         batt_kwh     = battery_capacity_kwh * battery_soc_pct / 100.0
         # Gradtimmodellen täcker inte baslasten – max mot verklig förbrukning (7-dygnssnitt före gårdagen). Se docs/decisions.md P02.
-        _eff_daily_kwh = max(predicted_daily_kwh, rolling_consumption_kwh or yesterday_consumption_kwh or 0.0)
+        _consumption_floor_kwh = rolling_consumption_kwh or yesterday_consumption_kwh or 0.0
+        _eff_daily_kwh = max(predicted_daily_kwh, _consumption_floor_kwh)
         _load_for_projection_w = house_load_avg_w if house_load_avg_w is not None else house_load_w
         hourly_load_kw = max(_eff_daily_kwh / 24.0, _load_for_projection_w / 1000.0, 0.5)
+
+        # Med väderprognos får varje dygn sin egen nivå: en köldknäpp i natt
+        # syns i planen redan i kväll, inte först dagen efter (gradtimmodellen
+        # matades annars bara med gårdagens/dämpad temperatur).
+        def _eff_daily_kwh_on(dt: datetime) -> float:
+            if daily_load_kwh_by_date:
+                level = daily_load_kwh_by_date.get(dt.astimezone().date())
+                if level is not None:
+                    return max(level, _consumption_floor_kwh)
+            return _eff_daily_kwh
 
         # Formen skalas mot _eff_daily_kwh, inte rå predicted_daily_kwh (mild dag gav nästan noll last, 2026-09-23). Se docs/decisions.md P03.
         def _load_kw_at(dt: datetime, shape: Optional[list]) -> float:
             if shape is not None:
                 h = shape[dt.astimezone().hour]
                 if h is not None:
-                    return _eff_daily_kwh * h
-            return hourly_load_kw
+                    return _eff_daily_kwh_on(dt) * h
+            return max(_eff_daily_kwh_on(dt) / 24.0, hourly_load_kw)
 
         def _slot_load_kwh(s, shape: Optional[list]) -> float:
             return _load_kw_at(s.start, shape) * (s.end - s.start).total_seconds() / 3600.0
@@ -317,7 +329,7 @@ class EnergyPlanner:
         _tomorrow_start = (now_a + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         _prices_cover_tomorrow = any(s.start >= _tomorrow_start for s in future_slots)
         if not _prices_cover_tomorrow:
-            _tomorrow_deficit_kwh = max(0.0, _eff_daily_kwh - solar_forecast_tomorrow_kwh)
+            _tomorrow_deficit_kwh = max(0.0, _eff_daily_kwh_on(_tomorrow_start + timedelta(hours=12)) - solar_forecast_tomorrow_kwh)
             _reserved_kwh = max(_reserved_kwh, min(batt_max_kwh, batt_min_kwh + _tomorrow_deficit_kwh))
 
         # En gemensam merit-order över täckning och export – två separata pass kunde ge V=0. Se docs/decisions.md P06.

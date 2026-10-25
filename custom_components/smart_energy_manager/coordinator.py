@@ -210,6 +210,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # alla börvärden SEM skriver verkningslösa utan att något syns.
         self._battery_mode_warning_active: bool = False
         self._started_at: datetime = dt_util.now()
+        # Väderprognosens dygnsmedeltemperatur per lokalt datum (sätts av
+        # _fetch_weather_forecast) – ger lastnivån per dygn i planen.
+        self._forecast_mean_temp_by_date: dict = {}
 
         # Produktionskvot (P3-2): rullande 3-dygns kvot faktisk/prognos
         # solproduktion – upptäcker snötäckta/nedsmutsade paneler som
@@ -1715,6 +1718,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             load_shape_p75=self._get_load_shape(0.75),
                             current_outdoor_temp_c=state.outdoor_temp_c,
                             weather_forecast=weather_forecast,
+                            # daily_load_kwh_by_date (self._daily_load_kwh_by_date()) kopplas
+                            # in först med DP-planeraren: V-planeraren blev sämre av den
+                            # (vinterbacktest −1 % även med perfekt temperatur). Se docs/decisions.md B1.
                             ev_energy_needed_kwh=_ev_energy_needed_kwh,
                             ev_deadline=_ev_deadline,
                             ev_max_power_kw=_ev_max_power_kw,
@@ -1844,6 +1850,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         horizon_end = now + timedelta(hours=_PLAN_HORIZON_H)
 
         result: list = []
+        self._forecast_mean_temp_by_date = {}
         for day in forecast_days:
             try:
                 day_dt_raw = day.get("datetime")
@@ -1852,16 +1859,35 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 day_dt = datetime.fromisoformat(day_dt_raw)
                 if day_dt.tzinfo is None:
                     day_dt = day_dt.astimezone()
-                if day_dt <= horizon_end:
-                    continue
                 temp_max_c = day.get("temperature")
                 temp_min_c = day.get("templow")
                 if temp_max_c is None or temp_min_c is None:
+                    continue
+                self._forecast_mean_temp_by_date[dt_util.as_local(day_dt).date()] = (
+                    float(temp_max_c) + float(temp_min_c)
+                ) / 2.0
+                if day_dt <= horizon_end:
                     continue
                 result.append((day_dt, day.get("condition"), float(temp_max_c), float(temp_min_c)))
             except (ValueError, TypeError) as err:
                 _LOGGER.debug("Kunde inte tolka väderprognos-dag %s: %s", day, err)
         return result
+
+    def _daily_load_kwh_by_date(self) -> dict:
+        """Gradtimmodellens dygnsnivå per prognosdygn (samma formel som
+        predicted_daily_kwh, men med prognosens dygnsmedel i stället för
+        gårdagens/dämpade temperatur). Idag behåller den vanliga nivån – den
+        följer redan aktuell dämpad temperatur och desinficeringstillägget."""
+        c = self._config
+        t_bal = float(c.get(CONF_HEAT_BALANCE_TEMP, DEFAULT_HEAT_BALANCE_TEMP))
+        k = float(c.get(CONF_HEAT_FACTOR_KWH_DD, DEFAULT_HEAT_FACTOR_KWH_DD))
+        base = float(c.get(CONF_BASE_DHW_KWH, DEFAULT_BASE_DHW_KWH))
+        today = dt_util.now().date()
+        return {
+            day: base + k * max(0.0, t_bal - mean_temp)
+            for day, mean_temp in self._forecast_mean_temp_by_date.items()
+            if day > today
+        }
 
     def _entity_not_ready_yet(self, state) -> bool:
         """Inom _STARTUP_GRACE efter start: entiteten finns inte eller är

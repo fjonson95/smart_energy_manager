@@ -463,6 +463,7 @@ def run_backtest(
     date_from: Optional[datetime] = None,
     date_to:   Optional[datetime] = None,
     drought_oracle: bool = False,
+    temp_oracle: bool = False,
 ):
     s = {**SETTINGS, **overrides}
 
@@ -584,6 +585,19 @@ def run_backtest(
         if temp_for_model is None:
             return 0.0
         return DEFAULT_BASE_DHW_KWH + DEFAULT_HEAT_FACTOR_KWH_DD * max(0.0, DEFAULT_HEAT_BALANCE_TEMP - temp_for_model)
+
+    # --temp-oracle: verklig dygnsmedeltemperatur för kommande dygn som
+    # "prognos" (övre gräns för vad SMHI-prognosen i lastnivån kan ge).
+    def _daily_load_by_date(ts: datetime) -> Optional[dict]:
+        if not temp_oracle:
+            return None
+        day0 = ts.astimezone().date()
+        out = {}
+        for offset in (1, 2, 3):
+            d = day0 + timedelta(days=offset)
+            if d in _daily_temp_avg:
+                out[d] = DEFAULT_BASE_DHW_KWH + DEFAULT_HEAT_FACTOR_KWH_DD * max(0.0, DEFAULT_HEAT_BALANCE_TEMP - _daily_temp_avg[d])
+        return out or None
 
     def _load_shape_at(ts: datetime, percentile: float) -> Optional[list]:
         day0 = ts.astimezone(timezone.utc).date()
@@ -736,6 +750,7 @@ def run_backtest(
                         load_shape_p75=_load_shape_at(ts, 0.75),
                         current_outdoor_temp_c=state.outdoor_temp_c if drought_oracle else None,
                         weather_forecast=_oracle_weather_forecast(ts) if drought_oracle else None,
+                        daily_load_kwh_by_date=_daily_load_by_date(ts),
                     )
                 except Exception as _plan_err:
                     sys.stdout.buffer.write(f"DayPlan-fel vid {ts}: {_plan_err}\n".encode("utf-8"))
@@ -816,6 +831,7 @@ def run_backtest(
                         load_shape_p75=_load_shape_at(ts, 0.75),
                         current_outdoor_temp_c=state.outdoor_temp_c if drought_oracle else None,
                         weather_forecast=_oracle_weather_forecast(ts) if drought_oracle else None,
+                        daily_load_kwh_by_date=_daily_load_by_date(ts),
                     )
                 except Exception as _sim_plan_err:
                     sys.stdout.buffer.write(f"Sim DayPlan-fel vid {ts}: {_sim_plan_err}\n".encode("utf-8"))
@@ -1052,6 +1068,10 @@ def main():
             "optimistisk övre gräns, inte ett förväntat verkligt utfall."
         ),
     )
+    parser.add_argument(
+        "--temp-oracle", action="store_true",
+        help="Lastnivå per dygn från verklig dygnsmedeltemperatur (perfekt temperaturprognos).",
+    )
     args = parser.parse_args()
 
     overrides = {}
@@ -1060,7 +1080,8 @@ def main():
     date_from = datetime.fromisoformat(args.date_from).replace(tzinfo=timezone.utc) if args.date_from else None
     date_to   = datetime.fromisoformat(args.date_to  ).replace(tzinfo=timezone.utc) if args.date_to   else None
 
-    run_backtest(args.input, args.out, overrides, date_from, date_to, drought_oracle=args.drought_oracle)
+    run_backtest(args.input, args.out, overrides, date_from, date_to, drought_oracle=args.drought_oracle,
+                 temp_oracle=args.temp_oracle)
 
 
 if __name__ == "__main__":

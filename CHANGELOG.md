@@ -2,6 +2,22 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.67
+
+Phase B, step B1 (HANDOFF.md): inputs for the coming DP planner. Behaviour in Home Assistant is unchanged.
+
+- **Battery power vs SOC measured** (~2,700 hours of history):
+  - full 8 kW charging up to 98 % SOC
+  - discharge follows the command down to ~10 %, about 70 % of it at 8–10 %, and stops at 8 %
+  - the DP planner will use 8 kW both ways within 8–98 % with 8 % as a hard floor
+- **Load level per day from the weather forecast** (prepared, not active): `EnergyPlanner.build_plan(daily_load_kwh_by_date=…)` and `coordinator._daily_load_kwh_by_date()` scale the load shape per day using SMHI's forecast daily mean temperature.
+  - New backtest flag `--temp-oracle`: actual temperature as a perfect forecast.
+  - Result: summer unchanged, winter 833.81 → 825.56 SEK (−1 %). A colder tomorrow raises V and the current planner holds and buys more.
+  - So it is not wired into the current planner; it will be connected and measured with the DP planner.
+- **Verified**:
+  - `pytest` 21 passed, 3 expected failures
+  - backtests without the flag identical to B0 (146.25 / 833.81 SEK)
+
 ## What's New in 0.9.66
 
 Phase B, step B0 (HANDOFF.md): new baseline before the planner is replaced.
