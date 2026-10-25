@@ -581,3 +581,21 @@ Besparingen sjönk mot förut (157 / 914 kr) för att köpet nu är ~0,30 kr/kWh
 - ⇒ DP-planeraren räknar med konstant 8 kW åt båda hållen inom 8–98 %, hård nedre gräns 8 %.
 
 **Lastnivå per dygn från väderprognosen:** `coordinator._daily_load_kwh_by_date()` räknar gradtimmodellen per prognosdygn (SMHI dygnsmedel (max+min)/2, bara kommande dygn – idag behåller dämpad temperatur + desinficeringstillägg); `EnergyPlanner.build_plan(daily_load_kwh_by_date=…)` skalar lastformen per dygn med förbrukningsgolvet kvar. Backtest `--temp-oracle` (verklig dygnsmedeltemp som perfekt prognos): sommar 146,25 → 146,25 kr, vinter 833,81 → **825,56 kr (−1 %)**. En kallare morgondag höjer V och V-planeraren håller/köper mer – samma strukturfel som HANDOFF 4.1. **Beslut: inte inkopplad i drift med V-planeraren; kopplas in med DP-planeraren och mäts där.**
+
+## 2026-10-25 – Fas B, steg B2: DP-planeraren (v0.9.68)
+
+**Modell:** tillstånd = (slot, lagrad energi i 0,1 kWh-steg mellan min-SOC och max-SOC), bakåtrekursion med numpy över hela den kända prishorisonten. Last = dygnsnivå × p50-timform (samma som V-planeraren), sol = Solcast p50; första sloten proratas. Kostnad = köp × import − sälj × export + 0,05 kr/kWh × urladdning. η 0,848 delas lika per ben (√η). Reserv = min-SOC + 2 kWh + EV-marginal – under den bara laddning (reservbeslutet, fråga 1, tas i B3). Slutvärde = (E − e_min) × medelköp sista 24 h × √η; saknas morgondagens priser värderas energi upp till morgondagens underskott till max köp.
+
+**Översättning till exekutorns åtgärder:** export klassas bara när batteriexporten > ett steg × √η, och `target_power_w` = −exporten/h (bara exportdelen – exekutorn laddar ur |mål| + husets underskott, att ta med lasten hade dubblat urladdningen). Annars `cover_load`; k = 0 med underskott → `hold_battery`. V = differens av cost-to-go, `marginal_value_charge` = V × √η.
+
+**Backtest:**
+
+| | V (B0) | DP | DP + `--load-oracle` | DP + `--temp-oracle` | Orakel |
+|---|---|---|---|---|---|
+| Sommar | 146,25 | 153,30 (72 %) | 170,06 (80 %) | – | 211,94 |
+| Vinter | 833,81 | 1 033,74 (54 %) | 1 175,13 (62 %) | 1 031,21 | 1 899,91 |
+
+Cykler: sommar 6,89 (V 5,53), vinter 43,87 (V 25,60; med perfekt last 49,30). Exekutorn överstyr sällan: 0 econ_peak, 169 verkligt överskott, 56 verkligt underskott. Öppet: 1 616 planerade grid_charge-slots men bara 1 199 laddade – utreds i B3.
+
+**Slutsatser:** DP slår V tydligt på vintern (strukturfelet 4.1 är borta – proben laddar ur genom båda topparna) men når inte acceptansmålet 1 330 kr. Lastprognosfelet kostar ~140 kr; temperaturnivån per dygn ger ingenting (≈ 0), så den förblir urkopplad. Resterande gap mot oraklet ligger i horisont/slutvärde/reserv → B3.
+

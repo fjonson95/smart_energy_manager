@@ -2,6 +2,31 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.68
+
+Fas B, steg B2 (HANDOFF.md): en ny DP-planerare, mätt i backtesten. Beteendet i Home Assistant är oförändrat; planeraren används inte i drift än.
+
+- **Ny `dp_planner.py`** (`DPPlanner`, samma `build_plan()`-gränssnitt som `EnergyPlanner`):
+  - dynamisk programmering över (15-minutersslot, lagrad energi i steg om 0,1 kWh), bakåtrekursion över den kända prishorisonten
+  - per slot väljs laddning, urladdning eller vila med verkliga köp-/säljpriser, rundgångsverkningsgrad 0,848 delad per ben, 8 kW åt båda hållen och 0,05 kr/kWh cykelkostnad vid urladdning
+  - reserv: min-SOC + 2 kWh (+ EV-marginal); under reserven får planen bara ladda
+  - slutvärde: kvarvarande energi till medelköppriset för de sista 24 h; utan morgondagens priser värderas energi upp till morgondagens underskott till högsta köppris
+  - exportslots får bara den exporterade delen som mål, eftersom exekutorn redan lägger till husets underskott
+- **Backtest** (`testdata/backtest.py --planner dp`, ny `--load-oracle` för perfekt lastprognos):
+
+  | | V-planeraren (B0) | DP | DP + perfekt last | Orakel |
+  |---|---|---|---|---|
+  | Sommar | 146,25 kr | **153,30 kr** (+4,8 %) | 170,06 kr | 211,94 kr |
+  | Vinter | 833,81 kr | **1 033,74 kr** (+24 %) | 1 175,13 kr | 1 899,91 kr |
+
+  - Fullcyklerna ökar: sommar 5,53 → 6,89, vinter 25,60 → 43,87.
+  - Lastnivån per dygn från B1 (`--temp-oracle`) ger inget med DP heller (vinter 1 031,21 kr).
+  - Acceptansmålet (vinter ≥ 1 330 kr) är inte nått än. En perfekt lastprognos är värd ~140 kr; slutvärde, reserv och horisont är nästa steg (B3).
+- **Tester**: planerarproben går nu igenom med `DPPlanner` (den laddar ur genom båda pristopparna); nya tester täcker reserv/SOC-gränser och exportmålet. CI installerar `numpy`.
+- **Verifierat**:
+  - `pytest` 26 godkända, 3 förväntade fel
+  - backtester med V-planeraren oförändrade (146,25 / 833,81 kr)
+
 ## Nyheter i 0.9.67
 
 Fas B, steg B1 (HANDOFF.md): indata till den kommande DP-planeraren. Beteendet i Home Assistant är oförändrat.

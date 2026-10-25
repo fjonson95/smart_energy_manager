@@ -2,6 +2,31 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.68
+
+Phase B, step B2 (HANDOFF.md): a new DP planner, measured in the backtest. Behaviour in Home Assistant is unchanged; the planner is not used live yet.
+
+- **New `dp_planner.py`** (`DPPlanner`, same `build_plan()` interface as `EnergyPlanner`):
+  - dynamic programming over (15-minute slot, stored energy in 0.1 kWh steps), backward recursion over the known price horizon
+  - per slot it picks charge, discharge or idle with real buy/sell prices, round-trip efficiency 0.848 split per leg, 8 kW both ways and a 0.05 SEK/kWh cycle cost on discharge
+  - reserve: min-SOC + 2 kWh (+ EV margin); below the reserve the plan may only charge
+  - terminal value: remaining energy at the mean buy price of the last 24 h; without tomorrow's prices, energy up to tomorrow's deficit is valued at the highest buy price
+  - export slots carry only the exported part as target, since the executor already adds the house deficit
+- **Backtest** (`testdata/backtest.py --planner dp`, new `--load-oracle` for a perfect load forecast):
+
+  | | V planner (B0) | DP | DP + perfect load | Oracle |
+  |---|---|---|---|---|
+  | Summer | 146.25 SEK | **153.30 SEK** (+4.8 %) | 170.06 SEK | 211.94 SEK |
+  | Winter | 833.81 SEK | **1033.74 SEK** (+24 %) | 1175.13 SEK | 1899.91 SEK |
+
+  - Full cycles go up: summer 5.53 → 6.89, winter 25.60 → 43.87.
+  - The per-day temperature level from B1 (`--temp-oracle`) gives nothing with DP either (winter 1031.21 SEK).
+  - The acceptance target (winter ≥ 1330 SEK) is not reached yet. A perfect load forecast is worth ~140 SEK; terminal value, reserve and horizon are next (B3).
+- **Tests**: the planner probe now passes with `DPPlanner` (it discharges through both price peaks); new tests cover the reserve/SOC limits and the export target. CI installs `numpy`.
+- **Verified**:
+  - `pytest` 26 passed, 3 expected failures
+  - backtests with the V planner unchanged (146.25 / 833.81 SEK)
+
 ## What's New in 0.9.67
 
 Phase B, step B1 (HANDOFF.md): inputs for the coming DP planner. Behaviour in Home Assistant is unchanged.

@@ -69,3 +69,46 @@ def test_battery_discharges_through_both_peaks(soc_pct):
     plan = _build_plan(soc_pct)
     assert _discharges_in(plan, 6, 9)
     assert _discharges_in(plan, 17, 20)
+
+
+def _build_dp_plan(soc_pct: float):
+    from custom_components.smart_energy_manager.dp_planner import DPPlanner
+    sch = PriceScheduler()
+    slots = []
+    for q in range(26 * 4):
+        start = NOW + timedelta(minutes=15 * q)
+        spot = _spot_at(start.hour)
+        slots.append(PriceSlot(start=start, end=start + timedelta(minutes=15), spot_sek=spot,
+                               buy_sek=sch._buy_price(spot), sell_sek=sch._sell_price(spot)))
+    return DPPlanner(battery_min_soc=10, battery_max_soc=95).build_plan(
+        now=NOW, battery_soc_pct=soc_pct, battery_capacity_kwh=33, battery_max_power_kw=8,
+        ps=PriceSchedule(slots=slots), predicted_daily_kwh=50, house_load_w=2000,
+    )
+
+
+@pytest.mark.parametrize("soc_pct", [15, 50])
+def test_dp_planner_discharges_through_both_peaks(soc_pct):
+    plan = _build_dp_plan(soc_pct)
+    assert _discharges_in(plan, 6, 9)
+    assert _discharges_in(plan, 17, 20)
+
+
+@pytest.mark.parametrize("soc_pct", [15, 50])
+def test_dp_planner_respects_reserve_and_soc_limits(soc_pct):
+    plan = _build_dp_plan(soc_pct)
+    reserve_soc = plan.export_floor_kwh / 33 * 100
+    socs = [s.battery_soc_est_pct for s in plan.slots]
+    assert max(socs) <= 95.0 + 0.5
+    # Under reserven får planen bara ladda – SOC sjunker aldrig där.
+    for a, b in zip(plan.slots, plan.slots[1:]):
+        if a.battery_soc_est_pct < reserve_soc - 0.5:
+            assert b.battery_soc_est_pct >= a.battery_soc_est_pct - 0.01
+
+
+def test_dp_planner_export_target_is_only_the_exported_part():
+    # Exekutorn laddar ur |målvärde| + husets underskott vid export; målvärdet
+    # får därför aldrig innehålla husets egen last (2 kW här).
+    plan = _build_dp_plan(50)
+    for s in plan.slots:
+        if s.action == "export":
+            assert abs(s.target_power_w) <= 8000.0 - 2000.0 + 1.0

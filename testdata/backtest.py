@@ -91,6 +91,7 @@ from custom_components.smart_energy_manager.energy_controller import (
     EnergyController, EnergyState, ChargerState, ChargerConfig, CarConfig,
 )
 from custom_components.smart_energy_manager.energy_planner import EnergyPlanner
+from custom_components.smart_energy_manager.dp_planner import DPPlanner
 from custom_components.smart_energy_manager.price_scheduler import (
     PriceSchedule, PriceSlot,
 )
@@ -464,6 +465,8 @@ def run_backtest(
     date_to:   Optional[datetime] = None,
     drought_oracle: bool = False,
     temp_oracle: bool = False,
+    planner_kind: str = "v",
+    load_oracle: bool = False,
 ):
     s = {**SETTINGS, **overrides}
 
@@ -474,7 +477,7 @@ def run_backtest(
         grid_voltage                = s["grid_voltage"],
         max_export_w                = s["max_export_w"],
     )
-    planner = EnergyPlanner(
+    planner = (DPPlanner if planner_kind == "dp" else EnergyPlanner)(
         battery_min_soc                = s["battery_min_soc"],
         battery_max_soc                = s["battery_max_soc"],
         eta_roundtrip                  = s["eta_roundtrip"],
@@ -510,6 +513,17 @@ def run_backtest(
     if not timestamps:
         sys.stdout.buffer.write(b"Inga tidsstamplar matchar filtret.\n")
         return
+
+    # --load-oracle (bara med --planner dp): verklig huslast per kvart som
+    # "prognos" – skiljer prognosfel från planerarens egna brister.
+    _dp_extra: dict = {}
+    if load_oracle and planner_kind == "dp":
+        _actual_load: dict = {}
+        for _t in timestamps:
+            _v = _safe(pivot[_t].get("sensor.el_forbruk_power_power", ""), float)
+            if _v is not None:
+                _actual_load[_t.replace(minute=_t.minute - _t.minute % 15, second=0, microsecond=0)] = _v / 1000.0
+        _dp_extra["load_kw_by_start"] = _actual_load
 
     sys.stdout.buffer.write(f"{len(timestamps)} timmar ({timestamps[0]} - {timestamps[-1]})\n".encode("utf-8"))
 
@@ -751,6 +765,7 @@ def run_backtest(
                         current_outdoor_temp_c=state.outdoor_temp_c if drought_oracle else None,
                         weather_forecast=_oracle_weather_forecast(ts) if drought_oracle else None,
                         daily_load_kwh_by_date=_daily_load_by_date(ts),
+                        **_dp_extra,
                     )
                 except Exception as _plan_err:
                     sys.stdout.buffer.write(f"DayPlan-fel vid {ts}: {_plan_err}\n".encode("utf-8"))
@@ -832,6 +847,7 @@ def run_backtest(
                         current_outdoor_temp_c=state.outdoor_temp_c if drought_oracle else None,
                         weather_forecast=_oracle_weather_forecast(ts) if drought_oracle else None,
                         daily_load_kwh_by_date=_daily_load_by_date(ts),
+                        **_dp_extra,
                     )
                 except Exception as _sim_plan_err:
                     sys.stdout.buffer.write(f"Sim DayPlan-fel vid {ts}: {_sim_plan_err}\n".encode("utf-8"))
@@ -1068,6 +1084,10 @@ def main():
             "optimistisk övre gräns, inte ett förväntat verkligt utfall."
         ),
     )
+    parser.add_argument("--load-oracle", action="store_true",
+                        help="Med --planner dp: verklig huslast som perfekt lastprognos.")
+    parser.add_argument("--planner", choices=["v", "dp"], default="v",
+                        help="v = V-heuristiken (energy_planner), dp = dynamisk programmering (dp_planner)")
     parser.add_argument(
         "--temp-oracle", action="store_true",
         help="Lastnivå per dygn från verklig dygnsmedeltemperatur (perfekt temperaturprognos).",
@@ -1081,7 +1101,8 @@ def main():
     date_to   = datetime.fromisoformat(args.date_to  ).replace(tzinfo=timezone.utc) if args.date_to   else None
 
     run_backtest(args.input, args.out, overrides, date_from, date_to, drought_oracle=args.drought_oracle,
-                 temp_oracle=args.temp_oracle)
+                 temp_oracle=args.temp_oracle, planner_kind=args.planner,
+                 load_oracle=args.load_oracle)
 
 
 if __name__ == "__main__":
