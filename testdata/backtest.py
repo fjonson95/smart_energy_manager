@@ -102,15 +102,15 @@ from custom_components.smart_energy_manager.const import (
 # inte de gamla felaktiga värdena (33 kWh, 0.07, 20A). Se README "What's New"
 # för P1-4/P2-2/P2-3/P3-2 för varifrån dessa kommer.
 SETTINGS = {
-    "grid_fees_sek_kwh":        0.45,
-    "energy_tax_sek_kwh":       0.536,
+    "grid_fees_sek_kwh":        0.389,   # överföring 0,3116 + elhandelns påslag 0,0778 (faktura sep 2026, exkl. moms)
+    "energy_tax_sek_kwh":       0.36,    # 2026 års nivå, exkl. moms
     "vat_rate":                 0.25,
     "sell_extra_revenue":       0.065,
     "battery_capacity_kwh":     30.69,
     "battery_max_power_kw":     8.0,
-    "battery_min_soc":          20.0,
+    "battery_min_soc":          8.0,     # Sonnens verkliga stopp på "verklig"-sensorn
     "battery_max_soc":          99.0,
-    "eta_roundtrip":            0.87,
+    "eta_roundtrip":            0.848,   # uppmätt, anläggningens AC-räknare
     "cycle_cost_sek_kwh":       0.05,
     "grid_scale":               1000.0,   # grid_power_unit = kW
     "battery_power_inverted":   True,

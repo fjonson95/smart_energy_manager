@@ -40,8 +40,14 @@ class _BaseSEMNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
         self._value: float = self._attr_native_min_value
 
     async def async_added_to_hass(self) -> None:
-        """Återställ senaste värdet – skydd tills entry.options hunnit läsas om vid reload."""
+        """Återställ senaste värdet bara när det inte finns i entry.options.
+
+        Värdet läses redan ur options i __init__; att alltid återställa senaste
+        state skrev över en nyss ändrad inställning med det gamla värdet efter
+        reload (2026-10-25: options 8 %, kontrollern fick tillbaka 5 %)."""
         await super().async_added_to_hass()
+        if self._config_key and self._config_key in self._config:
+            return
         last_state = await self.async_get_last_state()
         if last_state is not None and last_state.state not in ("unknown", "unavailable"):
             try:

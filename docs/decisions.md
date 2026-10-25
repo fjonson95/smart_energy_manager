@@ -553,3 +553,20 @@ Värmepumpens fasströmsensorer: `sensor.ivt_phase_a_current` = L2 (kompressorn)
 **Beslut (alternativ 1):** dumpen startar bara om överskottet täcker HELA den last pannan väntas välja (kompressor under 47 °C, annars patron) och värmen är värd mer än säljpriset (patron: snittköp 24 h / 3,5; kompressor: snittköp). Pågående dumps last räknas tillbaka. Täcker överskottet under 50 % av lasten avbryts dumpen förbi minimitiden; fasskyddet stänger av den på samma sätt. Fasskyddet räknar med uppmätt ström när sensorerna finns.
 
 **Kvar:** gränsen 47 °C och COP 3,5 är mätta i milt väder; kontrollera vid kyla. Kompressorn ensam (~15 A) ligger nära fasmarginalen på L2 (17 A − 2 A) när ingen sol går att räkna av.
+
+---
+
+## 2026-10-25 – Fas B, steg B0: ny baslinje (v0.9.66)
+
+Infört i HA (alternativen) och i `testdata/backtest.py` SETTINGS samtidigt: `grid_fees_sek_kwh` 0,389, `energy_tax_sek_kwh` 0,36 (köp = 1,25 × spot + 0,937 enligt faktura), `battery_min_soc` 8, `eta_roundtrip` 0,848. Kontroll i drift: `sensor.smart_energy_manager_buy_price` 0,9363 kr vid spot 0.
+
+Fel hittat på vägen: `number.smart_energy_manager_battery_min_soc` återställde sitt gamla värde (5) efter reload och skrev det till kontrollern medan planeraren läste 8 ur options. Rättat i `number.py` (återställ bara om nyckeln saknas i options); live-läget rättat med `number.set_value` 8.
+
+**Baslinjer B0** (oraklet = `testdata/oracle_dp.py`, perfekt framförhållning, samma batterimodell):
+
+| Period | Dagens planerare | Cykler | Orakel | Andel |
+|---|---|---|---|---|
+| Sommar (`testdata/history`, 10 d) | 146,25 kr | 5,53 | 211,94 kr | 69 % |
+| Vinter (`history_jan_apr2026`, 2026-01-01…04-30) | 833,81 kr | 25,60 | 1 899,91 kr | 44 % |
+
+Besparingen sjönk mot förut (157 / 914 kr) för att köpet nu är ~0,30 kr/kWh billigare – lagrad energi är mindre värd. **Godkänt för DP-planeraren (B2/B3): vinter ≥ 1 330 kr (≈ 70 % av oraklet), sommar ≥ 146 kr.**

@@ -2,6 +2,27 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.66
+
+Fas B, steg B0 (HANDOFF.md): ny baslinje innan planeraren byts ut.
+
+- **Inställningar ändrade i HA och i backtesten samtidigt**:
+  - nätavgift 0,389 kr/kWh och energiskatt 0,36 kr/kWh, exkl. moms. Köppriset blir 1,25 × spot + 0,937, som fakturan för september 2026; de gamla värdena gav ~0,30 kr/kWh för mycket.
+  - min-SOC 8 %, Sonnens verkliga stopp på sensorn "verklig"
+  - rundgångsverkningsgrad 0,848 (uppmätt)
+- **Rättat: `number`-entiteterna för min/max-SOC skrev över en ändrad inställning efter reload.** De återställde sitt tidigare tillstånd (t.ex. 5 %) och skrev det till kontrollern medan planeraren läste den nya inställningen (8 %). Nu återställs de bara om inställningen saknas.
+- **Ny `testdata/oracle_dp.py`**: övre gräns med perfekt framförhållning på en backtest-CSV, med samma batterimodell som backtesten.
+- **Nya baslinjer**:
+  - sommar: 146,25 kr (5,53 cykler); orakel 211,94 kr, så dagens planerare tar 69 %
+  - vinter (2026-01-01…04-30): 833,81 kr (25,60 cykler); orakel 1 899,91 kr, så 44 %
+  - besparingen är lägre än förut eftersom det billigare köppriset gör lagrad energi mindre värd
+  - godkänt för den kommande DP-planeraren: vinter ≥ 1 330 kr, sommar ≥ 146 kr
+  - detaljer i `docs/decisions.md`
+- **Verifierat**:
+  - `pytest` 21 godkända, 3 förväntade fel (sommarens regressionstest uppdaterat till 146,25)
+  - köppris i drift 0,9363 kr/kWh vid spot 0
+  - min-SOC 8 i både inställningarna och number-entiteten
+
 ## Nyheter i 0.9.65
 
 - **Inga falska varningar vid start av Home Assistant.** Under de första 5 minuterna efter att SEM startat räknas en driftläges- eller väderentitet som saknas eller är `unavailable` som "inte klar än" i stället för som ett fel. Sågs vid omstarten 2026-10-24 18:13: "batteriets driftläge står inte på 'manual'" och "kunde inte hämta väderprognos" ~12 s innan Sonnen- och SMHI-integrationerna hade startat. Efter 5 minuter varnar SEM som förut, så en integration som verkligen slutat fungera upptäcks fortfarande. Den första planen efter en start byggs utan väderprognos om den inte finns än; nästa ombyggnad (≤15 min) tar med den.

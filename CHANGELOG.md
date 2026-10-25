@@ -2,6 +2,27 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.66
+
+Phase B, step B0 (HANDOFF.md): new baseline before the planner is replaced.
+
+- **Settings changed in HA and in the backtest together**:
+  - grid fee 0.389 SEK/kWh and energy tax 0.36 SEK/kWh, excl. VAT. The buy price is now 1.25 × spot + 0.937, matching the September 2026 invoice; the old values gave ~0.30 SEK/kWh too much.
+  - minimum SOC 8 %, the Sonnen's real stop on the "real" SOC sensor
+  - round-trip efficiency 0.848 (measured)
+- **Fixed: the min/max SOC `number` entities overwrote a changed option after reload.** They restored their previous state (e.g. 5 %) and wrote it to the controller while the planner read the new option (8 %). They now restore only when the option is missing.
+- **New `testdata/oracle_dp.py`**: perfect-foresight upper bound on a backtest CSV, same battery model as the backtest.
+- **New baselines**:
+  - summer: 146.25 SEK (5.53 cycles); oracle 211.94 SEK, so the current planner gets 69 %
+  - winter (2026-01-01…04-30): 833.81 SEK (25.60 cycles); oracle 1,899.91 SEK, so 44 %
+  - savings are lower than before because the cheaper buy price makes stored energy worth less
+  - acceptance for the coming DP planner: winter ≥ 1,330 SEK, summer ≥ 146 SEK
+  - details in `docs/decisions.md`
+- **Verified**:
+  - `pytest` 21 passed, 3 expected failures (summer regression test updated to 146.25)
+  - live buy price 0.9363 SEK/kWh at spot 0
+  - min SOC 8 in options and in the number entity
+
 ## What's New in 0.9.65
 
 - **No false warnings at Home Assistant start.** For the first 5 minutes after SEM starts, a battery operating-mode entity or weather entity that is missing or `unavailable` counts as "not ready yet" instead of an error. Seen at the 2026-10-24 18:13 restart: "battery operating mode is not 'manual'" and "could not fetch weather forecast" ~12 s before the Sonnen and SMHI integrations had started. After 5 minutes SEM warns as before, so an integration that has really stopped is still caught. The first plan after a start is built without the weather forecast if it is not available yet; the next rebuild (≤15 min) includes it.
