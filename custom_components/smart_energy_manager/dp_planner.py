@@ -108,10 +108,24 @@ class DPPlanner:
         load_shape_p50: Optional[list] = None,
         daily_load_kwh_by_date: Optional[dict] = None,
         load_kw_by_start: Optional[dict] = None,
+        known_loads: Optional[list] = None,
+        phase_limit_a: Optional[float] = None,
+        grid_voltage: float = 230.0,
         **_unused,
     ) -> DayPlan:
         """load_kw_by_start: {slot-start: kW} som ersätter lastmodellen –
-        bara för backtestens orakelkörning (perfekt lastprognos)."""
+        bara för backtestens orakelkörning (perfekt lastprognos).
+
+        known_loads: [(start, slut, kW, faser)] – schemalagda laster som
+        lastmodellen inte ser (Legionella: ~6 kW på patronfaserna). Läggs på
+        lasten och fasbelastningen för de kvartar de överlappar.
+
+        phase_limit_a: effektiv fasgräns (A, efter marginal). Laddeffekten per
+        kvart begränsas till det minsta utrymmet på någon fas: grundlasten
+        (last − sol) antas jämnt fördelad, kända laster på sina faser. Utan den
+        planerade DP 7,9 kW laddning rakt igenom Legionellans patron (26 okt
+        2026) som exekutorns fasskydd sedan ströp – planen räknade med kvartar
+        som inte gick att använda."""
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
         cap = battery_capacity_kwh
@@ -161,20 +175,36 @@ class DPPlanner:
         net = np.empty(n)    # last − sol (kWh), positiv = underskott
         buy = np.empty(n)
         sell = np.empty(n)
+        charge_cap_kw = np.full(n, float(battery_max_power_kw))
+        phase_kw = phase_limit_a * grid_voltage / 1000.0 if phase_limit_a else None
         for t, s in enumerate(slots):
             start = max(s.start, now_a)
             h = max(1e-6, (s.end - start).total_seconds() / 3600.0)
             frac = h / max(1e-6, (s.end - s.start).total_seconds() / 3600.0)
+            extra_ph = {"L1": 0.0, "L2": 0.0, "L3": 0.0}
+            for k_start, k_end, k_kw, k_phases in (known_loads or ()):
+                overlap_h = (min(s.end, k_end) - max(start, k_start)).total_seconds() / 3600.0
+                if overlap_h <= 0 or not k_phases:
+                    continue
+                for ph in k_phases:
+                    extra_ph[ph] = extra_ph.get(ph, 0.0) + k_kw / len(k_phases) * overlap_h / h
+            load_kw = load_kw_at(start)
+            solar_kw = s.solar_kwh * frac / h
             hours[t] = h
-            net[t] = load_kw_at(start) * h - s.solar_kwh * frac
+            net[t] = (load_kw + sum(extra_ph.values()) - solar_kw) * h
             buy[t] = s.buy_sek
             sell[t] = s.sell_sek
+            if phase_kw is not None:
+                base_ph = (load_kw - solar_kw) / 3.0
+                room = min(phase_kw - base_ph - extra_ph.get(ph, 0.0) for ph in ("L1", "L2", "L3"))
+                charge_cap_kw[t] = min(charge_cap_kw[t], max(0.0, 3.0 * room))
 
         n_real = n
         if self.terminal_mode == "repeat":
             tail_idx = [t for t, s in enumerate(slots) if s.start >= slots[-1].end - timedelta(hours=24)]
             hours = np.concatenate([hours, hours[tail_idx]])
             net = np.concatenate([net, net[tail_idx]])
+            charge_cap_kw = np.concatenate([charge_cap_kw, charge_cap_kw[tail_idx]])
             buy = np.concatenate([buy, buy[tail_idx]])
             sell = np.concatenate([sell, sell[tail_idx]])
             n = len(hours)
@@ -206,7 +236,7 @@ class DPPlanner:
         values_t0 = None
         for t in range(n - 1, -1, -1):
             h = hours[t]
-            k_up = int(math.floor(battery_max_power_kw * h * eta_leg / _STEP_KWH + 1e-9))
+            k_up = int(math.floor(charge_cap_kw[t] * h * eta_leg / _STEP_KWH + 1e-9))
             k_dn = int(math.floor(battery_max_power_kw * h / eta_leg / _STEP_KWH + 1e-9))
             ks = np.arange(-k_dn, k_up + 1)
             ac = np.where(ks > 0, ks * _STEP_KWH / eta_leg, ks * _STEP_KWH * eta_leg)  # kWh från nätets sida

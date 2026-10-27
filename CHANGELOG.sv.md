@@ -2,6 +2,17 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.71
+
+Fas B, steg B4.1: plan B (DP-planeraren i skuggläge) planerar nu med samma fysiska gränser som exekutorn, så att den kan jämföras rättvist med dagens planerare. Dagens planerare och exekutorn är oförändrade.
+
+- **Bakgrund**: den 26 okt planerade plan B 7,9 kW batteriladdning 06:00–06:45 medan Legionella-programmet körde elpatronen (~6 kW på L1/L3). Det blir ungefär 25 A på L1/L3 mot gränsen 17 A, alltså omöjligt. Riktiga SEM:s fasskydd höll tillbaka laddningen tills patronen stängde av och laddade sedan med full effekt. Plan B:s plan räknade med kvartar som inte gick att använda.
+- **Kända laster**: Legionella-fönstret (pågående, eller det fönster som väntas in) skickas till plan B som en last på `heat_pump_patron_power_kw` på `heat_pump_patron_phases` under `legionella_duration_minutes`. `LegionellaManager.planned_window` exponerar det. Plan B byggs också om när fönstret ändras.
+- **Fasutrymme per kvart**: plan B:s högsta laddeffekt är det minsta utrymmet på någon fas, upp till exekutorns effektiva gräns (`max_current_per_phase` − 2 A). Grundlasten (last − sol) antas jämnt fördelad, och kända laster ligger på sina egna faser. Under Legionella blir det cirka 0,2 kW över i stället för 8 kW.
+- **Backtest**: DP får nu samma fasgräns (`--dp no_phase_limit=1` stänger av den). Vinter 1 325,29 → 1 328,11 kr, sommar oförändrad (170,07 kr).
+- **Utvärdering**: skugglägesutvärderingen kör plan B genom samma exekutor och fasskydd som dagens plan, på verklig last per kvart. Tillvägagångssättet står i `docs/decisions.md` B4.1.
+- **Verifierat**: `pytest` 40 godkända, 3 förväntade fel (7 nya tester för fastaket och Legionella-fönstret).
+
 ## Nyheter i 0.9.70
 
 Fas B, steg B4 (HANDOFF.md): DP-planeraren körs live i **skuggläge**. Den planerar bredvid dagens planerare, med samma indata och samma tidpunkter, men styr ingenting; exekutorn följer fortfarande dagens plan.

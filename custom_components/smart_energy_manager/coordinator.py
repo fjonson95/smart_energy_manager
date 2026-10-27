@@ -166,6 +166,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         )
         self._day_plan_b: Optional[DayPlan] = None
         self._day_plan_b_levels: dict = {}
+        self._plan_b_legionella_window: Optional[tuple] = None
+        self._plan_b_ev_reserve_margin_kwh = 0.0
         # Dygnsmedel av momentan utetemp för dygnshistoriken (DP:s lastnivå).
         # Egen ackumulator: _temp_samples fylls bara när ingen dämpad sensor finns.
         self._outdoor_temp_day_sum = 0.0
@@ -1724,8 +1726,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     price_schedule.slots[-1].start if price_schedule.slots else None,
                 )
                 plan_expired = self._day_plan is None or now >= self._day_plan.valid_until
+                rebuild_b = False
                 if plan_expired or ps_sig != self._last_plan_ps_sig:
-                    ev_reserve_margin_kwh = 0.0
+                    rebuild_b = True
+                    self._plan_b_ev_reserve_margin_kwh = 0.0
                     try:
                         # EV-marginal: flat buffert om NÅGON laddare har en vald
                         # bil under sitt SOC-mål och sol inte räcker idag/imorgon
@@ -1746,6 +1750,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             if _ev_needs_charge and (_low_solar_today_ev or _low_solar_tomorrow_ev)
                             else 0.0
                         )
+                        self._plan_b_ev_reserve_margin_kwh = ev_reserve_margin_kwh
                         weather_forecast = await self._fetch_weather_forecast(now)
                         (
                             _ev_energy_needed_kwh, _ev_deadline, _ev_max_power_kw, self._ev_scheduled_charger_name,
@@ -1783,6 +1788,18 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     except Exception as _plan_err:
                         _LOGGER.warning("DayPlan: kunde inte byggas: %s", _plan_err)
 
+                # Plan B byggs också om när Legionellas fönster ändras (valt,
+                # startat, klart) – patronen tar fasutrymmet DP annars laddar i.
+                legionella_window = self._legionella.planned_window
+                if rebuild_b or legionella_window != self._plan_b_legionella_window:
+                    self._plan_b_legionella_window = legionella_window
+                    known_loads = []
+                    if legionella_window is not None:
+                        known_loads.append((
+                            legionella_window[0], legionella_window[1],
+                            float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
+                            tuple(c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES)),
+                        ))
                     try:
                         self._day_plan_b_levels = calibrated_daily_levels(
                             self._daily_consumption_history, now.date(), self._forecast_mean_temp_by_date,
@@ -1802,10 +1819,13 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             pv_production_ratio=pv_production_ratio,
                             yesterday_consumption_kwh=state.yesterday_consumption_kwh,
                             house_load_avg_w=state.house_load_avg_w,
-                            ev_reserve_margin_kwh=ev_reserve_margin_kwh,
+                            ev_reserve_margin_kwh=self._plan_b_ev_reserve_margin_kwh,
                             rolling_consumption_kwh=state.rolling_consumption_kwh,
                             load_shape_p50=self._get_load_shape(0.5),
                             daily_load_kwh_by_date=self._day_plan_b_levels or None,
+                            known_loads=known_loads,
+                            phase_limit_a=self._controller.max_current_effective,
+                            grid_voltage=self._controller.voltage,
                         ))
                         _LOGGER.info(
                             "Plan B (DP) byggd på %.0f ms: %s",

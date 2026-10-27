@@ -649,3 +649,20 @@ Utan kalibrerad nivå (golvet kvar): reserv 0 1 222,20, reserv 2 1 196,02; före
 
 **Utvärdering före B5:** jämför plan A/B i planloggen (`plan_b` per ögonblicksbild) och `daily_load_kwh_by_date` mot faktisk dygnsförbrukning under minst en–två veckor.
 
+## 2026-10-26 – Fas B, steg B4.1: kända laster och fasutrymme i plan B (v0.9.71)
+
+**Händelse 26 okt:** Legionella (switch 05:30–07:37, patron steg 1+2 05:51–06:37, ~6,2 kW på L1/L3). Plan B planerade `grid_charge` 7 865 W 06:00–06:45 och 7 882 W 07:00. Riktiga SEM: SOC 76 → 77 % medan patronen gick (fasskyddet ströp), sedan 77 → 95 % på ~50 min. 7,9 kW/3 = 11,4 A + patron 13,4 A ≈ 25 A mot 17 A.
+
+**Jämförelse samma dag, 00–21** (backtest med HA-statistik, DP med egen SOC-bana, verkligheten räknad med samma energibalans): verklig SEM 27,68 kr (SOC 73,8 → ~80,7 %), plan B 28,19 kr (→ 84,0 %); lagerjusterat ~0,5 kr till plan B. Backtestens V-planerare tömde däremot batteriet under natten (14 % kl 16) – den återger inte drift-V (saknar Solcast p10, SMHI, verklig historik). **Skugglägets utvärdering görs därför mot det verkliga utfallet, inte mot backtestens V.**
+
+**Ändring:**
+- `LegionellaManager.planned_window`: pågående körning (start + `legionella_duration_minutes`), fönstret som väntas in, eller (nu, nu + körtid) vid start; annars None.
+- `DPPlanner.build_plan(known_loads=[(start, slut, kW, faser)], phase_limit_a, grid_voltage)`: kända laster läggs på lasten och sina faser; laddtak per kvart = 3 × min över faser (gräns − (last − sol)/3 − känd last på fasen), högst batteriets maxeffekt. Urladdning/export begränsas inte här (exekutorns fasskydd tar exportriktningen).
+- Coordinator: `phase_limit_a = controller.max_current_effective` (17 − 2 A), patroneffekt/faser från inställningarna; plan B byggs om när Legionella-fönstret ändras (V:s utlösare oförändrade).
+
+**Kända förenklingar:** grundlasten antas jämnt fördelad – värmepumpens kompressor på L2 gör L2 tyngre i verkligheten, så taket är något optimistiskt vintertid. Legionella modelleras som patron hela körtiden (verkligen: kompressor först, patron ~45 min) – konservativt. EV-schema och Extra VV saknas fortfarande i plan B (B5); dygn med EV-laddning redovisas separat i utvärderingen.
+
+**Backtest (DP, kalibrerad nivå, fasgräns):** sommar 170,07 / 204,80 (oförändrad), vinter 1 325,29 → **1 328,11** / 1 339,82 kr.
+
+**Utvärderingsmetod (inför B5):** hämta HA-statistik (`period=5minute` eller `hour`) för sol, huslast, utetemp, SOC, nätfaser, batteri-inout och värmepump samt Nordpool-historik till en `history`-mapp (samma filformat som `testdata/history`, läsaren framåtfyller valfri upplösning); kör `backtest.py <mapp> --date-from <dag>T23:00 --date-to <dag>T23:00 --planner dp --load-level calib` per dygn och jämför `sim_cost − sim_export_rev` mot verkligheten räknad som Σ (last + batteri_inout − sol) × köp/sälj, lagerjusterat. 5-minutersdata krävs för att patron- och EV-toppar inte ska smetas ut av timmedel.
+

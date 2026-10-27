@@ -62,7 +62,7 @@ docs/decisions.md       # Daterade beslut och flyttade incidentberättelser (P01
 1. `coordinator._async_update_data()` hämtar alla sensor-states
 2. Bygger `EnergyState` med laddare, batteri, sol, priser
 3. `EnergyPlanner.build_plan()` bygger om DayPlan (var 15:e min eller när priserna ändras)
-   - Skuggläge (fas B4): `DPPlanner.build_plan()` (`dp_planner.py`) bygger plan B direkt efteråt i en arbetstråd → `plan_b_*`-sensorer och `plan_b` i planloggen. Exekutorn läser aldrig plan B. Dygnsnivån för lasten kommer från `calibrated_daily_levels()` (delad med backtestens `--load-level calib`).
+   - Skuggläge (fas B4): `DPPlanner.build_plan()` (`dp_planner.py`) bygger plan B direkt efteråt i en arbetstråd → `plan_b_*`-sensorer och `plan_b` i planloggen. Exekutorn läser aldrig plan B. Dygnsnivån för lasten kommer från `calibrated_daily_levels()` (delad med backtestens `--load-level calib`). Plan B får Legionellas fönster som känd last (`LegionellaManager.planned_window`) och laddtak per kvart från fasgränsen (B4.1).
 4. `EnergyController.compute()` returnerar `ControlDecision` (EV, varmvatten, fasskydd, preliminärt batteri)
 5. `EnergyController.apply_plan_executor()` ersätter batteridelen med planens slot, klämd mot verkligheten – enda stället som skriver batterieffekt (delas med backtesten)
 6. Coordinator applicerar beslut via HA-tjänster

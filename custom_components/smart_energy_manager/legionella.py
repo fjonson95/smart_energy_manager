@@ -68,6 +68,9 @@ class LegionellaManager:
         self._loaded: bool = False
         # Spåra om vi redan bekräftat via temperatur denna körning
         self._temp_confirmed: bool = False
+        # (start, slut) för pågående eller vald kommande körning – DP-planeraren
+        # lägger in patronens last och fasbelastning där (fas B4.1).
+        self._planned_window: Optional[tuple[datetime, datetime]] = None
 
     # ── Persistens ────────────────────────────────────────────────────
 
@@ -125,8 +128,11 @@ class LegionellaManager:
           körningsstatus alls – annars misstolkas ett kort kommunikationsglapp
           som att pannan avslutat körningen.
         """
+        self._planned_window = None
         if not self._loaded:
             return False, "legionella: storage ej laddad"
+        duration = timedelta(minutes=float(self._config.get(
+            CONF_LEGIONELLA_DURATION_MINUTES, DEFAULT_LEGIONELLA_DURATION_MINUTES)))
 
         if not self._config.get(CONF_LEGIONELLA_ENABLED, DEFAULT_LEGIONELLA_ENABLED):
             return False, "legionella: avaktiverat"
@@ -136,6 +142,8 @@ class LegionellaManager:
         # ── Switchen tillfälligt otillgänglig – håll nuvarande status ────
         if switch_is_on is None:
             if self._running:
+                if self._run_started_at:
+                    self._planned_window = (self._run_started_at, self._run_started_at + duration)
                 elapsed_min = (now - self._run_started_at).total_seconds() / 60 if self._run_started_at else 0
                 return True, f"legionella: pågår ({elapsed_min:.0f} min, switch otillgänglig)"
             return False, "legionella: switch tillfälligt otillgänglig"
@@ -149,6 +157,9 @@ class LegionellaManager:
                 self._temp_confirmed = False
                 self._hass.async_create_task(self._async_save())
                 _LOGGER.info("Legionella: switch är på – synkar körning")
+
+            if self._run_started_at:
+                self._planned_window = (self._run_started_at, self._run_started_at + duration)
 
             # Bekräfta via temperatur om vi inte redan gjort det
             if water_temp is not None and water_temp >= target_temp and not self._temp_confirmed:
@@ -273,6 +284,7 @@ class LegionellaManager:
                         f"{start_txt}, snitt {mean_cost:.2f}, {days_since:.1f}/{max_days} dagar)"
                     )
                 if window_cost[0] > best_cost + 1e-6:
+                    self._planned_window = (slots[best_i].start, slots[best_i].start + duration)
                     return False, (
                         f"legionella: väntar på bästa fönstret {start_txt} "
                         f"({best_cost:.2f} kr/kWh mot {window_cost[0]:.2f} nu)"
@@ -288,6 +300,7 @@ class LegionellaManager:
         # starkare bevis än ett API-svar. Så länge switchen förblir av
         # returnerar vi samma "starta"-beslut varje cykel, vilket ger gratis
         # återförsök av ett misslyckat anrop.
+        self._planned_window = (now, now + duration)
         _LOGGER.info("Legionella: %s", reason)
         return True, reason
 
@@ -300,6 +313,11 @@ class LegionellaManager:
     @property
     def last_run(self) -> Optional[datetime]:
         return self._last_run
+
+    @property
+    def planned_window(self) -> Optional[tuple[datetime, datetime]]:
+        """Pågående körning eller det fönster som väntas in; None annars."""
+        return self._planned_window
 
     @property
     def days_since_last_run(self) -> Optional[float]:

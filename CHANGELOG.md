@@ -2,6 +2,17 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.71
+
+Phase B, step B4.1: plan B (the DP planner in shadow mode) now plans with the same physical limits as the executor, so it can be compared fairly with today's planner. Today's planner and the executor are unchanged.
+
+- **Background**: on 26 Oct plan B planned 7.9 kW battery charging 06:00–06:45 while the Legionella programme ran the immersion heater (~6 kW on L1/L3). That is about 25 A on L1/L3 against the 17 A limit, so it was not possible. The real SEM's phase limiter held the charging back until the heater stopped, then charged at full power. Plan B's plan counted on quarters that could not be used.
+- **Known loads**: the Legionella window (running, or the window it waits for) is passed to plan B as a load of `heat_pump_patron_power_kw` on `heat_pump_patron_phases` for `legionella_duration_minutes`. `LegionellaManager.planned_window` exposes it. Plan B is also rebuilt when the window changes.
+- **Phase headroom per quarter**: plan B's maximum charge power is the smallest room on any phase, up to the executor's effective limit (`max_current_per_phase` − 2 A). Base load (load − solar) is assumed evenly split, and known loads sit on their own phases. During Legionella that leaves about 0.2 kW instead of 8 kW.
+- **Backtest**: DP now gets the same phase limit (`--dp no_phase_limit=1` turns it off). Winter 1325.29 → 1328.11 SEK, summer unchanged (170.07 SEK).
+- **Evaluation**: the shadow evaluation runs plan B through the same executor and phase limiter as today's plan, on real load per quarter. The procedure is in `docs/decisions.md` B4.1.
+- **Verified**: `pytest` 40 passed, 3 expected failures (7 new tests for the phase cap and the Legionella window).
+
 ## What's New in 0.9.70
 
 Phase B, step B4 (HANDOFF.md): the DP planner runs live in **shadow mode**. It plans next to today's planner, with the same inputs and the same timing, but controls nothing; the executor still follows today's plan.

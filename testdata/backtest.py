@@ -471,7 +471,9 @@ def run_backtest(
     dp_options: Optional[dict] = None,
 ):
     s = {**SETTINGS, **overrides}
-    dp_options = dp_options or {}
+    dp_options = dict(dp_options or {})
+    # --dp no_phase_limit=1: DP utan fasgräns (jämförelse mot B4).
+    dp_phase_limit = not dp_options.pop("no_phase_limit", 0)
 
     controller = EnergyController(
         battery_min_soc             = s["battery_min_soc"],
@@ -540,6 +542,10 @@ def run_backtest(
             if _v is not None:
                 _actual_load[_t.replace(minute=_t.minute - _t.minute % 15, second=0, microsecond=0)] = _v / 1000.0
         _dp_extra["load_kw_by_start"] = _actual_load
+    if planner_kind == "dp" and dp_phase_limit:
+        # Samma fasgräns som coordinatorn ger DP i drift (B4.1).
+        _dp_extra["phase_limit_a"] = controller.max_current_effective
+        _dp_extra["grid_voltage"] = controller.voltage
 
     sys.stdout.buffer.write(f"{len(timestamps)} timmar ({timestamps[0]} - {timestamps[-1]})\n".encode("utf-8"))
 
