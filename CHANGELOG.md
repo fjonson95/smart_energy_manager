@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.72
+
+Fix: a full battery was kept idle while the house bought power at 3.4–3.8 SEK/kWh (27–29 Oct).
+
+- **Cause**: the risk markup on the battery's marginal value V depends on the 3-day production ratio (actual solar / Solcast forecast). The ramp started already at ratio 0.9, so the autumn ratio of 0.74–0.84 (forecast noise, not snow-covered panels) raised V by 40–87 %, to 3.3–4.3 SEK. Buy prices below that made the plan hold the battery and buy from the grid, and with the battery full, solar was sold directly at ~1.1 SEK.
+- **Change**: the markup is 10 % down to ratio 0.6 and then rises linearly to 3.0× at 0.3, as originally intended. Snow-covered panels are handled as before; the SMHI drought markup is unchanged.
+- **Effect tonight**: V 3.91 → 3.08 SEK against a buy price of 3.36 SEK, so the battery covers the house.
+- **Verified**: `pytest` 48 passed, 3 expected failures (8 new tests). Backtests unchanged (summer 147.80, winter 880.64 SEK) since they always run at ratio 1.0.
+
 ## What's New in 0.9.71
 
 Phase B, step B4.1: plan B (the DP planner in shadow mode) now plans with the same physical limits as the executor, so it can be compared fairly with today's planner. Today's planner and the executor are unchanged.

@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.72
+
+Rättning: ett fullt batteri stod oanvänt medan huset köpte el för 3,4–3,8 kr/kWh (27–29 okt).
+
+- **Orsak**: riskpåslaget på batteriets marginalvärde V beror på 3-dygns produktionskvoten (faktisk sol / Solcast-prognos). Rampen började redan vid kvot 0,9, så höstens kvot 0,74–0,84 (prognosbrus, inte snötäckta paneler) höjde V med 40–87 %, till 3,3–4,3 kr. Köppriser under det fick planen att hålla batteriet och köpa från nätet, och med fullt batteri såldes solen direkt för ~1,1 kr.
+- **Ändring**: påslaget är 10 % ner till kvot 0,6 och stiger sedan linjärt till 3,0× vid 0,3, som ursprungligen avsett. Snötäckta paneler hanteras som förut; SMHI-torkpåslaget är oförändrat.
+- **Effekt i kväll**: V 3,91 → 3,08 kr mot köppris 3,36 kr, så batteriet täcker huset.
+- **Verifierat**: `pytest` 48 godkända, 3 förväntade fel (8 nya tester). Backtesterna oförändrade (sommar 147,80, vinter 880,64 kr) eftersom de alltid körs med kvot 1,0.
+
 ## Nyheter i 0.9.71
 
 Fas B, steg B4.1: plan B (DP-planeraren i skuggläge) planerar nu med samma fysiska gränser som exekutorn, så att den kan jämföras rättvist med dagens planerare. Dagens planerare och exekutorn är oförändrade.

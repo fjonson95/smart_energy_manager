@@ -666,3 +666,11 @@ Utan kalibrerad nivå (golvet kvar): reserv 0 1 222,20, reserv 2 1 196,02; före
 
 **Utvärderingsmetod (inför B5):** hämta HA-statistik (`period=5minute` eller `hour`) för sol, huslast, utetemp, SOC, nätfaser, batteri-inout och värmepump samt Nordpool-historik till en `history`-mapp (samma filformat som `testdata/history`, läsaren framåtfyller valfri upplösning); kör `backtest.py <mapp> --date-from <dag>T23:00 --date-to <dag>T23:00 --planner dp --load-level calib` per dygn och jämför `sim_cost − sim_export_rev` mot verkligheten räknad som Σ (last + batteri_inout − sol) × köp/sälj, lagerjusterat. 5-minutersdata krävs för att patron- och EV-toppar inte ska smetas ut av timmedel.
 
+## 2026-10-29 – Osäkerhetspåslaget på V börjar vid kvot 0,6 (v0.9.72)
+
+**Händelse 27–29 okt:** produktionskvoten (3 dygn faktisk/Solcast) föll 1,24 → 0,78 → 0,74 → 0,84. `_uncertainty_markup` rampade från 0,9, så V fick +87 % (0,74) resp. +39 % (0,84): 3,3–4,3 kr. Planen höll batteriet på ~96 % från 27 okt 14:00 och köpte från nätet för upp till 3,82 kr (28 okt 18–19: köp 3,49 < V 4,26; 29 okt 18:15: köp 3,36 < V 3,91, rå V 2,80). Fullt batteri gjorde dessutom att solen 28–29 okt såldes direkt för ~1,1 kr. Plan B (DP, utan påslag) ville ladda ur 1,5 kW samtidigt. Batteriets snittpris (0,85 kr) var normalt.
+
+**Orsak:** rampen 0,9→0,3 var tänkt för snötäckta paneler (coordinatorns docstring säger "kvot < 0,6"), men höstens små dygnsproduktioner ger kvoter på 0,7–0,9 av rent prognosbrus. Backtesten matar aldrig kvoten (alltid 1,0 → 10 %), så påslaget var aldrig provat där.
+
+**Ändring:** 10 % för kvot ≥ 0,6, linjärt till 3,0× vid 0,3 (oförändrat tak och snöfall). Torkpåslaget oförändrat. Test: `tests/test_uncertainty_markup.py` (rampen + kvällsscenariot, rött på gamla rampen). Backtest oförändrad: sommar 147,80, vinter 880,64 kr.
+

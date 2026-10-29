@@ -108,17 +108,19 @@ def _drought_markup(drought_days_ahead: int) -> float:
 def _uncertainty_markup(pv_production_ratio: float) -> float:
     """Riskpåslag på V baserat på produktionskvoten (P3-2).
 
-    Kvot ~1.0 (normal produktion mot prognos) → litet baspåslag.
+    Kvot ≥0.6 (normal produktion, inkl. höstens prognosbrus) → litet baspåslag.
     Kvot ≤0.3 (snötäckta paneler etc.) → stort påslag – ett högre V ger
     mindre export, sparsammare självkonsumtion och nätladdning vid högre
     priser, alla tre effekterna man vill ha när solprognosen inte går att
     lita på (v1.0 steg 3, punkt 3 – flyttad hit från golvbanan i steg 2).
+    Rampen började vid 0,9 och gav +40–87 % vid kvot 0,74–0,84 i oktober –
+    batteriet stod fullt medan huset köpte för 3–4 kr (docs/decisions.md 2026-10-29).
     """
-    if pv_production_ratio >= 0.9:
+    if pv_production_ratio >= 0.6:
         return 0.10
     if pv_production_ratio <= 0.3:
         return 3.0
-    frac = (0.9 - pv_production_ratio) / (0.9 - 0.3)
+    frac = (0.6 - pv_production_ratio) / (0.6 - 0.3)
     return 0.10 + frac * (3.0 - 0.10)
 
 
