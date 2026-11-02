@@ -682,3 +682,11 @@ Utan kalibrerad nivå (golvet kvar): reserv 0 1 222,20, reserv 2 1 196,02; före
 
 **Verifiering:** `tests/test_grid_charge_unknown_tomorrow.py` (köptestet rött på gamla koden). Backtest: sommar 147,80 (oförändrad), vinter 880,64 → 880,70 kr. Liten effekt i backtesten, vilket säger att felet är ovanligt där; backtestens prognoser och prisfönster återger inte drift helt.
 
+## 2026-11-02 – Plan B utan facit, första avläsningen
+
+**Verktyg i `testdata/backtest.py`:** `--no-foresight` (morgondagens priser dolda till kl 13 lokal tid), `--solcast-archive FIL` (planerna använder senaste arkivbilden av Solcast p50/p10, energibalansen verklig sol), `--until ISO-UTC` (stopp vid sista mätvärdet). Utan `--until` framfylls sista batterieffekten, vilket gav den återspelade SOC:n 0 % mot verkliga 52 %. Med stoppet: 57,6 mot 54,0 %.
+
+**Resultat 27 okt 18:45 – 2 nov 19:00 (6,0 dygn), lagerjusterat, slitage 0,10 kr/kWh, kvartar med |rest| > 0,25 kWh räknade som bil:** nuvarande 296,90 kr, plan B 224,83 kr, referens utan batteri 327,86 kr. Facit på sol och pris gav plan B +83,10 kr, facit bara på sol +81,99 kr, utan facit **+72,07 kr**. Från 30 okt (efter v0.9.72, 3,8 dygn): +58,21 kr.
+
+**Kvarvarande osäkerhet:** ~5 kWh mindre nätavvikelse (~13 kr) ligger kvar på den verkliga sidan. Arkivet har två prognosbilder per dygn, live uppdateras oftare. Perioden hade ovanligt stor prisspridning. Plan B saknar EV-schema, och dess verkliga batteribeteende vid 96 kWh urladdning är inte prövat.
+

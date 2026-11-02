@@ -73,6 +73,7 @@ Options:
 """
 from __future__ import annotations
 
+import json
 import sys
 import os
 import csv
@@ -80,6 +81,7 @@ import bisect
 import argparse
 import dataclasses
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -457,6 +459,42 @@ def _simulate_battery_soc(
     return max(0.0, min(100.0, energy_kwh / capacity_kwh * 100.0))
 
 
+def _known_prices_end(ts: datetime) -> datetime:
+    """Live syns morgondagens priser först vid publiceringen, cirka kl 13 lokal tid."""
+    local = ts.astimezone(ZoneInfo("Europe/Stockholm"))
+    days = 1 if local.hour < 13 else 2
+    return (local + timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _load_solcast_archive(path: str) -> list[tuple[datetime, dict]]:
+    """coordinator._maybe_archive_solcast: [(tagen, {slotstart: (p50_kw, p10_kw)})], äldst först."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    snapshots = data.get("data", data).get("snapshots", [])
+    out = []
+    for snap in snapshots:
+        rows = {datetime.fromisoformat(r[0]).astimezone(timezone.utc): (r[1], r[2]) for r in snap["slots"]}
+        out.append((datetime.fromisoformat(snap["at"]).astimezone(timezone.utc), rows))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def _apply_solcast_forecast(ps, snapshots: list, ts: datetime) -> None:
+    """Byt facit-solen mot senaste prognosen som fanns vid ts; energibalansen behåller verklig sol."""
+    known = [rows for at, rows in snapshots if at <= ts]
+    if not known:
+        return
+    rows = known[-1]
+    for sl in ps.slots:
+        half = sl.start.replace(minute=sl.start.minute - sl.start.minute % 30, second=0, microsecond=0)
+        p50_p10 = rows.get(half.astimezone(timezone.utc))
+        h = (sl.end - sl.start).total_seconds() / 3600.0
+        p50, p10 = p50_p10 if p50_p10 else (0.0, 0.0)
+        sl.solar_kw = p50
+        sl.solar_kwh = p50 * h
+        sl.solar_kwh_p10 = p10 * h
+
+
 def run_backtest(
     data_path: str,
     out_path: str,
@@ -469,8 +507,12 @@ def run_backtest(
     planner_kind: str = "v",
     load_oracle: bool = False,
     dp_options: Optional[dict] = None,
+    no_foresight: bool = False,
+    solcast_archive: Optional[str] = None,
+    until: Optional[datetime] = None,
 ):
     s = {**SETTINGS, **overrides}
+    _solcast_snapshots = _load_solcast_archive(solcast_archive) if solcast_archive else []
     dp_options = dict(dp_options or {})
     # --dp no_phase_limit=1: DP utan fasgräns (jämförelse mot B4).
     dp_phase_limit = not dp_options.pop("no_phase_limit", 0)
@@ -527,6 +569,9 @@ def run_backtest(
     if date_to:
         end = date_to + timedelta(days=1)
         timestamps = [t for t in timestamps if t < end]
+    # Efter sista mätvärdet framfylls allt – simulerat utfall där är påhittat.
+    if until:
+        timestamps = [t for t in timestamps if t < until]
 
     if not timestamps:
         sys.stdout.buffer.write(b"Inga tidsstamplar matchar filtret.\n")
@@ -794,9 +839,11 @@ def run_backtest(
             row = pivot[ts]
 
             # Prisschema: nuvarande + kommande 24h
-            window_end = ts + timedelta(hours=24)
+            window_end = _known_prices_end(ts) if no_foresight else ts + timedelta(hours=24)
             window_prices = [(t, p) for t, p in all_prices if t >= ts and t < window_end]
             ps = build_price_schedule(window_prices, hourly_solar_w, ts, s, slot_minutes=slot_minutes)
+            if ps and _solcast_snapshots:
+                _apply_solcast_forecast(ps, _solcast_snapshots, ts)
 
             state = build_state(row, ps, s, ts)
 
@@ -1176,6 +1223,12 @@ def main():
     parser.add_argument("--dp", action="append", default=[], metavar="NYCKEL=VÄRDE",
                         help="Konstruktorparameter till DPPlanner, t.ex. --dp reserve_margin_kwh=0 --dp terminal_mode=repeat")
     parser.add_argument("--cycle-cost", type=float)
+    parser.add_argument("--no-foresight", action="store_true",
+                        help="dölj morgondagens priser före kl 13 lokal tid, som live")
+    parser.add_argument("--solcast-archive", metavar="FIL",
+                        help=".storage/smart_energy_manager_solcast_archive: planera på riktig prognos i stället för utfallet")
+    parser.add_argument("--until", metavar="ISO-UTC",
+                        help="stoppa här (sista mätvärdet), annars simuleras framfylld data")
     parser.add_argument("--load-level", choices=["floor", "calib"], default="floor",
                         help="calib = kalibrerad dygnsnivå (7 d + temperaturdelta), se _calib_levels")
     args = parser.parse_args()
@@ -1196,7 +1249,9 @@ def main():
 
     run_backtest(args.input, args.out, overrides, date_from, date_to, drought_oracle=args.drought_oracle,
                  temp_oracle=args.temp_oracle, planner_kind=args.planner, load_level=args.load_level,
-                 load_oracle=args.load_oracle, dp_options=dp_options)
+                 load_oracle=args.load_oracle, dp_options=dp_options,
+                 no_foresight=args.no_foresight, solcast_archive=args.solcast_archive,
+                 until=datetime.fromisoformat(args.until).replace(tzinfo=timezone.utc) if args.until else None)
 
 
 if __name__ == "__main__":
