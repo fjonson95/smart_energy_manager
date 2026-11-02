@@ -674,3 +674,11 @@ Utan kalibrerad nivå (golvet kvar): reserv 0 1 222,20, reserv 2 1 196,02; före
 
 **Ändring:** 10 % för kvot ≥ 0,6, linjärt till 3,0× vid 0,3 (oförändrat tak och snöfall). Torkpåslaget oförändrat. Test: `tests/test_uncertainty_markup.py` (rampen + kvällsscenariot, rött på gamla rampen). Backtest oförändrad: sommar 147,80, vinter 880,64 kr.
 
+## 2026-10-30 – Regel 3 värderas utan P05-reserven (v0.9.73)
+
+**Händelse 30 okt 10:30:** `grid_charge` 6,6 kW i 15 min, 1,34 kWh köpt för 3,14 kr ("nätladda 3.14+cykel<V·η 3.71"). Morgondagens priser saknades, så P05 höjde reserven till 24,7 kWh mot 24,9 kWh i batteriet; merit-ordern tilldelade bara kvartarna runt 17:30 och V blev 4,37 kr. Solpåfyllningen (p10/p50-blandning) räknades 1,7 kWh för låg. Kvarten 10:30 valdes som billigaste LEDIGA, eftersom 11–14 var bokade för solladdning. Utfall: fullt kl 12:45 och 7,4 kWh såld för ~1,6 kr; nettokostnad ~2 kr. V föll till 3,27 kr när priserna kom.
+
+**Ändring:** när P05-höjningen är aktiv körs merit-ordern en gång till med basreserven, och enbart regel 3 använder resultatet (`V_grid_charge`). Regel 1, 2 och 4 samt reserven är oförändrade: att regel 1 fick lägre V hade sålt sol som ska täcka morgondagen.
+
+**Verifiering:** `tests/test_grid_charge_unknown_tomorrow.py` (köptestet rött på gamla koden). Backtest: sommar 147,80 (oförändrad), vinter 880,64 → 880,70 kr. Liten effekt i backtesten, vilket säger att felet är ovanligt där; backtestens prognoser och prisfönster återger inte drift helt.
+

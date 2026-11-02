@@ -326,6 +326,7 @@ class EnergyPlanner:
         _fill_cap_end_kwh = batt_kwh + _fill_gain_kwh
 
         _reserved_kwh = batt_min_kwh + _flat_buffer_kwh
+        _base_reserved_kwh = _reserved_kwh
 
         # Utan morgondagens priser: höj golvet med Solcasts kända underskott tills priserna kommer (2026-09-22). Se docs/decisions.md P05.
         _tomorrow_start = (now_a + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -373,6 +374,24 @@ class EnergyPlanner:
                 _withdrawn_at[s.start] += _alloc
                 _accepted.append((s, value, _alloc))
 
+        # Regel 3 värderas utan P05-höjningen: reserven skyddar morgondagen mot urladdning, men ska inte
+        # blåsa upp V till dagens dyraste kvartar och köpa dyrt (30/10 kl 10:30, 3,14 kr). Se docs/decisions.md 2026-10-30.
+        _v_raw_grid = None
+        if _reserved_kwh > _base_reserved_kwh:
+            _withdrawn_grid: dict[datetime, float] = {t: 0.0 for t in _slot_starts_sorted}
+            for s, value, cap_kwh in sorted(_opportunities, key=lambda x: x[1], reverse=True):
+                _running = sum(_withdrawn_grid[t] for t in _slot_starts_sorted if t < s.start)
+                _slack = float("inf")
+                for t in _slot_starts_sorted:
+                    if t < s.start:
+                        continue
+                    _running += _withdrawn_grid[t]
+                    _slack = min(_slack, _cap_by_time.get(t, batt_kwh) - _base_reserved_kwh - _running)
+                _alloc = min(cap_kwh, max(0.0, _slack))
+                if _alloc > 0.01:
+                    _withdrawn_grid[s.start] += _alloc
+                    _v_raw_grid = value if _v_raw_grid is None else min(_v_raw_grid, value)
+
         # Regel 4 begränsas till det merit-ordern tilldelat den här sloten som export. Se docs/decisions.md P08.
         _accepted_export_kwh_by_slot: dict[datetime, float] = {}
         for _s, _value, _kwh in _accepted:
@@ -408,6 +427,10 @@ class EnergyPlanner:
         V = _v_raw * (1.0 + max(_uncertainty_markup(pv_production_ratio), _drought_markup(_drought_days_ahead)))
         # Laddning kräver en η-strängare tröskel; V_charge utan torkpåslag (gjorde nätladdningen för ivrig). Se docs/decisions.md P11.
         V_charge = _v_raw * (1.0 + _uncertainty_markup(pv_production_ratio)) * self.eta_roundtrip
+        V_grid_charge = (
+            V_charge if _v_raw_grid is None
+            else _v_raw_grid * (1.0 + _uncertainty_markup(pv_production_ratio)) * self.eta_roundtrip
+        )
 
         evening_target_soc = min(self.battery_max_soc, self.battery_min_soc + _flat_buffer_kwh / battery_capacity_kwh * 100.0)
         exportable_kwh = max(0.0, batt_kwh - _reserved_kwh)
@@ -531,7 +554,7 @@ class EnergyPlanner:
                 # Nätladda bara det solen inte väntas fylla inom horisonten (2026-09-10). Se docs/decisions.md P14.
                 _solar_fills_kwh = max(0.0, _fill_cap_end_kwh - batt_kwh)
                 _grid_needed_kwh = max(0.0, room_kwh - _solar_fills_kwh)
-                if slot.buy_sek + self.cycle_cost_sek_kwh < V_charge and _grid_needed_kwh > 0.1:
+                if slot.buy_sek + self.cycle_cost_sek_kwh < V_grid_charge and _grid_needed_kwh > 0.1:
                     # Laddas INTE här - se _grid_charge_candidates-kommentaren
                     # ovanför huvudloopen. batt_kwh/action/power_w lämnas
                     # orörda tills det billigast-först-passet nedan.
@@ -591,7 +614,7 @@ class EnergyPlanner:
                 _p.hold_battery = False
                 _p.target_power_w = _power_w
                 _p.reason = (
-                    f"nätladda {_cand_slot.buy_sek:.2f}+cykel<V·η {V_charge:.2f} "
+                    f"nätladda {_cand_slot.buy_sek:.2f}+cykel<V·η {V_grid_charge:.2f} "
                     f"(billigast-först {_charge_kwh:.1f}/{_grid_total_need_kwh:.1f}kWh)"
                 )
                 _grid_remaining_kwh -= _charge_kwh

@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.73
+
+Rättning: planeraren köper inte längre dyr nätel på grund av reserven den håller medan morgondagens priser är okända.
+
+- **Bakgrund**: den 30 okt kl 10:30 laddade batteriet 6,6 kW i 15 minuter och köpte 1,34 kWh för 3,14 kr. Solen fyllde sedan batteriet till kl 12:45 och 7,4 kWh såldes för cirka 1,6 kr, så köpet kostade cirka 2 kr netto.
+- **Orsak**: innan morgondagens priser är publicerade höjs reserven med morgondagens väntade underskott (24,7 kWh den förmiddagen). Med nästan ingen energi fri sattes marginalvärdet V av dygnets dyraste kvartar (4,37 kr), och nätladdningen jämfördes mot det värdet.
+- **Ändring**: nätladdningen (regel 3) värderar nu batteriet med den vanliga reserven. Den höjda reserven håller fortfarande tillbaka urladdning och export tills priserna är kända, och solladdningen är oförändrad.
+- **Verifierat**: `pytest` 51 godkända, 3 förväntade fel (3 nya tester; köptestet underkänns med den gamla koden). Backtest: sommar oförändrad 147,80 kr, vinter 880,64 → 880,70 kr. Ännu inte verifierat live.
+
 ## Nyheter i 0.9.72
 
 Rättning: ett fullt batteri stod oanvänt medan huset köpte el för 3,4–3,8 kr/kWh (27–29 okt).

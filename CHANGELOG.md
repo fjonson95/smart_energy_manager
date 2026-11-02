@@ -2,6 +2,15 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.73
+
+Fix: the planner no longer buys expensive grid power because of the reserve it holds while tomorrow's prices are unknown.
+
+- **Background**: on 30 Oct at 10:30 the battery charged 6.6 kW for 15 minutes and bought 1.34 kWh at 3.14 SEK. The sun then filled the battery by 12:45 and 7.4 kWh was sold at about 1.6 SEK, so the purchase cost about 2 SEK net.
+- **Cause**: before tomorrow's prices are published, the reserve is raised by tomorrow's expected deficit (24.7 kWh that morning). With almost no energy free, the marginal value V was set by the day's most expensive quarters (4.37 SEK), and grid charging compared against that value.
+- **Change**: grid charging (rule 3) now values the battery with the normal reserve. The raised reserve still holds back discharge and export until the prices are known, and solar charging is unchanged.
+- **Verified**: `pytest` 51 passed, 3 expected failures (3 new tests; the purchase test fails on the old code). Backtests: summer unchanged at 147.80 SEK, winter 880.64 → 880.70 SEK. Not yet verified live.
+
 ## What's New in 0.9.72
 
 Fix: a full battery was kept idle while the house bought power at 3.4–3.8 SEK/kWh (27–29 Oct).
