@@ -2,6 +2,18 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.74
+
+Fix: a full battery no longer sits idle all morning while tomorrow's prices are unpublished.
+
+- **Background**: on 9 Nov at 09:15 the battery was at 99 % and the house bought power at 4–5 SEK/kWh, with an evening peak of 6.9 SEK ahead. The plan showed "idle" for the whole day and the marginal value V was 7.61 SEK.
+- **Cause**: before tomorrow's prices are published (~13:00), a floor reserved tomorrow's expected deficit. With a low solar forecast for tomorrow the floor became the whole battery (30.4 kWh). With nothing free, V fell back to the day's highest opportunity, and no price could beat it.
+- **Change**: until the real prices arrive, the planner assumes tomorrow has today's prices, quarter by quarter, with Solcast's forecast for the sun. The battery's value now weighs today's peak against tomorrow's needs. The assumed prices are only used for V and the allocation; the plan, sensors and card never show them. The plan notes say "morgondagens priser antagna = idag" while it applies. The old floor stays only as a fallback when there is no reference day.
+- **Effect in the 9 Nov case**: the battery covers the house 15:00–20:00 (99 → 73 %) and keeps the rest. On a flat-price day it covers only the peak (81 → 60 %) and buys nothing.
+- **Refill limit (10 Nov)**: the first version held a full battery all morning while the house bought at up to 6.22 SEK, because the assumed tomorrow copied today's 7 SEK peaks and half the battery was saved for them. The assumed tomorrow is now worth no more than buying the energy back before it (cheapest earlier price / efficiency + cycle cost), e.g. ~2.9 SEK with a 2.4 SEK night. Real price days are not affected: the same limit there, and removing the 10 % risk markup, each lowered the winter backtest (−14 and −35 SEK), so both were left out.
+- **Start-up**: right after a restart the Sonnen SOC sensor has no value yet and SEM fell back to 50 %. A plan built on that stayed for 15 minutes (on 9 Nov V became 6.20 SEK with the battery at 99 %). The plan is now not built until the SOC is known.
+- **Verified**: `pytest` 56 passed, 3 expected failures (5 new tests; the old floor locks the battery in the same case). Backtests unchanged (summer 147.80, winter 880.70 SEK), because they always see 24 h of prices and never hit this path. Not yet verified live.
+
 ## What's New in 0.9.73
 
 Fix: the planner no longer buys expensive grid power because of the reserve it holds while tomorrow's prices are unknown.

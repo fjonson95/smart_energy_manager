@@ -690,3 +690,29 @@ Utan kalibrerad nivå (golvet kvar): reserv 0 1 222,20, reserv 2 1 196,02; före
 
 **Kvarvarande osäkerhet:** ~5 kWh mindre nätavvikelse (~13 kr) ligger kvar på den verkliga sidan. Arkivet har två prognosbilder per dygn, live uppdateras oftare. Perioden hade ovanligt stor prisspridning. Plan B saknar EV-schema, och dess verkliga batteribeteende vid 96 kWh urladdning är inte prövat.
 
+## 2026-11-05 – Plan B utan facit, 9 dygn
+
+Samma metod som 2026-11-02, arkiv t.o.m. 5 nov 13:00. 27 okt 18:45 – 5 nov 19:00 (9,0 dygn): nuvarande 505,30 kr, plan B 402,62 kr, referens 561,07 kr, plan B **+102,67 kr** (+90,25 kr från 30 okt, 6,8 dygn). Facit på solen gav +121,34 kr. Urladdning 159 mot 58 kWh. Med ett arkiv utan 3 nov kl 13 blev 3 nov 114,71 kr i stället för 79,97 – planen körde på inaktuell prognos.
+
+## 2026-11-09 – Antagen morgondag ersätter P05-golvet (v0.9.74)
+
+**Händelse 9 nov 09:15:** SOC 99 %, köp 4,5–4,8 kr, kvällstopp 6,9 kr. Planen: idle hela dygnet, "V=7.61kr/kWh (rå 6.92) satt av bästa säljpris | reserv 30.4kWh exporterbart 0.0kWh". Morgondagens sol 4,6 kWh gav ett P05-underskott större än batteriet; golvet kapades vid fullt, ingen möjlighet kunde tilldelas och V föll tillbaka på `max(värde)`. Plan B ville täcka huset från 14:30, exportera 17–18 och nätladda 21:30–24 för 3,2–3,9 kr.
+
+**Prövat och förkastat (väg 1):** låta P05 bara gälla export och värdera regel 2 med basreserven. Då tömdes batteriet till dagens pris även dagar med jämna priser (test: 81 → 28 % före midnatt) – morgondagens behov syntes inte alls.
+
+**Ändring (väg 2):** `PriceSchedule.reference_day` (dagens alla slots, även passerade) och `PriceSchedule.solar_forecast` (Solcasts halvtimmar). Utan morgondagens priser lägger planeraren till en antagen morgondag (dagens priser +1 dygn, sol från Solcast) i `_merit_slots`, som bara används av `_cap_by_time`, möjligheterna och merit-ordern. Framåtsimuleringen, planens slots och sensorerna ser bara riktiga slots. P05 körs endast om referensdagen saknas (backtest, tester). v0.9.73:s basreserv-pass blir därmed inaktivt live.
+
+**Uppstart (samma version):** första planen efter omstarten 9 nov 11:05:55 byggdes med SOC 50 % (`_get_state_float(..., default=50.0)`, Sonnen svarade 11:06:00) och gav V 6,20 kr i 15 min. Planen (och plan B) byggs nu bara när SOC-sensorn har ett värde.
+
+**Verifiering:** `tests/test_assumed_tomorrow.py`. 9 nov-fallet: täcker 15–20, 99 → 73 %; samma fall med det gamla golvet: ingen urladdning. Jämna priser: 81 → 60 %, ingen nätladdning. Backtest oförändrad (147,80 / 880,70) – den ser alltid 24 h priser. Plan B (DP) har ingen antagen morgondag; den värderar kvarvarande energi med snittköpet.
+
+## 2026-11-10 – Ersättningstak på den antagna morgondagen (v0.9.74, forts.)
+
+**Händelse 10 nov:** nattladdning 81 → 99 % för ~2,4 kr (bra), sedan "håller batteriet" 04:00–09:30 med V 6,22–6,28 kr (rå 5,71, satt av 14:45) medan köpet steg 2,4 → 6,22 kr. Planen kl 09:30 skulle hålla till 16, täcka 16–19 och sluta på 73 %, trots köp 4,8–7,1 kr hela dagen. Användaren satte Sonnen på automatik 06:48. Plan B täckte 15–21 och laddade 22–24.
+
+**Orsak:** den antagna morgondagen kopierade dagens 7 kr-toppar; merit-ordern sparade halva batteriet till dem utan att se att energin kan köpas tillbaka i natt för ~2,4 kr. Påslaget på 10 % lyfte dessutom V 5,71 → 6,28 kr över morgonens 6,01–6,22 kr.
+
+**Prövat (vinterbacktest, lagerjusterat, bas 872,39 kr):** ersättningstak på alla slots 858,38 (−14); påslag 0 % vid kvot ≥ 0,6 837,45 (−35); båda 793,75 (−79). Taket förutsätter nätladdning som regel 3 inte alltid gör; påslaget kompenserar troligen för låg lastmodell (P02).
+
+**Ändring:** taket `min(värde, billigaste köp före slotten / η + cykel)` gäller bara den antagna morgondagens möjligheter. Regel 3 värderas alltid utan tak och med basreserven (taket gjorde annars nätladdning olönsam per definition – den billiga kvarten är själv ersättningen). Påslaget oförändrat 10 %. Backtest identisk med 0.9.73 (147,80 / 880,70). Test: `test_expensive_day_uses_the_battery_today_and_refills_at_night`; 10 nov 08:15 ger täckning 08–10 och 15–21, 95 → 49 %, nätladdning 23.
+

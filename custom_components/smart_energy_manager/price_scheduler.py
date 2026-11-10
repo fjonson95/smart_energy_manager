@@ -70,6 +70,13 @@ class PriceSchedule:
     # Alla slots sorterade på tid (idag + imorgon om tillgängligt)
     slots: list[PriceSlot] = field(default_factory=list)
 
+    # Dagens alla slots, även passerade – planeraren antar dem som morgondagens
+    # priser tills de riktiga publiceras (docs/decisions.md 2026-11-09).
+    reference_day: list[PriceSlot] = field(default_factory=list)
+
+    # Solcasts halvtimmar framåt, även bortom prisslotsen.
+    solar_forecast: list[SolarForecastSlot] = field(default_factory=list)
+
     # Antal kvartstimmar FRAMÅT (från nu) med negativt säljpris
     negative_slots_ahead: int = 0
 
@@ -405,6 +412,9 @@ class PriceScheduler:
         )
         slots = [s for s in all_slots if s.end > now_aware]
         schedule.slots = slots
+        schedule.reference_day = [
+            s for s in all_slots if s.start.astimezone(now_aware.tzinfo).date() == now_aware.date()
+        ]
 
         if not slots:
             _LOGGER.debug("PriceScheduler: inga slots tillgängliga")
@@ -416,6 +426,7 @@ class PriceScheduler:
                 solcast_today_attrs, solcast_tomorrow_attrs, now
             )
             self._match_solar_to_slots(slots, solar_slots)
+            schedule.solar_forecast = solar_slots
 
             # Aggregat per tidshorisont
             for hours, attr in [(2, "solar_next_2h_kwh"), (4, "solar_next_4h_kwh"), (8, "solar_next_8h_kwh")]:

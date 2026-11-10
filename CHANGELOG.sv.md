@@ -2,6 +2,18 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.74
+
+Rättning: ett fullt batteri står inte längre stilla hela förmiddagen medan morgondagens priser är opublicerade.
+
+- **Bakgrund**: den 9 nov kl 09:15 låg batteriet på 99 % och huset köpte el för 4–5 kr/kWh, med en kvällstopp på 6,9 kr framför sig. Planen visade "idle" hela dagen och marginalvärdet V var 7,61 kr.
+- **Orsak**: innan morgondagens priser är publicerade (~13:00) reserverade ett golv morgondagens väntade underskott. Med låg solprognos för morgondagen blev golvet hela batteriet (30,4 kWh). Med inget fritt föll V tillbaka på dygnets högsta möjlighet, och inget pris kunde slå det.
+- **Ändring**: tills de riktiga priserna kommer antar planeraren att morgondagen får dagens priser, kvart för kvart, med Solcasts prognos för solen. Batteriets värde väger nu dagens topp mot morgondagens behov. De antagna priserna används bara för V och fördelningen; planen, sensorerna och kortet visar dem aldrig. Planens anteckning säger "morgondagens priser antagna = idag" medan det gäller. Det gamla golvet finns kvar bara som reserv när referensdag saknas.
+- **Effekt i fallet 9 nov**: batteriet täcker huset 15:00–20:00 (99 → 73 %) och sparar resten. En dag med jämna priser täcker det bara toppen (81 → 60 %) och köper inget.
+- **Ersättningstak (10 nov)**: första versionen höll ett fullt batteri hela morgonen medan huset köpte för upp till 6,22 kr, eftersom den antagna morgondagen kopierade dagens 7 kr-toppar och halva batteriet sparades till dem. Den antagna morgondagen är nu aldrig värd mer än att köpa tillbaka energin före den (billigaste tidigare pris / verkningsgrad + cykelkostnad), t.ex. ~2,9 kr med en natt på 2,4 kr. Riktiga prisdagar påverkas inte: samma tak där, och att ta bort riskpåslaget på 10 %, sänkte var för sig vinterbacktesten (−14 och −35 kr), så båda lämnades utanför.
+- **Uppstart**: direkt efter en omstart saknar Sonnens SOC-sensor värde och SEM föll tillbaka på 50 %. En plan byggd på det låg kvar i 15 minuter (9 nov blev V 6,20 kr med batteriet på 99 %). Planen byggs nu inte förrän SOC är känd.
+- **Verifierat**: `pytest` 56 godkända, 3 förväntade fel (5 nya tester; det gamla golvet låser batteriet i samma fall). Backtesterna oförändrade (sommar 147,80, vinter 880,70 kr), eftersom de alltid ser 24 h priser och aldrig hamnar i det här läget. Ännu inte verifierat live.
+
 ## Nyheter i 0.9.73
 
 Rättning: planeraren köper inte längre dyr nätel på grund av reserven den håller medan morgondagens priser är okända.

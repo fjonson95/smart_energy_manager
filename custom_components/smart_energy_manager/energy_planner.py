@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .price_scheduler import PriceSchedule
+from .price_scheduler import PriceSchedule, PriceSlot
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -115,6 +115,8 @@ def _uncertainty_markup(pv_production_ratio: float) -> float:
     lita på (v1.0 steg 3, punkt 3 – flyttad hit från golvbanan i steg 2).
     Rampen började vid 0,9 och gav +40–87 % vid kvot 0,74–0,84 i oktober –
     batteriet stod fullt medan huset köpte för 3–4 kr (docs/decisions.md 2026-10-29).
+    Att ta bort baspåslaget prövades 2026-11-10 och kostade 35 kr i vinterbacktesten –
+    det kompenserar troligen för att lastmodellen ligger för lågt (P02).
     """
     if pv_production_ratio >= 0.6:
         return 0.10
@@ -292,11 +294,33 @@ class EnergyPlanner:
         if not future_slots:
             return _empty_plan("Inga prisslots tillgängliga")
 
+        # Före publiceringen (~13) antas morgondagen få dagens priser, kvart för kvart, med Solcasts sol.
+        # Bara V och merit-ordern ser dem – planen och sensorerna visar aldrig påhittade priser.
+        # Ersätter P05-golvet, som kunde låsa hela batteriet (9/11: V 7,61 kr). Se docs/decisions.md 2026-11-09.
+        _tomorrow_start = (now_a + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        _prices_cover_tomorrow = any(s.start >= _tomorrow_start for s in future_slots)
+        _assumed_tomorrow: list[PriceSlot] = []
+        if not _prices_cover_tomorrow:
+            for r in ps.reference_day:
+                start = r.start + timedelta(days=1)
+                end = r.end + timedelta(days=1)
+                if start < _tomorrow_start:
+                    continue
+                h = (end - start).total_seconds() / 3600.0
+                overlap = [ss for ss in ps.solar_forecast if ss.start < end and ss.start + timedelta(minutes=30) > start]
+                kw = sum(ss.kw_estimate for ss in overlap) / len(overlap) if overlap else 0.0
+                kw10 = sum(ss.kw_estimate10 for ss in overlap) / len(overlap) if overlap else 0.0
+                _assumed_tomorrow.append(PriceSlot(
+                    start=start, end=end, spot_sek=r.spot_sek, buy_sek=r.buy_sek, sell_sek=r.sell_sek,
+                    solar_kw=kw, solar_kwh=kw * h, solar_kwh_p10=kw10 * h,
+                ))
+        _merit_slots = future_slots + _assumed_tomorrow
+
         # V via merit-order; _cap_by_time på p10/P75 (p50 gav cirkulär regression), _banked_extra_kwh vid fullt batteri. Se docs/decisions.md P04.
         _cap_by_time: dict[datetime, float] = {}
         _running_cap = batt_kwh
         _banked_extra_kwh = 0.0
-        for s in future_slots:
+        for s in _merit_slots:
             s_h = (s.end - s.start).total_seconds() / 3600.0
             if s_h <= 0:
                 continue
@@ -328,30 +352,39 @@ class EnergyPlanner:
         _reserved_kwh = batt_min_kwh + _flat_buffer_kwh
         _base_reserved_kwh = _reserved_kwh
 
-        # Utan morgondagens priser: höj golvet med Solcasts kända underskott tills priserna kommer (2026-09-22). Se docs/decisions.md P05.
-        _tomorrow_start = (now_a + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        _prices_cover_tomorrow = any(s.start >= _tomorrow_start for s in future_slots)
-        if not _prices_cover_tomorrow:
+        # Utan morgondagens priser och utan referensdag (t.ex. backtest): P05-golvet som tidigare. Se docs/decisions.md P05.
+        if not _prices_cover_tomorrow and not _assumed_tomorrow:
             _tomorrow_deficit_kwh = max(0.0, _eff_daily_kwh_on(_tomorrow_start + timedelta(hours=12)) - solar_forecast_tomorrow_kwh)
             _reserved_kwh = max(_reserved_kwh, min(batt_max_kwh, batt_min_kwh + _tomorrow_deficit_kwh))
 
         # En gemensam merit-order över täckning och export – två separata pass kunde ge V=0. Se docs/decisions.md P06.
-        _opportunities: list[tuple] = []  # (slot, värde_sek_kwh, kwh)
-        for s in future_slots:
+        # Den antagna morgondagen är aldrig värd mer än att köpa tillbaka energin före den (billigaste
+        # köp dessförinnan / η + cykel). Utan taket sparades batteriet till antagna 7 kr-toppar som går
+        # att ladda för 2,4 kr i natt (10/11: V 6,28 kr, huset köpte för 6,22 kr). På riktiga prisdagar
+        # kostade samma tak 14 kr i vinterbacktesten. Se docs/decisions.md 2026-11-10.
+        _assumed_ids = {id(s) for s in _assumed_tomorrow}
+        _opportunities: list[tuple] = []  # (slot, värde_sek_kwh, kwh, "cover"|"export", värde utan tak)
+        _cheapest_buy_before = float("inf")
+        for s in _merit_slots:
             s_h = (s.end - s.start).total_seconds() / 3600.0
             if s_h <= 0:
                 continue
+            _replace = (
+                _cheapest_buy_before / self.eta_roundtrip + self.cycle_cost_sek_kwh
+                if id(s) in _assumed_ids else float("inf")
+            )
             cap_kwh = battery_max_power_kw * s_h
             deficit = max(0.0, _slot_load_kwh(s, load_shape_p75) - s.solar_kwh_p10)
             tier1 = min(deficit, cap_kwh)
             if tier1 > 0.01:
-                _opportunities.append((s, s.buy_sek, tier1))
+                _opportunities.append((s, min(s.buy_sek, _replace), tier1, "cover", s.buy_sek))
             rest_kwh = cap_kwh - tier1
             if rest_kwh > 0.01:
-                _opportunities.append((s, s.sell_sek, rest_kwh))
+                _opportunities.append((s, min(s.sell_sek, _replace), rest_kwh, "export", s.sell_sek))
+            _cheapest_buy_before = min(_cheapest_buy_before, s.buy_sek)
 
         # En kandidat måste rymmas under taket vid varje senare tidpunkt (värdeordning ≠ tidsordning). Se docs/decisions.md P07.
-        _slot_starts_sorted = sorted({s.start for s in future_slots})
+        _slot_starts_sorted = sorted({s.start for s in _merit_slots})
         _withdrawn_at: dict[datetime, float] = {t: 0.0 for t in _slot_starts_sorted}
 
         def _slack_min_from(t_i: datetime) -> float:
@@ -366,42 +399,44 @@ class EnergyPlanner:
                     min_slack = slack
             return min_slack if min_slack != float("inf") else 0.0
 
-        _accepted: list[tuple] = []  # (slot, värde, kwh)
-        for s, value, cap_kwh in sorted(_opportunities, key=lambda x: x[1], reverse=True):
+        _accepted: list[tuple] = []  # (slot, värde, kwh, typ)
+        for s, value, cap_kwh, kind, _uncapped in sorted(_opportunities, key=lambda x: x[1], reverse=True):
             _avail_at_t = max(0.0, _slack_min_from(s.start))
             _alloc = min(cap_kwh, _avail_at_t)
             if _alloc > 0.01:
                 _withdrawn_at[s.start] += _alloc
-                _accepted.append((s, value, _alloc))
+                _accepted.append((s, value, _alloc, kind))
 
-        # Regel 3 värderas utan P05-höjningen: reserven skyddar morgondagen mot urladdning, men ska inte
-        # blåsa upp V till dagens dyraste kvartar och köpa dyrt (30/10 kl 10:30, 3,14 kr). Se docs/decisions.md 2026-10-30.
+        # Regel 3 värderas utan ersättningstaket – nätladdningen ÄR ersättningen, och med taket kunde V·η aldrig
+        # slå köppriset – och med basreserven, så P05-höjningen inte köper dyrt (30/10 kl 10:30, 3,14 kr).
+        # Se docs/decisions.md 2026-10-30 och 2026-11-10.
         _v_raw_grid = None
-        if _reserved_kwh > _base_reserved_kwh:
-            _withdrawn_grid: dict[datetime, float] = {t: 0.0 for t in _slot_starts_sorted}
-            for s, value, cap_kwh in sorted(_opportunities, key=lambda x: x[1], reverse=True):
-                _running = sum(_withdrawn_grid[t] for t in _slot_starts_sorted if t < s.start)
-                _slack = float("inf")
-                for t in _slot_starts_sorted:
-                    if t < s.start:
-                        continue
-                    _running += _withdrawn_grid[t]
-                    _slack = min(_slack, _cap_by_time.get(t, batt_kwh) - _base_reserved_kwh - _running)
-                _alloc = min(cap_kwh, max(0.0, _slack))
-                if _alloc > 0.01:
-                    _withdrawn_grid[s.start] += _alloc
-                    _v_raw_grid = value if _v_raw_grid is None else min(_v_raw_grid, value)
+        _withdrawn_grid: dict[datetime, float] = {t: 0.0 for t in _slot_starts_sorted}
+        for s, _value, cap_kwh, _kind, uncapped in sorted(_opportunities, key=lambda x: x[4], reverse=True):
+            _running = sum(_withdrawn_grid[t] for t in _slot_starts_sorted if t < s.start)
+            _slack = float("inf")
+            for t in _slot_starts_sorted:
+                if t < s.start:
+                    continue
+                _running += _withdrawn_grid[t]
+                _slack = min(_slack, _cap_by_time.get(t, batt_kwh) - _base_reserved_kwh - _running)
+            _alloc = min(cap_kwh, max(0.0, _slack))
+            if _alloc > 0.01:
+                _withdrawn_grid[s.start] += _alloc
+                _v_raw_grid = uncapped if _v_raw_grid is None else min(_v_raw_grid, uncapped)
+        if _v_raw_grid is None and _opportunities:
+            _v_raw_grid = max(o[4] for o in _opportunities)
 
         # Regel 4 begränsas till det merit-ordern tilldelat den här sloten som export. Se docs/decisions.md P08.
         _accepted_export_kwh_by_slot: dict[datetime, float] = {}
-        for _s, _value, _kwh in _accepted:
-            if _value == _s.sell_sek:
+        for _s, _value, _kwh, _kind in _accepted:
+            if _kind == "export":
                 _accepted_export_kwh_by_slot[_s.start] = _accepted_export_kwh_by_slot.get(_s.start, 0.0) + _kwh
 
         # Regel 2 begränsas till det som öronmärkts åt sloten (natten åt morgontoppens kapacitet, 2026-09-16). Se docs/decisions.md P09.
         _accepted_cover_kwh_by_slot: dict[datetime, float] = {}
-        for _s, _value, _kwh in _accepted:
-            if _value == _s.buy_sek:
+        for _s, _value, _kwh, _kind in _accepted:
+            if _kind == "cover":
                 _accepted_cover_kwh_by_slot[_s.start] = _accepted_cover_kwh_by_slot.get(_s.start, 0.0) + _kwh
 
         if _accepted:
@@ -416,7 +451,7 @@ class EnergyPlanner:
             # mest värdefulla obetjänade möjligheten, vilket i praktiken
             # blockerar all vidare urladdning/export och gynnar nätladdning
             # (regel 3) tills reserven är återställd.
-            _v_raw = max(value for _, value, _ in _opportunities)
+            _v_raw = max(o[1] for o in _opportunities)
             _marginal_slot_start = None
         else:
             _v_raw = 0.0
@@ -666,6 +701,7 @@ class EnergyPlanner:
             f"satt av {_marginal_slot_start.astimezone().strftime('%d %H:%M') if _marginal_slot_start else 'bästa säljpris'} "
             f"(torkdagar_fram={_drought_days_ahead}) | "
             f"reserv {_reserved_kwh:.1f}kWh exporterbart {exportable_kwh:.1f}kWh"
+            + (" | morgondagens priser antagna = idag" if _assumed_tomorrow else "")
         )
 
         return DayPlan(

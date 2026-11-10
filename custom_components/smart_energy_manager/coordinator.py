@@ -1719,7 +1719,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             pv_production_ratio = self._update_pv_production_ratio(now, state.solar_forecast_today_kwh)
 
             # ── Dag-framåt plan ────────────────────────────────────────────
-            if price_schedule:
+            # Direkt efter omstart saknar Sonnen-sensorn värde och SOC faller tillbaka på 50 %;
+            # en plan byggd på det låg kvar i 15 min (9/11: V 6,20 kr med batteriet på 99 %).
+            soc_known = self._get_state_float(c.get(CONF_BATTERY_SOC), default=None) is not None
+            if price_schedule and soc_known:
                 ps_sig = (
                     len(price_schedule.slots),
                     price_schedule.slots[0].start if price_schedule.slots else None,
