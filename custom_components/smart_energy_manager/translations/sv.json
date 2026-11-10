@@ -433,6 +433,13 @@
       },
       "plan_executor_discharge": {
         "name": "Plan executor: urladdning"
+      },
+      "active_planner": {
+        "name": "Aktiv planerare",
+        "state": {
+          "v": "Dagens (V)",
+          "dp": "Plan B (DP)"
+        }
       }
     },
     "switch": {
@@ -468,6 +475,13 @@
         "name": "Active Car",
         "state": {
           "none": "Ingen bil vald"
+        }
+      },
+      "planner": {
+        "name": "Planerare",
+        "state": {
+          "v": "Dagens (V)",
+          "dp": "Plan B (DP)"
         }
       }
     }

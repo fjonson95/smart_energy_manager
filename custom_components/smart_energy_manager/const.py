@@ -172,6 +172,11 @@ MODE_FORCE_CHARGE_BATTERY = "force_charge_battery"
 MODE_MANUAL = "manual"
 OPERATING_MODES = [MODE_AUTO, MODE_FORCE_CHARGE_EV, MODE_FORCE_CHARGE_BATTERY, MODE_MANUAL]
 
+# ── Planerare (fas B5): vilken DayPlan exekutorn följer ───────────────────────
+PLANNER_V = "v"
+PLANNER_DP = "dp"
+PLANNERS = [PLANNER_V, PLANNER_DP]
+
 # ── Laddarsensorvärden som räknas som "ansluten" ──────────────────────────────
 CHARGER_CONNECTED_STATES = {"connected", "charging", "plugged_in", "pluggedin", "waiting",
                              "ready", "preparing", "suspended_ev", "suspended_evse","ev connected"}

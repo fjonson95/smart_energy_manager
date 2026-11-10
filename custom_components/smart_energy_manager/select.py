@@ -5,9 +5,10 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, OPERATING_MODES, MODE_AUTO, NO_CAR_SELECTED
+from .const import DOMAIN, OPERATING_MODES, MODE_AUTO, NO_CAR_SELECTED, PLANNERS
 from .coordinator import SmartEnergyCoordinator
 
 
@@ -18,7 +19,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator: SmartEnergyCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[SelectEntity] = [OperatingModeSelect(coordinator, entry)]
+    entities: list[SelectEntity] = [OperatingModeSelect(coordinator, entry), PlannerSelect(coordinator, entry)]
 
     # En bilvals-select per laddare
     for ch_data in coordinator._get_charger_configs():
@@ -58,6 +59,29 @@ class OperatingModeSelect(_BaseSEMSelect):
 
     async def async_select_option(self, option: str) -> None:
         self.coordinator.operating_mode = option
+        await self.coordinator.async_request_refresh()
+        self.async_write_ha_state()
+
+
+class PlannerSelect(_BaseSEMSelect, RestoreEntity):
+    """Välj vilken planerare exekutorn följer (fas B5.1). Valet överlever omstart."""
+    _attr_unique_id = "sem_planner_select"
+    _attr_translation_key = "planner"
+    _attr_icon = "mdi:source-branch"
+    _attr_options = PLANNERS
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in PLANNERS:
+            self.coordinator.selected_planner = last.state
+
+    @property
+    def current_option(self) -> str:
+        return self.coordinator.selected_planner
+
+    async def async_select_option(self, option: str) -> None:
+        self.coordinator.selected_planner = option
         await self.coordinator.async_request_refresh()
         self.async_write_ha_state()
 

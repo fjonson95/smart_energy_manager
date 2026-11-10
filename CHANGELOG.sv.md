@@ -2,6 +2,19 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.75
+
+Fas B, steg B5.1: plan B (DP-planeraren) kan nu styra batteriet. En ny väljare avgör vilken planerare exekutorn följer; standard är fortfarande dagens planerare.
+
+- **Bakgrund**: under 13,7 dygn (27 okt – 10 nov), simulerat utan facit, hade plan B kostat cirka 171 kr mindre än dagens styrning (12,5 kr/dygn), efter slitage, batterinivå vid periodens slut och billaddning. Se `docs/decisions.md`.
+- **Ny väljare "Planerare"** (`select.smart_energy_manager_planerare`): *Dagens (V)* eller *Plan B (DP)*. Valet överlever omstart. Planen som inte är vald byggs fortfarande som skugga, så jämförelsen fortsätter.
+- **Reserv**: saknas plan B, eller är den mer än 15 minuter äldre än sin giltighetstid, följer exekutorn dagens plan och en varning loggas.
+- **Ny sensor "Aktiv planerare"** (`sensor.smart_energy_manager_aktiv_planerare`): vilken planerare som faktiskt styr; skiljer sig från väljaren vid reservläge. Planens anledningssensorer får attributet `active_planner`.
+- **Oförändrat**: EV-schemat kommer fortfarande från dagens plan (plan B får det i B5.2), och exekutorn, fasskyddet, varmvattendumpen, Legionella, negativa priser och manuella lägen fungerar som förut. Med plan B jämför dumpen mot plan B:s marginalvärde.
+- **Planeringskortet**: visar plan B automatiskt medan den styr (`follow_active_planner: false` stänger av; `plan_b_sensor` ersätter den härledda entiteten). `dist/smart-energy-manager-cards.js` ombyggd.
+- **Gå tillbaka**: sätt väljaren på *Dagens (V)*, eller installera release v0.9.74.
+- **Verifierat**: `pytest` 61 godkända, 3 förväntade fel (5 nya tester för valet och reserven). Backtesterna oförändrade (147,80 / 880,70 kr), eftersom de inte använder väljaren. Ännu inte verifierat live.
+
 ## Nyheter i 0.9.74
 
 Rättning: ett fullt batteri står inte längre stilla hela förmiddagen medan morgondagens priser är opublicerade.

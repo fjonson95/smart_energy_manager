@@ -21,10 +21,27 @@ from typing import Optional
 
 import numpy as np
 
-from .const import DP_LOAD_BALANCE_TEMP_C, DP_LOAD_K_KWH_DD
+from .const import DP_LOAD_BALANCE_TEMP_C, DP_LOAD_K_KWH_DD, PLANNER_DP, PLANNER_V
 from .energy_planner import DayPlan, PlannedSlot, _PLAN_HORIZON_H
 
 _STEP_KWH = 0.1
+
+# Plan B får vara högst så här gammal innan exekutorn faller tillbaka på V.
+# Båda byggs var 15:e min; en kvart extra täcker en missad ombyggnad.
+_PLAN_B_GRACE = timedelta(minutes=15)
+
+
+def select_active_plan(
+    selected: str,
+    plan_v: Optional[DayPlan],
+    plan_b: Optional[DayPlan],
+    now: datetime,
+) -> tuple[Optional[DayPlan], str]:
+    """(plan exekutorn följer, planerare som faktiskt styr). Faller tillbaka på V
+    om plan B saknas eller är för gammal (fas B5.1)."""
+    if selected == PLANNER_DP and plan_b is not None and now < plan_b.valid_until + _PLAN_B_GRACE:
+        return plan_b, PLANNER_DP
+    return plan_v, PLANNER_V
 
 
 def calibrated_daily_levels(

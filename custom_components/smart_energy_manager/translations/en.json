@@ -433,6 +433,13 @@
       },
       "plan_executor_discharge": {
         "name": "Plan executor: discharge"
+      },
+      "active_planner": {
+        "name": "Active planner",
+        "state": {
+          "v": "Current (V)",
+          "dp": "Plan B (DP)"
+        }
       }
     },
     "switch": {
@@ -468,6 +475,13 @@
         "name": "Active Car",
         "state": {
           "none": "No car selected"
+        }
+      },
+      "planner": {
+        "name": "Planner",
+        "state": {
+          "v": "Current (V)",
+          "dp": "Plan B (DP)"
         }
       }
     }

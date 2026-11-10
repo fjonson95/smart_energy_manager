@@ -3,6 +3,8 @@
  *
  *   type: custom:sem-energy-plan-card
  *   day_plan_sensor: sensor.smart_energy_manager_<dag_plan_anledning_entity>
+ *   # När plan B styr visas plan B automatiskt (plan_b_sensor härleds ur day_plan_sensor);
+ *   # follow_active_planner: false visar alltid day_plan_sensor.
  *   # Valfria overrides:
  *   battery_cap_kwh: 33
  *   battery_min_pct: 10
@@ -224,7 +226,13 @@ canvas { display: block; width: 100%; }
     const nowMs = now.getTime();
 
     // ── SEM plan data ─────────────────────────────────────────────────
-    const planState = cfg.day_plan_sensor ? this._hass?.states[cfg.day_plan_sensor] : null;
+    // Fas B5.1: när plan B styr visar kortet plan B (follow_active_planner: false stänger av).
+    const basePlanState = cfg.day_plan_sensor ? this._hass?.states[cfg.day_plan_sensor] : null;
+    let planState = basePlanState;
+    if (cfg.follow_active_planner !== false && basePlanState?.attributes?.active_planner === "dp") {
+      const planBId = cfg.plan_b_sensor || cfg.day_plan_sensor.replace("plan_anledning", "plan_b_anledning");
+      planState = this._hass?.states[planBId] ?? basePlanState;
+    }
     const planAttr  = planState?.attributes ?? {};
     const rawPlanSlots = Array.isArray(planAttr.slots) && planAttr.slots.length > 0
       ? planAttr.slots : null;

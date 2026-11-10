@@ -62,6 +62,7 @@ from .const import (
     CONF_BATTERY_POWER_INVERTED,
     CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
     MODE_AUTO, MODE_MANUAL,
+    PLANNER_DP, PLANNER_V,
     DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH,
 )
 from .price_scheduler import PriceScheduler
@@ -70,7 +71,7 @@ from .energy_controller import (
     ChargerConfig, CarConfig, ChargerState,
 )
 from .energy_planner import EnergyPlanner, DayPlan, _PLAN_HORIZON_H
-from .dp_planner import DPPlanner, calibrated_daily_levels
+from .dp_planner import DPPlanner, calibrated_daily_levels, select_active_plan
 from .legionella import LegionellaManager
 from .savings_tracker import DailySavingsTracker
 
@@ -134,6 +135,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._config = {**entry.data, **entry.options}
         self.operating_mode: str = MODE_AUTO
+        # Fas B5.1: vald planerare (väljaren återställer valet vid omstart) och den som faktiskt styr.
+        self.selected_planner: str = PLANNER_V
+        self._active_planner: str = PLANNER_V
         self._last_decision: Optional[ControlDecision] = None
         self._state: Optional[EnergyState] = None
         self._controller = self._build_controller()
@@ -156,8 +160,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             cycle_cost_sek_kwh=float(self._config.get(CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)),
         )
         self._day_plan: Optional[DayPlan] = None
-        # Fas B4 skuggläge: DP-planeraren byggs parallellt och exponeras som
-        # plan_b_*-sensorer, men exekutorn läser bara _day_plan. Reserv och
+        # Fas B4/B5.1: DP-planeraren byggs parallellt och exponeras som plan_b_*-sensorer;
+        # exekutorn följer den planerare väljaren anger (select_active_plan). Reserv och
         # cykelkostnad är DP:s egna (B3-beslut), inte HA-inställningen som V använder.
         self._dp_planner = DPPlanner(
             battery_min_soc=float(self._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
@@ -1838,13 +1842,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     except Exception as _plan_b_err:
                         _LOGGER.warning("Plan B (DP): kunde inte byggas: %s", _plan_b_err)
 
-            if self._day_plan:
-                _cs = self._day_plan.slot_at(now)
+            active_plan, active_planner = select_active_plan(
+                self.selected_planner, self._day_plan, self._day_plan_b, now,
+            )
+            if active_planner != self.selected_planner and active_planner != self._active_planner:
+                _LOGGER.warning("Plan B (DP) saknas eller är för gammal – exekutorn följer dagens plan (V) tills vidare")
+            self._active_planner = active_planner
+            if active_plan:
+                _cs = active_plan.slot_at(now)
                 state.plan_action = _cs.action if _cs else None
-                state.plan_export_floor_kwh = self._day_plan.export_floor_kwh
-                state.plan_marginal_value_charge_sek_kwh = self._day_plan.marginal_value_charge_sek_kwh
-                if self._ev_scheduled_charger_name and _cs is not None:
-                    state.plan_ev_charge_w = _cs.ev_charge_w
+                state.plan_export_floor_kwh = active_plan.export_floor_kwh
+                state.plan_marginal_value_charge_sek_kwh = active_plan.marginal_value_charge_sek_kwh
+            # EV-schemat finns bara i V-planen; plan B saknar det tills B5.2.
+            if self._day_plan and self._ev_scheduled_charger_name:
+                _ev_cs = self._day_plan.slot_at(now)
+                if _ev_cs is not None:
+                    state.plan_ev_charge_w = _ev_cs.ev_charge_w
                     state.plan_ev_charger_name = self._ev_scheduled_charger_name
 
             decision = self._controller.compute(state)
@@ -1854,7 +1867,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             # plan finns (P2-5). Delad metod med backtest-simulatorn – se
             # EnergyController.apply_plan_executor() för hela resonemanget.
             decision = self._controller.apply_plan_executor(
-                self._day_plan, self.operating_mode, state, decision, now, solar_surplus_w,
+                active_plan, self.operating_mode, state, decision, now, solar_surplus_w,
             )
             self._last_decision = decision
 
@@ -2338,6 +2351,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     @property
     def day_plan_b(self) -> Optional[DayPlan]:
         return self._day_plan_b
+
+    @property
+    def active_planner(self) -> str:
+        return self._active_planner
 
     @property
     def day_plan_b_levels(self) -> dict:

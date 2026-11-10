@@ -2,6 +2,19 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.75
+
+Phase B, step B5.1: plan B (the DP planner) can now control the battery. A new selector chooses which planner the executor follows; the default is still today's planner.
+
+- **Background**: over 13.7 days (27 Oct – 10 Nov), simulated without hindsight, plan B would have cost about 171 SEK less than today's control (12.5 SEK/day), after wear, end-of-period battery level and EV charging. See `docs/decisions.md`.
+- **New selector "Planner"** (`select.smart_energy_manager_planerare`): *Current (V)* or *Plan B (DP)*. The choice survives a restart. The plan that is not selected is still built in shadow, so the comparison continues.
+- **Fallback**: if plan B is missing or more than 15 minutes past its validity, the executor follows today's plan and a warning is logged.
+- **New sensor "Active planner"** (`sensor.smart_energy_manager_aktiv_planerare`): which planner actually controls; it differs from the selector during a fallback. The plan reason sensors get an `active_planner` attribute.
+- **Unchanged**: the EV schedule still comes from today's plan (plan B gets it in B5.2), and the executor, phase limiter, hot-water dump, Legionella, negative prices and manual modes work as before. With plan B the dump compares against plan B's marginal value.
+- **Plan card**: shows plan B automatically while it controls (`follow_active_planner: false` turns this off; `plan_b_sensor` overrides the derived entity). Rebuilt `dist/smart-energy-manager-cards.js`.
+- **Rollback**: set the selector back to *Current (V)*, or install release v0.9.74.
+- **Verified**: `pytest` 61 passed, 3 expected failures (5 new tests for the selection and fallback). Backtests unchanged (147.80 / 880.70 SEK), since they do not use the selector. Not yet verified live.
+
 ## What's New in 0.9.74
 
 Fix: a full battery no longer sits idle all morning while tomorrow's prices are unpublished.

@@ -716,3 +716,19 @@ Samma metod som 2026-11-02, arkiv t.o.m. 5 nov 13:00. 27 okt 18:45 – 5 nov 19:
 
 **Ändring:** taket `min(värde, billigaste köp före slotten / η + cykel)` gäller bara den antagna morgondagens möjligheter. Regel 3 värderas alltid utan tak och med basreserven (taket gjorde annars nätladdning olönsam per definition – den billiga kvarten är själv ersättningen). Påslaget oförändrat 10 %. Backtest identisk med 0.9.73 (147,80 / 880,70). Test: `test_expensive_day_uses_the_battery_today_and_refills_at_night`; 10 nov 08:15 ger täckning 08–10 och 15–21, 95 → 49 %, nätladdning 23.
 
+## 2026-11-10 – Plan B utan facit, slutavläsning
+
+27 okt 18:45 – 10 nov 11:15 (13,7 dygn), arkiv t.o.m. 10 nov 06:00, priser dolda till 13, lagerjusterat, slitage 0,10 kr/kWh, billaddning borträknad: nuvarande 973,05 kr, plan B 802,26 kr, referens utan batteri 1 082,20 kr. Plan B **+170,79 kr** (12,5 kr/dygn); från 30 okt +158,13 kr på 11,5 dygn. Facit på solen gav +192,65 kr. Urladdning 248,7 mot 95,5 kWh. Återspelad SOC 83,5 mot verkliga 84,0 %.
+
+Avvikelser i det verkliga utfallet: 9–10 nov körde 0.9.74:s första version (P05-låsning 9 nov, V-uppblåsning 10 nov), 10 nov 06:48–11:01 styrde Sonnens automatik. Plan B har legat 9–14 kr/dygn före vid varje avläsning (2, 5 och 10 nov). Beslut om B5 tas av användaren.
+
+## 2026-11-10 – Fas B, steg B5.1: väljare för planerare (v0.9.75)
+
+**Beslut:** efter slutavläsningen (+170,79 kr på 13,7 dygn utan facit) får plan B styra, stegvis. Återställningspunkt: release v0.9.74.
+
+**Ändring:** `select.smart_energy_manager_planerare` (RestoreEntity, standard V) sätter `coordinator.selected_planner`. `dp_planner.select_active_plan()` väljer planen till exekutorn och faller tillbaka på V om plan B saknas eller är mer än 15 min förbi `valid_until`; `sensor.smart_energy_manager_aktiv_planerare` visar utfallet. Exekutorn är oförändrad – samma väg som utvärderingen simulerade. EV-schemat hämtas alltid från V-planen (B5.2 flyttar in det i DP). `plan_marginal_value_charge_sek_kwh` (varmvattendumpen) och exportgolvet tas från den aktiva planen. Planeringskortet byter till plan B-sensorn när `active_planner` = dp.
+
+**Verifiering:** `tests/test_active_planner.py` (5 tester). Backtest oförändrad: sommar 147.80, vinter 880.70 kr.
+
+**Nästa:** B5.2 EV i DP, B5.3 exekutor som ren fysik (bara om backtesten visar att det inte kostar), B5.4 städning (attributstorlek, np.float64, cykelkostnadsinställningen).
+
