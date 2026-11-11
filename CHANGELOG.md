@@ -2,6 +2,14 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.76
+
+Two fixes found while reviewing plan B's first day in control (10–11 Nov).
+
+- **EV charging no longer starts on battery export**: when the grid exported, the solar surplus for EV charging was taken as grid export + battery charging, so export coming *out of* the battery counted as sun. On 11 Nov at 16:15 plan B exported 8 kW from the battery with 0 W of sun and the charger was told to charge at 13–16 A "solar". The surplus now subtracts battery discharge and never exceeds solar production. Had the car been drawing, up to 3.7 kW of battery energy would have gone into it during the evening peak instead of being sold.
+- **Phase limiter only warns about real overloads**: "Pass 0 … exceeded" was logged every 30 s while the limiter merely trimmed a charging decision that would otherwise have gone over the limit (951 warnings in 16 hours). That trimming is normal operation and is now logged at debug level. A warning is logged when the *measured* phase current is already over the limit, and when a phase is still over after the limiter has done what it can.
+- **Verified**: `pytest` 65 passed, 3 expected failures (4 new tests in `tests/test_ev_surplus_and_phase_log.py`; two of them fail without the fix). Backtests unchanged (147.80 / 880.70 SEK).
+
 ## What's New in 0.9.75
 
 Phase B, step B5.1: plan B (the DP planner) can now control the battery. A new selector chooses which planner the executor follows; the default is still today's planner.

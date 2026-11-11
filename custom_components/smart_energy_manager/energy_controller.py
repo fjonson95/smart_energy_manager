@@ -442,11 +442,14 @@ class EnergyController:
         # vilket gör solar−house för litet. Formeln gäller BARA vid aktiv export —
         # används den även vid nätimport skapas en feedback-loop som håller kvar
         # batteriladdningen trots att solöverskottet är borta.
+        # Export som kommer ur batteriet är inget solöverskott: 11 nov 2026
+        # exporterade plan B 8 kW med 0 W sol och billaddaren beordrades 16 A "sol".
         _grid_total_w = state.grid_power_l1 + state.grid_power_l2 + state.grid_power_l3
         _batt_charge_w = max(0.0, state.battery_power_w)
+        _batt_discharge_w = max(0.0, -state.battery_power_w)
         _raw_export_w = max(0.0, -_grid_total_w)
         if _raw_export_w > 0:
-            _effective_surplus_w = _raw_export_w + _batt_charge_w
+            _effective_surplus_w = min(solar_w, _raw_export_w + _batt_charge_w - _batt_discharge_w)
             if _effective_surplus_w > solar_surplus_w:
                 _LOGGER.debug(
                     "Nät-export surplus korrigering: %.0fW (export=%.0fW batt_charge=%.0fW) > beräknat %.0fW",
@@ -1228,6 +1231,10 @@ class EnergyController:
                 loads[ph] = sign * current_a * self.voltage
             else:
                 loads[ph] = power_w
+        # Varning bara när den uppmätta strömmen redan är över gränsen – att
+        # strypa ett beslut som annars hade gått över är normal drift (951
+        # varningar 11 nov 2026, nästan alla nattladdning som ströps varje cykel).
+        measured_over = {ph: abs(w) / self.voltage > self.max_current_effective for ph, w in loads.items()}
 
         # Baslinje = SEM:s eget senaste kommando, inte Sonnens fördröjda sensor (pendling 2026-09-14). Se docs/decisions.md C09.
         current_batt_per_phase = self._last_battery_command_w / 3.0  # positiv=laddning, negativ=urladdning
@@ -1293,7 +1300,8 @@ class EnergyController:
                     # Exportriktning – enda kontrollerbara källan är batteriurladdning
                     # (solproduktionen styr vi inte).
                     over_w = (abs(phase_current) - self.max_current_effective) * self.voltage
-                    _LOGGER.warning(
+                    _LOGGER.log(
+                        logging.WARNING if iteration == 0 and measured_over[ph] else logging.DEBUG,
                         "Pass %d: fas %s export överskriden %.1fA (max %.1fA)",
                         iteration, ph, abs(phase_current), self.max_current_effective,
                     )
@@ -1306,7 +1314,8 @@ class EnergyController:
 
                 over_w = (phase_current - self.max_current_effective) * self.voltage
 
-                _LOGGER.warning(
+                _LOGGER.log(
+                    logging.WARNING if iteration == 0 and measured_over[ph] else logging.DEBUG,
                     "Pass %d: fas %s import överskriden %.1fA (max %.1fA)",
                     iteration, ph, phase_current, self.max_current_effective,
                 )
@@ -1363,6 +1372,14 @@ class EnergyController:
 
             if not any_violation:
                 break
+
+        for ph in PHASES:
+            remaining_a = abs(loads[ph]) / self.voltage
+            if remaining_a > self.max_current_effective + 0.05:
+                _LOGGER.warning(
+                    "Fas %s över gränsen efter fasskyddet: %.1fA (max %.1fA) – inget mer att strypa",
+                    ph, remaining_a, self.max_current_effective,
+                )
 
         # Separat exporttak – växelriktarens AC-exportgräns är en annan begränsning
         # än fasströmmen. Klämmer bara batteriurladdningen, aldrig solproduktionen

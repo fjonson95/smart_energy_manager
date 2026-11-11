@@ -2,6 +2,14 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.76
+
+Två rättningar efter genomgången av plan B:s första dygn som styrande (10–11 nov).
+
+- **Billaddning startar inte längre på batteriexport**: när nätet exporterade räknades solöverskottet för billaddning som nätexport + batteriladdning, så export *ur* batteriet räknades som sol. Den 11 nov 16:15 exporterade plan B 8 kW ur batteriet med 0 W sol och laddaren beordrades 13–16 A "sol". Överskottet drar nu bort batteriets urladdning och blir aldrig större än solproduktionen. Hade bilen dragit ström hade upp till 3,7 kW batterienergi gått in i den mitt i kvällstoppen i stället för att säljas.
+- **Fasskyddet varnar bara vid verklig överlast**: "Pass 0 … överskriden" loggades var 30:e sekund medan fasskyddet bara ströp ett laddbeslut som annars hade gått över gränsen (951 varningar på 16 timmar). Strypningen är normal drift och loggas nu på debug-nivå. En varning loggas när den *uppmätta* fasströmmen redan är över gränsen, och när en fas fortfarande är över efter att fasskyddet gjort vad det kan.
+- **Verifierat**: `pytest` 65 godkända, 3 förväntade fel (4 nya tester i `tests/test_ev_surplus_and_phase_log.py`; två av dem faller utan rättningen). Backtesterna oförändrade (147,80 / 880,70 kr).
+
 ## Nyheter i 0.9.75
 
 Fas B, steg B5.1: plan B (DP-planeraren) kan nu styra batteriet. En ny väljare avgör vilken planerare exekutorn följer; standard är fortfarande dagens planerare.

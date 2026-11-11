@@ -732,3 +732,31 @@ Avvikelser i det verkliga utfallet: 9–10 nov körde 0.9.74:s första version (
 
 **Nästa:** B5.2 EV i DP, B5.3 exekutor som ren fysik (bara om backtesten visar att det inte kostar), B5.4 städning (attributstorlek, np.float64, cykelkostnadsinställningen).
 
+## 2026-11-11 – Plan B:s export: premie och lastmarginal prövade, förkastade
+
+**Fråga:** användaren upplevde plan B:s kvällsurladdning som aggressiv (10 nov: 11 kWh export 15:45–18:30 till 4,8–5,55 kr, batteriet tomt 21:15; 11 nov: export till 4,1–4,5 kr inför billig morgondag). Utfallet 10–11 nov: ~52 kr besparing mot hus utan batteri, aldrig köp i kvällstoppen.
+
+**Prövat** (parametrar i `DPPlanner`, backade efter mätningen): A = exportpremie X kr/kWh på batteriexport, B = husets last × 1,2 i DP:n.
+
+| Variant | Utan facit 13,7 d (B bättre än V) | Sommar | Vinter |
+|---|---|---|---|
+| Bas | +170,79 | 204,80 | 1 339,82 |
+| A 0,5 | +153,68 | – | – |
+| A 1,0 | +145,08 | 131,79 | 1 293,25 |
+| B 1,2 | +166,14 | 199,91 | 1 317,42 |
+| A 1,0 + B 1,2 | +147,12 | 126,69 | 1 279,54 |
+
+Basens simulering tog aldrig slut i dygnets dyraste fjärdedel under de 13,7 dygnen – B skyddade mot något som inte inträffade. A tar bort affärer med 0,5–1,5 kr marginal (snitt export 2,83 kr/kWh) och går bara jämnt upp vid verkligt slitage ~0,6 kr/kWh.
+
+**Beslut (användaren):** plan B behålls oförändrad. Enda kvarvarande skäl att exportera mindre är verklig slitagekostnad – mät i så fall cykelkostnaden (alternativ C) med batteriets pris och cykelgaranti.
+
+## 2026-11-11 – Fasvarningar och billaddning på batteriexport (v0.9.76)
+
+**Utredning:** 951 fasvarningar 11 nov 00:30–16:40. Två orsaker:
+1. 16:15–16:37 (L1, 17–18 A): plan B exporterade 8 kW ur batteriet, sol 0 W. `compute()` räknade överskott vid nätexport som `export + batteriladdning`, så batteriexporten blev "sol" och Amina beordrades 13–16 A (Kia vald, bilen drog inget). Fasskyddet lade beslutets 13–16 A på uppmätta 3,8 A. Verklig L1 ≤ ~10 A (export).
+2. Natt/morgon (L2, "Pass 0" 18–22 A): exekutorn begärde full laddning varje cykel och fasskyddet ströp – varningen visade beslutets ström, inte uppmätt. Uppmätt L2 ~15 A, topp ~17 A 05:45 när kompressorn gick på L2 (plan B:s laddtak antar jämn fasfördelning; bara Legionella är känd last).
+
+**Ändring:** överskott vid export = `min(sol, export + laddning − urladdning)`. "Pass N … överskriden" loggas som varning bara i pass 0 när den uppmätta fasströmmen redan är över gränsen, annars debug; ny varning om en fas fortfarande är över efter alla pass. Ej gjort (C): plan B:s laddtak från uppmätt fasobalans för aktuell kvart – avvakta tills bruset är borta.
+
+**Verifiering:** `tests/test_ev_surplus_and_phase_log.py` (4 tester, 2 faller utan rättningen). Backtest oförändrad 147,80 / 880,70.
+
