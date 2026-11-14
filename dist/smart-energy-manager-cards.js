@@ -427,6 +427,7 @@ class SemEnergyPlanCard extends HTMLElement {
       operating_mode:       "select.smart_energy_manager_operating_mode",
       solcast_peak_w_today:       "sensor.solcast_pv_forecast_peak_forecast_today",
       solcast_peak_time_today:    "sensor.solcast_pv_forecast_peak_time_today",
+      solcast_today:        "sensor.solcast_pv_forecast_forecast_today",
       battery_cap_kwh:      33,
       battery_usable_pct:   93,
       battery_min_pct:      10,
@@ -655,7 +656,21 @@ canvas { display: block; width: 100%; }
     const _peakTimeToday = peakTimeToday
       ?? peakTimeTomorrow
       ?? { getHours: () => 12, getMinutes: () => 30 };
+    // Solcasts p50 per halvtimme – samma prognos som plan B räknar med. Gaussen
+    // nedan är bara reserv om detailedForecast saknas.
+    const solcastP50 = new Map();
+    [cfg.solcast_today, cfg.solcast_tomorrow_kwh].forEach(id => {
+      (this._hass?.states[id]?.attributes?.detailedForecast ?? []).forEach(f => {
+        const ms = new Date(f.period_start).getTime();
+        if (!isNaN(ms)) solcastP50.set(ms, Number(f.pv_estimate) || 0);
+      });
+    });
     const getSolarKw = (t) => {
+      if (solcastP50.size) {
+        const half = new Date(t); half.setMinutes(t.getMinutes() < 30 ? 0 : 30, 0, 0);
+        const kw = solcastP50.get(half.getTime());
+        if (kw !== undefined) return kw;
+      }
       const isToday = t.toDateString() === now.toDateString();
       if (isToday) {
         if (peakWToday > 0)
@@ -1002,7 +1017,11 @@ canvas { display: block; width: 100%; }
     for (let v = 0; v <= priceMax; v += priceStep) priceTicks.push(v);
     const yP   = (v) => pT + ph - Math.max(0, Math.min(1, v / priceMax)) * ph;
     const yB   = (v) => pT + ph - Math.max(0, Math.min(1, v / battMax)) * ph;
-    const ySOL = (v) => pT + ph - Math.max(0, Math.min(1, v / 12)) * ph;
+    // Solkurvan har ingen egen axel; skalan följer dagens topp och toppen får en
+    // kW-etikett, annars läses kurvan mot kr-axeln (12 nov 2026: 2,1 kW såg ut som 0,6).
+    const solarPeak = Math.max(0, ...solarKwsData);
+    const solarMax = Math.max(4, Math.ceil(solarPeak * 1.6));
+    const ySOL = (v) => pT + ph - Math.max(0, Math.min(1, v / solarMax)) * ph;
 
     const fz   = Math.max(10, Math.min(12, Math.round(dispW / 55)));
     const font = `${fz}px sans-serif`;
@@ -1163,6 +1182,11 @@ canvas { display: block; width: 100%; }
     });
     ctx.stroke();
     ctx.setLineDash([]);
+    if (solarPeak >= 0.05) {
+      const iPeak = solarKwsData.indexOf(solarPeak);
+      ctx.fillStyle = "#eda100"; ctx.font = font; ctx.textAlign = "center";
+      ctx.fillText(`${solarPeak.toFixed(1)} kW`, xOf(iPeak), ySOL(solarPeak) - 4);
+    }
 
     if (battSrc) {
       // Fill

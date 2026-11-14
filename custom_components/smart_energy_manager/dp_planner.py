@@ -291,8 +291,14 @@ class DPPlanner:
             deficit = net[t]
             soc_pct = energies[i] / cap * 100.0
             if k > 0:
-                action = "solar_charge" if deficit < 0 and ac <= -deficit + 1e-6 else "grid_charge"
-                reason = f"DP: laddar {power_w:.0f}W (köp {buy[t]:.2f}, sälj {sell[t]:.2f} kr)"
+                # Ett energisteg (0,1 kWh) är ofta större än ett litet solöverskott;
+                # kommer minst hälften ur solen är det solladdning, inte nätköp
+                # (12 nov 2026: 434 W "nätladdning" 10:30 med 2 kW sol, köp 2,90 kr).
+                solar_share = min(ac, max(0.0, -deficit)) / ac
+                action = "solar_charge" if solar_share >= 0.5 else "grid_charge"
+                reason = (f"DP: laddar {power_w:.0f}W, {solar_share * 100:.0f} % sol "
+                          f"(köp {buy[t]:.2f}, sälj {sell[t]:.2f} kr)" if solar_share > 0 else
+                          f"DP: laddar {power_w:.0f}W (köp {buy[t]:.2f}, sälj {sell[t]:.2f} kr)")
             elif k < 0:
                 battery_export = max(0.0, -ac - max(deficit, 0.0))
                 # Exekutorns export laddar ur |målvärde| + husets underskott, så

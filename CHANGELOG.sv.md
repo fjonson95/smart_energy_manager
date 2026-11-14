@@ -2,6 +2,13 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.77
+
+- **Plan B märker små solöverskott som solladdning**: plan B planerar i steg om 0,1 kWh, och ett steg är ofta större än ett litet solöverskott. En sådan kvart märktes som nätladdning, så kortet visade "Nätladdning" 12 nov 10:30–11:30 (Solcast p50 2 kW, köp 2,90 kr) och exekutorn köpte nätdelen till fullt pris. En kvart där minst hälften av steget kommer från solen är nu solladdning: exekutorn laddar från det verkliga överskottet och köper inget. Beslutstexten visar solandelen. Backtester med plan B: vinter 1 339,82 → 1 357,82 kr, sommar 204,80 → 205,02 kr, utan facit 27 okt–10 nov 304,83 → 320,10 kr.
+- **Solöverskott lagras under "ekonomisk topp"**: när planens kvart sa nätladdning och köppriset räknades som ekonomisk topp (≥ 1,2 × billigaste priset kommande 12 h) täckte exekutorn bara husets underskott och struntade i solöverskott. 12 nov 10:26 exporterades 2,5 kW för 1,66 kr medan batteriet stod på 9 %. Grenen laddar nu från verkligt överskott över 100 W, som idle- och egenförbrukningsgrenarna. Ingen ändring i backtesterna (fallet finns inte i historiken).
+- **Planeringskortet visar solprognosen plan B räknar med**: sollinjen följer nu Solcast p50 per halvtimme (nytt val `solcast_today`, standard `sensor.solcast_pv_forecast_forecast_today`) i stället för en klockkurva runt toppen, och skalan följer dagens topp, som får en etikett i kW. Förut hade linjen en fast skala 0–12 kW utan axel, så 2,1 kW såg ut som 0,6 mot prisaxeln.
+- **Verifierat**: `pytest` 68 godkända, 3 förväntade fel (3 nya tester i `tests/test_dp_solar_share.py`; två faller utan rättningarna). V-backtesterna oförändrade (147,80 / 880,70 kr).
+
 ## Nyheter i 0.9.76
 
 Två rättningar efter genomgången av plan B:s första dygn som styrande (10–11 nov).

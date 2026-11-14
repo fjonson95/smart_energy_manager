@@ -2,6 +2,13 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.77
+
+- **Plan B labels small solar surpluses as solar charging**: plan B plans in 0.1 kWh steps, which are often larger than a small solar surplus. Such a quarter used to be labelled grid charging, so the plan card showed "Grid charging" on 12 Nov 10:30–11:30 (Solcast p50 2 kW, buy price 2.90 SEK), and the executor bought the grid share at full price. A quarter where at least half of the step comes from the sun is now solar charging: the executor charges from the real surplus and buys nothing. The decision text shows the solar share. Backtests with plan B: winter 1,339.82 → 1,357.82 SEK, summer 204.80 → 205.02 SEK, without hindsight 27 Oct–10 Nov 304.83 → 320.10 SEK.
+- **Solar surplus is stored during an "economic peak"**: when a plan slot said grid charging and the buy price counted as an economic peak (≥ 1.2 × the cheapest price in the next 12 h), the executor only covered a house deficit and ignored a solar surplus. On 12 Nov at 10:26 2.5 kW was exported for 1.66 SEK while the battery sat at 9 %. That branch now charges from a real surplus over 100 W, like the idle and self-consumption branches. No change in the backtests (the case does not occur in the history).
+- **Plan card shows the solar forecast plan B uses**: the solar line now follows Solcast p50 per half hour (new option `solcast_today`, default `sensor.solcast_pv_forecast_forecast_today`) instead of a bell curve around the peak, and its scale follows the day's peak, which is labelled in kW. Before, the line had a fixed 0–12 kW scale with no axis, so 2.1 kW read as 0.6 on the price axis.
+- **Verified**: `pytest` 68 passed, 3 expected failures (3 new tests in `tests/test_dp_solar_share.py`; two fail without the fixes). V backtests unchanged (147.80 / 880.70 SEK).
+
 ## What's New in 0.9.76
 
 Two fixes found while reviewing plan B's first day in control (10–11 Nov).

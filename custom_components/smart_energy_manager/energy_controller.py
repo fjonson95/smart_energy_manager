@@ -1151,12 +1151,21 @@ class EnergyController:
             decision.reason = f"{ev_reason} | Plan grid_charge {decision.battery_charge_power_w:.0f}W | {now_slot.reason}"
 
         elif now_slot.action == "grid_charge" and econ_peak:
-            if self_consume_ok:
-                decision.battery_discharge_power_w = min(house_def_w, batt_max_w)
-            decision.reason = (
-                f"{ev_reason} | Plan grid_charge men economic_peak → egenförbrukning "
-                f"{decision.battery_discharge_power_w:.0f}W | {now_slot.reason}"
-            )
+            if solar_surplus_w > 100:
+                # 12 nov 2026 10:26: 2,5 kW solöverskott exporterades för 1,66 kr
+                # medan batteriet stod på 9 % – grenen fångade bara underskott.
+                decision.battery_charge_power_w = min(max(0.0, solar_surplus_w - ev_total_w), batt_max_w)
+                decision.reason = (
+                    f"{ev_reason} | Plan grid_charge men economic_peak → laddar solöverskott "
+                    f"{decision.battery_charge_power_w:.0f}W | {now_slot.reason}"
+                )
+            else:
+                if self_consume_ok:
+                    decision.battery_discharge_power_w = min(house_def_w, batt_max_w)
+                decision.reason = (
+                    f"{ev_reason} | Plan grid_charge men economic_peak → egenförbrukning "
+                    f"{decision.battery_discharge_power_w:.0f}W | {now_slot.reason}"
+                )
 
         elif now_slot.action == "export":
             batt_kwh = state.battery_soc_pct / 100.0 * state.battery_capacity_kwh

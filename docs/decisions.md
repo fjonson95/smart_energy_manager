@@ -760,3 +760,29 @@ Basens simulering tog aldrig slut i dygnets dyraste fjärdedel under de 13,7 dyg
 
 **Verifiering:** `tests/test_ev_surplus_and_phase_log.py` (4 tester, 2 faller utan rättningen). Backtest oförändrad 147,80 / 880,70.
 
+## 2026-11-12 – Solandel i plan B:s laddsteg och kortets sollinje (v0.9.77)
+
+**Observation:** 12 nov 09:00 visade kortet "Nätladdning" 10:30–11:30 (434 W) trots att 12:00–13:30 var billigare. Plan B laddade inte för priset: Solcast p50 ~2 kW mot husets ~1,6 kW gav några hundra watt överskott, och DP:s minsta steg (0,1 kWh lagrat ≈ 434 W AC) var större än överskottet. Etiketten var solar_charge bara om hela steget rymdes i överskottet, annars grid_charge – och exekutorn köpte då nätdelen till fullt pris (2,78–2,90 kr, över V_charge 2,59). 13:45 (köp 2,59 = V_charge) var en ren nätladdning på gränsen.
+
+**Ändring:** solar_charge när minst hälften av steget är sol; exekutorns solar_charge laddar från verkligt överskott. Kortets sollinje använder Solcast p50 per halvtimme och en skala efter dagens topp med kW-etikett (förut fast 0–12 kW utan axel, avläst mot kr-axeln).
+
+**Även:** 10:26 samma dag exporterades 2,5 kW (sol 3,8, hus 1,3 kW, SOC 9 %): kvarten var grid_charge och köp 2,93 ≥ 1,2 × billigaste 12 h → `econ_peak`-grenen, som bara täckte underskott. Grenen laddar nu verkligt solöverskott > 100 W. `econ_peak` är V-tidens logik och tas bort i B5.4. Backtesterna oförändrade.
+
+**Mätning (plan B, `--planner dp --load-level calib`, lagerjusterat):** vinter 1 339,82 → 1 357,82; sommar 204,80 → 205,02; utan facit 27 okt–10 nov 304,83 → 320,10 kr. V-backtesterna påverkas inte.
+
+## 2026-11-14 – Utvärdering: plan B styr sedan 10 nov
+
+**Period:** 10 nov 13:00 – 14 nov 09:00 (3,8 dygn), plan B styrande sedan 10 nov 12:39.
+
+| Variant | Lagerjusterad besparing | Per dygn |
+|---|---|---|
+| Plan B, verkligt utfall (uppmätt nät + batteri) | 121,55 kr | 32,0 kr |
+| Plan B, simulerad samma dygn | 129,37 kr | 34,0 kr |
+| V, simulerad samma dygn | 66,77 kr | 17,6 kr |
+
+Plan B +62,6 kr mot V (~16 kr/dygn), i linje med utvärderingen före bytet (+170,79 kr på 13,7 dygn, 12,5 kr/dygn). Verkligt utfall 94 % av simulerat; skillnaden: fasskyddets strypning, exporten 12 nov förmiddag (v0.9.77), modellens energibalans (återspelad import −5,6 %).
+
+Verkligt per dygn (besparing → lagerjusterad à 3,14 kr/kWh): 10 nov (från 13) 122,0 → 60,3; 11 nov 42,3 → 35,4; 12 nov −1,3 → 4,5; 13 nov −19,8 → 25,6 (laddning 8 → 86 %); 14 nov till 09 10,6 → −4,1. Sensorn "Besparing idag" saknar lagerjustering – minusdagar med påfyllt batteri är inga förluster.
+
+**Metod:** `testdata/backtest.py <nov14> --date-from 2026-11-10T12:45 --date-to 2026-11-14 --load-level calib --no-foresight --until 2026-11-14T08:00 --planner v|dp` (v0.9.77; med v0.9.76 129,17 kr). Sol = utfall för båda planerarna (lokalt Solcast-arkiv slutar 10 nov; 34 kWh sol under perioden). Verkligt utfall: timmedel av elmätare och batterieffekt mot referens utan batteri (nät + batteriurladdning), köp 1,25 × (spot + 0,749), sälj spot + 0,065. Datafilerna är personliga och committas inte.
+
