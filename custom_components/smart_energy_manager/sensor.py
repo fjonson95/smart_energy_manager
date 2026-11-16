@@ -1211,6 +1211,8 @@ class DayPlanReasonSensor(_DayPlanBase):
                     "action": slot.action,
                     "target_power_w": round(slot.target_power_w, 0),
                     "battery_soc_est_pct": round(slot.battery_soc_est_pct, 1),
+                    # Bara när bilen är schemalagd – attributen ligger nära 16 kB.
+                    **({"ev_charge_w": round(slot.ev_charge_w)} if slot.ev_charge_w > 0 else {}),
                 }
                 for slot in plan.slots
                 if slot.start < dt_util.now() + timedelta(hours=24)

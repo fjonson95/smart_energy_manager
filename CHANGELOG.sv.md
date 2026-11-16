@@ -2,6 +2,11 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.79
+
+- **Plan B schemalägger bilens nätladdning (fas B5.2)**: hittills kom bilens nätladdning från V-planen (deadline-schemat) eller vinterns "billig timme", och plan B såg den inte. 15 nov 02:00–06:45 laddade bilen 8 A på L1 medan plan B planerade 7,6–7,8 kW batteriladdning; fasskyddet ströp batteriet till 5,3 kW och 11 kWh av den planerade nattladdningen föll bort. När plan B styr schemalägger den nu bilen själv: en bil med deadline får de billigaste kvartarna före deadline med 16 A (som förut); utan deadline ersätter plan B "billig timme" under samma villkor (lite sol idag eller imorgon) med 8 A och deadline 07:00. Bilen undviker batteriets laddkvartar; får den inte plats delar den dem och plan B sänker batteriets laddtak med bilens last på dess fas. Bilen räknas bara i fasgränsen – batteriet laddar aldrig ur till bilen. Beslutstexten visar "plan B 8A". När V styr är allt som förut. Plansensorernas slots visar `ev_charge_w` i kvartar med schemalagd bil.
+- **Verifierat**: `pytest` 79 godkända, 3 förväntade fel (6 nya tester i `tests/test_dp_ev_schedule.py`). Backtesterna oförändrade (bilen är bortrensad ur backtestdatan): V 147,80 / 880,70 kr, plan B sommar 205,45, vinter 1 357,44, utan facit 320,10 kr.
+
 ## Nyheter i 0.9.78
 
 - **Plan B:s solladdning blir inte längre urladdning när solen ger mindre än prognosen**: 15 nov 12:00–12:30 planerade plan B att ladda 876 W (70 % sol, resten från nätet för 1,53 kr), men solen räckte bara till huset. Exekutorn tolkade det uteblivna överskottet som underskott och täckte huset ur batteriet – i snitt ~400 W urladdning i stället för 876 W laddning, ~0,65 kWh som sedan ersatte el för 4,20 kr på kvällen. Plan B:s laddkvartar bär nu den planerade nätdelen (`grid_charge_w`) och håller batteriet. När det verkliga överskottet saknas köper exekutorn nätdelen (överskott + nätdel när solen är bättre än prognosen) och laddar inte ur – men bara när köppriset är högst det lagrade värdet (V_charge). Är nätet dyrare täcks huset ur batteriet som förut: att köpa nätdelen för 2,2–3,7 kr kostade 3,7 kr i backtesten utan facit. V:s solladdning är oförändrad.

@@ -284,6 +284,8 @@ class EnergyState:
     # deadline-schemalagd just nu (se coordinator._compute_ev_schedule_inputs).
     plan_ev_charge_w: Optional[float] = None
     plan_ev_charger_name: Optional[str] = None
+    # Plan B styr och äger bilens nätladdning – "billig timme" (C05) körs inte (B5.2).
+    plan_owns_ev_grid: bool = False
 
     # Driftläge
     operating_mode: str = MODE_AUTO
@@ -595,11 +597,12 @@ class EnergyController:
                 if car and ch.soc_pct is not None and ch.soc_pct >= car.ev_soc_target:
                     break
                 cur = min(MAX_EV_CURRENT, max(MIN_EV_CURRENT, state.plan_ev_charge_w / (self.voltage * ch.car_phases)))
+                label = "plan B" if state.plan_owns_ev_grid else "deadline-garanti"
                 decision.charger_decisions[i] = ChargerDecision(
                     enable=True, current_a=cur,
-                    reason=f"deadline-garanti {cur:.0f}A",
+                    reason=f"{label} {cur:.0f}A",
                 )
-                decision.reason += f" | {ch.config.name} {cur:.0f}A deadline-garanti"
+                decision.reason += f" | {ch.config.name} {cur:.0f}A {label}"
                 break
 
         # Återlägg reserverad batterikapacitet – EV-loopen körde på reducerat överskott;
@@ -934,7 +937,8 @@ class EnergyController:
                             )
 
         # EV billigast-timmar på vintern; måttlig ström så att batteriet behåller prioritet. Se docs/decisions.md C05.
-        if not export_active and not _economic_peak and (_low_solar_today or _low_solar_tomorrow) and ps and ps.slots:
+        if (not state.plan_owns_ev_grid and not export_active and not _economic_peak
+                and (_low_solar_today or _low_solar_tomorrow) and ps and ps.slots):
             _ev_sorted_prices = sorted(s.buy_sek for s in ps.slots if s.end > now_aware)
             if _ev_sorted_prices:
                 _ev_threshold_idx = max(0, int(len(_ev_sorted_prices) * DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE) - 1)

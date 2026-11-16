@@ -795,3 +795,26 @@ Verkligt per dygn (besparing → lagerjusterad à 3,14 kr/kWh): 10 nov (från 13
 **Prövat först (utan priskrav):** utan facit 27 okt–10 nov 320,10 → 316,39 kr. Kvartarna där solen svek låg på 2,2–3,7 kr, där egenförbrukning var bättre än att köpa nätdelen (+12,6 kr direkt, −8,9 kr igen senare). Med priskravet: 320,10 (identiskt), 10–14 nov 129,37 (identiskt), sommar 205,02 → 205,45, vinter 1 357,82 → 1 357,44. V oförändrad 147,80 / 880,70.
 
 **Verifiering:** `tests/test_dp_solar_share.py` (5 nya: nätdel och hold i plan B, ingen sol → köper nätdelen, mer sol → överskott + nätdel, dyrt köp → egenförbrukning, V:s reserv kvar).
+
+## 2026-11-16 – Plan B:s laddtak och fasobalans: mätt, ingen ändring (alternativ C)
+
+**Mätning (10 nov 12:40 – 16 nov 19:00, plan B styrande):** timmedel av `plan_b_laddningseffekt` (planens mål) mot `plan_executor_laddning` (exekutorns börvärde efter fasskyddet) i timmar med nätladdning. Förlorad laddenergi totalt ~16 kWh:
+
+| Tillfälle | Förlust | Orsak |
+|---|---|---|
+| 15 nov 02–06:45 (köp 1,1 kr) | 11,1 kWh | Amina 8 A på L1 ("billig timme", V:s EV-schema); L1 1,9 kW före batteriladdningen mot L2 0,5 / L3 0,4 kW. Exekutorn fick 5,3 kW i stället för 7,6–7,8 kW. |
+| 11 nov 05:45–06:30 | 1,7 kWh | Värmepumpen på en fas; fasskyddet rampade upp 0,4 → 6,5 kW. |
+| 13 nov 12–13 | 0,9 kWh | Dag, last + nätladdning 7,9 kW. |
+| 13 nov 21:45, 14 nov 23:45, 11 nov natt | 0,9 + 0,6 + 0,3 kWh | Kvällslast / korta strypningar. |
+
+Husets egen grundobalans (16 nov 01:45: L1 0,23, L2 0,76, L3 0,41 kW) förklarar bara några kWh på sex dygn. Planen läggs om var 15:e minut och flyttar den strypta laddningen till närliggande billiga kvartar (15 nov: SOC 13 → 88 % före 06:45 ändå), så kostnaden är liten – uppskattningsvis under 2 kr.
+
+**Beslut:** uppmätt fasfördelning i plan B (steg 1) görs inte nu. Den dominerande orsaken är billaddning som plan B inte ser; den hör till B5.2 – bilen som känd last med sina faser i DP:s laddtak, på samma sätt som Legionellas patron (B4.1).
+
+## 2026-11-16 – Fas B, steg B5.2: bilens nätladdning i plan B (v0.9.79)
+
+**Bakgrund:** mätningen ovan – 11 av 16 kWh strypt planerad laddning kom från Amina 8 A på L1 ("billig timme", C05), som plan B inte såg.
+
+**Ändring:** `DPPlanner.build_plan(ev_demand=...)` schemalägger bilen efter batteriplanen: billigast först före deadline, i kvartar där batteriet inte laddar (som V:s P16). Räcker de inte tar bilen även batteriets laddkvartar och batteriplanen byggs om med bilen som `cap_only_loads` – bara i fasgränsen, inte i energibalansen (exekutorn laddar aldrig ur till bilen; huslasten räknas utan bilen). Behovet (`coordinator._plan_b_ev_demand`): bil med deadline som V (16 A × faser); annars, under C05:s villkor (lite sol idag/imorgon), 8 A till nästa 07:00 med behov (mål − SOC) × kapacitet, eller alla kvartar fram till 07:00 om det är okänt. Användaren valde 8 A och 07:00. När plan B styr följer exekutorn plan B:s `ev_charge_w` och `EnergyState.plan_owns_ev_grid` stänger av C05. Solladdning av bilen och fasskyddet oförändrade; V-läget oförändrat.
+
+**Verifiering:** `tests/test_dp_ev_schedule.py` (6 tester): bilen undviker batteriets laddkvartar, en hel natts bil sänker laddtaket till ≤ 3,7 kW i delade kvartar (utan bil > 7 kW), C05 kvar under V och av under plan B, plan B-kvart ger 8 A. Backtesterna oförändrade (bilen är bortrensad ur datan) – nyttan verifieras live en natt med bilen inkopplad.

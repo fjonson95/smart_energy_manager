@@ -106,7 +106,58 @@ class DPPlanner:
         self.reserve_margin_kwh = reserve_margin_kwh
         self.terminal_mode = terminal_mode
 
-    def build_plan(
+    def build_plan(self, *, ev_demand: Optional[dict] = None, **kwargs) -> DayPlan:
+        """Batteriplanen plus bilens nätladdning (fas B5.2).
+
+        ev_demand: {"energy_kwh", "deadline", "power_kw", "phases"} eller None.
+        Bilen läggs i de billigaste kvartarna före deadline där batteriet inte
+        laddar (som V:s P16). Räcker de inte tar bilen även batteriets
+        laddkvartar och planen byggs om med bilen som fasbelastning – annars
+        planerar DP laddning som fasskyddet stryper (15 nov 2026: Amina 8 A på
+        L1, 11 kWh av planerad nattladdning ströps). Bilen ligger bara i
+        fasgränsen, inte i energibalansen: exekutorn laddar aldrig ur till bilen.
+        """
+        plan = self._build_battery_plan(**kwargs)
+        if not ev_demand or ev_demand.get("energy_kwh", 0.0) <= 0.01 or ev_demand.get("power_kw", 0.0) <= 0.01:
+            return plan
+        now = kwargs["now"]
+        now_a = now if now.tzinfo else now.astimezone()
+        ps = kwargs.get("ps")
+        buy_by_start = {s.start: s.buy_sek for s in (ps.slots if ps else [])}
+        deadline = ev_demand.get("deadline") or plan.valid_until
+        power_kw = float(ev_demand["power_kw"])
+        cands = [p for p in plan.slots if p.start < deadline and p.end > now_a]
+        free = [p for p in cands if p.target_power_w <= 0]
+        busy = [p for p in cands if p.target_power_w > 0]
+
+        def allocate(pool, remaining):
+            out = {}
+            for p in sorted(pool, key=lambda p: (buy_by_start.get(p.start, float("inf")), p.start)):
+                if remaining <= 0.01:
+                    break
+                h = (p.end - max(p.start, now_a)).total_seconds() / 3600.0
+                if h <= 0:
+                    continue
+                kwh = min(power_kw * h, remaining)
+                out[p.start] = (p.end, kwh / h)
+                remaining -= kwh
+            return out, remaining
+
+        sched, remaining = allocate(free, float(ev_demand["energy_kwh"]))
+        if remaining > 0.01 and busy:
+            extra, remaining = allocate(busy, remaining)
+            sched.update(extra)
+            phases = tuple(ev_demand.get("phases") or ("L1",))
+            cap_loads = [(start, end, kw, phases) for start, (end, kw) in sched.items()]
+            plan = self._build_battery_plan(**kwargs, cap_only_loads=cap_loads)
+        for p in plan.slots:
+            if p.start in sched:
+                p.ev_charge_w = sched[p.start][1] * 1000.0
+        ev_kwh = sum(kw * (end - max(start, now_a)).total_seconds() / 3600.0 for start, (end, kw) in sched.items())
+        plan.notes += f" | bil {ev_kwh:.1f}kWh i {len(sched)} kvartar"
+        return plan
+
+    def _build_battery_plan(
         self,
         now: datetime,
         battery_soc_pct: float,
@@ -126,6 +177,7 @@ class DPPlanner:
         daily_load_kwh_by_date: Optional[dict] = None,
         load_kw_by_start: Optional[dict] = None,
         known_loads: Optional[list] = None,
+        cap_only_loads: Optional[list] = None,
         phase_limit_a: Optional[float] = None,
         grid_voltage: float = 230.0,
         **_unused,
@@ -205,6 +257,13 @@ class DPPlanner:
                     continue
                 for ph in k_phases:
                     extra_ph[ph] = extra_ph.get(ph, 0.0) + k_kw / len(k_phases) * overlap_h / h
+            cap_ph = dict(extra_ph)
+            for k_start, k_end, k_kw, k_phases in (cap_only_loads or ()):
+                overlap_h = (min(s.end, k_end) - max(start, k_start)).total_seconds() / 3600.0
+                if overlap_h <= 0 or not k_phases:
+                    continue
+                for ph in k_phases:
+                    cap_ph[ph] = cap_ph.get(ph, 0.0) + k_kw / len(k_phases) * overlap_h / h
             load_kw = load_kw_at(start)
             solar_kw = s.solar_kwh * frac / h
             hours[t] = h
@@ -213,7 +272,7 @@ class DPPlanner:
             sell[t] = s.sell_sek
             if phase_kw is not None:
                 base_ph = (load_kw - solar_kw) / 3.0
-                room = min(phase_kw - base_ph - extra_ph.get(ph, 0.0) for ph in ("L1", "L2", "L3"))
+                room = min(phase_kw - base_ph - cap_ph.get(ph, 0.0) for ph in ("L1", "L2", "L3"))
                 charge_cap_kw[t] = min(charge_cap_kw[t], max(0.0, 3.0 * room))
 
         n_real = n
