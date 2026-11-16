@@ -1129,8 +1129,13 @@ class EnergyController:
         if now_slot.action == "solar_charge":
             # Ingen prefer_sell här – planen har redan valt att spara (2026-09-22). Se docs/decisions.md C07.
             battery_surplus_w = max(0.0, solar_surplus_w - ev_total_w)
-            decision.battery_charge_power_w = min(battery_surplus_w, batt_max_w)
-            if decision.battery_charge_power_w == 0.0 and house_def_w > 0.0 and self_consume_ok:
+            # Nätdelen och spärren gäller bara när köpet är billigare än det lagrade
+            # värdet; annars är egenförbrukning bättre (backtest utan facit 27 okt–10 nov).
+            cheap = buy_price <= day_plan.marginal_value_charge_sek_kwh
+            grid_part_w = max(0.0, now_slot.grid_charge_w) if cheap else 0.0
+            decision.battery_charge_power_w = min(battery_surplus_w + grid_part_w, batt_max_w)
+            if (decision.battery_charge_power_w == 0.0 and house_def_w > 0.0 and self_consume_ok
+                    and not (now_slot.hold_battery and cheap)):
                 # Planen (upp till 15 min gammal prognos) väntade sig nog med sol för att
                 # ladda, men verkligheten levererar ett underskott istället - täck det med
                 # batteriet i stället för att låta nätet köpa till aktuellt pris (samma
@@ -1142,6 +1147,11 @@ class EnergyController:
                 decision.reason = (
                     f"{ev_reason} | Plan solar_charge men verkligt underskott → egenförbrukning "
                     f"{decision.battery_discharge_power_w:.0f}W | {now_slot.reason}"
+                )
+            elif battery_surplus_w == 0.0 and grid_part_w > 0.0:
+                decision.reason = (
+                    f"{ev_reason} | Plan solar_charge men verkligt underskott → laddar nätdelen "
+                    f"{decision.battery_charge_power_w:.0f}W | {now_slot.reason}"
                 )
             else:
                 decision.reason = f"{ev_reason} | Plan solar_charge {decision.battery_charge_power_w:.0f}W | {now_slot.reason}"

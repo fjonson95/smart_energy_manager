@@ -786,3 +786,12 @@ Verkligt per dygn (besparing → lagerjusterad à 3,14 kr/kWh): 10 nov (från 13
 
 **Metod:** `testdata/backtest.py <nov14> --date-from 2026-11-10T12:45 --date-to 2026-11-14 --load-level calib --no-foresight --until 2026-11-14T08:00 --planner v|dp` (v0.9.77; med v0.9.76 129,17 kr). Sol = utfall för båda planerarna (lokalt Solcast-arkiv slutar 10 nov; 34 kWh sol under perioden). Verkligt utfall: timmedel av elmätare och batterieffekt mot referens utan batteri (nät + batteriurladdning), köp 1,25 × (spot + 0,749), sälj spot + 0,065. Datafilerna är personliga och committas inte.
 
+## 2026-11-16 – Solladdning när solen sviker: nätdelen i stället för urladdning (v0.9.78)
+
+**Observation (kontroll av v0.9.77 live):** solandelen syns som avsett ("DP: laddar 876W, 70 % sol", `solar_charge`). Men 15 nov 12:00–12:30 (köp 1,53–1,55 kr) gav solen 1,1–1,9 kW mot husets 1,5–2,6 kW i stället för Solcasts ~600 W överskott. Exekutorns `solar_charge`-gren föll då i egenförbrukningsreserven (skydd från incidenten 2026-09-11) och växlade var 30:e sekund mellan "laddar" och "verkligt underskott → egenförbrukning": i snitt ~400 W urladdning mot planens 876 W laddning, ~0,65 kWh som ersatte 4,20 kr-el på kvällen (~1,5–2 kr). Före 0.9.77 var samma kvart `grid_charge` och laddade från nätet.
+
+**Ändring:** `PlannedSlot.grid_charge_w` = mål × (1 − solandel) för plan B:s laddsteg, och laddsteg får `hold_battery = True` (planloggens kolumn `hold_battery` visar därför 1 även på plan B:s laddkvartar). Exekutorn: laddning = verkligt överskott + nätdelen; ingen urladdning – men bara när köp ≤ `marginal_value_charge_sek_kwh` (V_charge). Annars gäller den gamla reserven. V-planens slots har 0/False och beter sig som förut.
+
+**Prövat först (utan priskrav):** utan facit 27 okt–10 nov 320,10 → 316,39 kr. Kvartarna där solen svek låg på 2,2–3,7 kr, där egenförbrukning var bättre än att köpa nätdelen (+12,6 kr direkt, −8,9 kr igen senare). Med priskravet: 320,10 (identiskt), 10–14 nov 129,37 (identiskt), sommar 205,02 → 205,45, vinter 1 357,82 → 1 357,44. V oförändrad 147,80 / 880,70.
+
+**Verifiering:** `tests/test_dp_solar_share.py` (5 nya: nätdel och hold i plan B, ingen sol → köper nätdelen, mer sol → överskott + nätdel, dyrt köp → egenförbrukning, V:s reserv kvar).

@@ -140,6 +140,9 @@ class PlannedSlot:
     # slot (regel 2: köp ≤ sparvärde, eller kapaciteten är öronmärkt åt en
     # bättre slot). Exekutorn får då inte täcka huslasten ur batteriet.
     hold_battery: bool = False
+    # Plan B:s nätdel av en solar_charge-slot (mål × (1 − solandel)); exekutorn
+    # köper den även när solen sviker i stället för att ladda ur.
+    grid_charge_w: float = 0.0
 
 
 @dataclass

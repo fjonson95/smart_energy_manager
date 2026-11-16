@@ -285,6 +285,7 @@ class DPPlanner:
         revenue = 0.0
         for t, s in enumerate(slots):
             k = int(policy[t][i])
+            grid_part_w = 0.0
             h = hours[t]
             ac = k * _STEP_KWH / eta_leg if k > 0 else k * _STEP_KWH * eta_leg
             power_w = ac / h * 1000.0
@@ -296,6 +297,7 @@ class DPPlanner:
                 # (12 nov 2026: 434 W "nätladdning" 10:30 med 2 kW sol, köp 2,90 kr).
                 solar_share = min(ac, max(0.0, -deficit)) / ac
                 action = "solar_charge" if solar_share >= 0.5 else "grid_charge"
+                grid_part_w = power_w * (1.0 - solar_share)
                 reason = (f"DP: laddar {power_w:.0f}W, {solar_share * 100:.0f} % sol "
                           f"(köp {buy[t]:.2f}, sälj {sell[t]:.2f} kr)" if solar_share > 0 else
                           f"DP: laddar {power_w:.0f}W (köp {buy[t]:.2f}, sälj {sell[t]:.2f} kr)")
@@ -321,7 +323,10 @@ class DPPlanner:
             planned.append(PlannedSlot(
                 start=s.start, end=s.end, action=action, target_power_w=power_w,
                 battery_soc_est_pct=round(soc_pct, 1), reason=reason,
-                hold_battery=(k == 0 and deficit > 0.01),
+                # Laddslots håller också batteriet: när solen sviker ska exekutorn
+                # köpa nätdelen, inte ladda ur (15 nov 2026 12:00–12:30, köp 1,55 kr).
+                hold_battery=(k == 0 and deficit > 0.01) or k > 0,
+                grid_charge_w=float(grid_part_w),
             ))
             i = min(max(i + k, 0), n_states - 1)
 

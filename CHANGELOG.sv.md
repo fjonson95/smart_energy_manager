@@ -2,6 +2,11 @@
 
 Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.md) för aktuell funktionsuppsättning och konfiguration.
 
+## Nyheter i 0.9.78
+
+- **Plan B:s solladdning blir inte längre urladdning när solen ger mindre än prognosen**: 15 nov 12:00–12:30 planerade plan B att ladda 876 W (70 % sol, resten från nätet för 1,53 kr), men solen räckte bara till huset. Exekutorn tolkade det uteblivna överskottet som underskott och täckte huset ur batteriet – i snitt ~400 W urladdning i stället för 876 W laddning, ~0,65 kWh som sedan ersatte el för 4,20 kr på kvällen. Plan B:s laddkvartar bär nu den planerade nätdelen (`grid_charge_w`) och håller batteriet. När det verkliga överskottet saknas köper exekutorn nätdelen (överskott + nätdel när solen är bättre än prognosen) och laddar inte ur – men bara när köppriset är högst det lagrade värdet (V_charge). Är nätet dyrare täcks huset ur batteriet som förut: att köpa nätdelen för 2,2–3,7 kr kostade 3,7 kr i backtesten utan facit. V:s solladdning är oförändrad.
+- **Verifierat**: `pytest` 73 godkända, 3 förväntade fel (5 nya tester i `tests/test_dp_solar_share.py`; tre faller utan rättningen). V-backtesterna oförändrade (147,80 / 880,70 kr). Plan B: sommar 205,02 → 205,45 kr, vinter 1 357,82 → 1 357,44 kr, utan facit 27 okt–10 nov 320,10 kr (oförändrad – solen svek aldrig i en billig kvart där), 10–14 nov 129,37 kr (oförändrad).
+
 ## Nyheter i 0.9.77
 
 - **Plan B märker små solöverskott som solladdning**: plan B planerar i steg om 0,1 kWh, och ett steg är ofta större än ett litet solöverskott. En sådan kvart märktes som nätladdning, så kortet visade "Nätladdning" 12 nov 10:30–11:30 (Solcast p50 2 kW, köp 2,90 kr) och exekutorn köpte nätdelen till fullt pris. En kvart där minst hälften av steget kommer från solen är nu solladdning: exekutorn laddar från det verkliga överskottet och köper inget. Beslutstexten visar solandelen. Backtester med plan B: vinter 1 339,82 → 1 357,82 kr, sommar 204,80 → 205,02 kr, utan facit 27 okt–10 nov 304,83 → 320,10 kr.

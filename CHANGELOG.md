@@ -2,6 +2,11 @@
 
 All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
 
+## What's New in 0.9.78
+
+- **Plan B's solar charging no longer turns into discharging when the sun falls short of the forecast**: on 15 Nov 12:00–12:30 plan B planned to charge 876 W (70 % sun, the rest from the grid at 1.53 SEK), but the sun only covered the house. The executor treated the missing surplus as a deficit and covered the house from the battery – on average ~400 W discharge instead of 876 W charging, ~0.65 kWh that was later replaced at 4.20 SEK in the evening. Plan B's charging quarters now carry the planned grid share (`grid_charge_w`) and hold the battery. When the real surplus is missing, the executor buys the grid share (surplus + grid share when the sun is better than forecast) and does not discharge – but only when the buy price is at or below the stored value (V_charge). When the grid is more expensive, it covers the house from the battery as before: buying the grid share at 2.2–3.7 SEK cost 3.7 SEK in the no-hindsight backtest. V's solar charging is unchanged.
+- **Verified**: `pytest` 73 passed, 3 expected failures (5 new tests in `tests/test_dp_solar_share.py`; three fail without the fix). V backtests unchanged (147.80 / 880.70 SEK). Plan B: summer 205.02 → 205.45 SEK, winter 1,357.82 → 1,357.44 SEK, without hindsight 27 Oct–10 Nov 320.10 SEK (unchanged – the sun never fell short in a cheap quarter there), 10–14 Nov 129.37 SEK (unchanged).
+
 ## What's New in 0.9.77
 
 - **Plan B labels small solar surpluses as solar charging**: plan B plans in 0.1 kWh steps, which are often larger than a small solar surplus. Such a quarter used to be labelled grid charging, so the plan card showed "Grid charging" on 12 Nov 10:30–11:30 (Solcast p50 2 kW, buy price 2.90 SEK), and the executor bought the grid share at full price. A quarter where at least half of the step comes from the sun is now solar charging: the executor charges from the real surplus and buys nothing. The decision text shows the solar share. Backtests with plan B: winter 1,339.82 → 1,357.82 SEK, summer 204.80 → 205.02 SEK, without hindsight 27 Oct–10 Nov 304.83 → 320.10 SEK.
