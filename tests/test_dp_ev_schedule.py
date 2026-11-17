@@ -103,20 +103,14 @@ def _ctrl():
     return EnergyController(max_current_per_phase=17, battery_min_soc=8, battery_max_soc=99)
 
 
-def test_cheap_hour_ev_charging_still_runs_under_v():
+def test_cheap_hour_without_plan_slot_does_not_charge_ev():
+    # "Billig timme" (C05) togs bort i B5.4.1 – bara planens kvartar laddar från nätet.
     decision = _ctrl().compute(_night_state())
-    assert decision.charger_decisions[0].enable
-    assert "billig timme" in decision.charger_decisions[0].reason
-
-
-def test_plan_b_owns_ev_grid_charging_and_cheap_hour_is_off():
-    decision = _ctrl().compute(_night_state(plan_owns_ev_grid=True))
     assert not decision.charger_decisions[0].enable
 
 
-def test_plan_b_ev_slot_charges_at_8_a():
-    decision = _ctrl().compute(_night_state(plan_owns_ev_grid=True, plan_ev_charge_w=EV_KW * 1000.0,
-                                            plan_ev_charger_name="Amina"))
+def test_plan_ev_slot_charges_at_8_a():
+    decision = _ctrl().compute(_night_state(plan_ev_charge_w=EV_KW * 1000.0, plan_ev_charger_name="Amina"))
     d = decision.charger_decisions[0]
     assert d.enable and round(d.current_a) == 8
-    assert "plan B" in d.reason
+    assert "plan" in d.reason

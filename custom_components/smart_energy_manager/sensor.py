@@ -102,7 +102,7 @@ async def async_setup_entry(
     if coordinator._config.get(CONF_BATTERY_AC_DISCHARGE_ENERGY_ENTITY):
         entities.append(BatteryEquivalentCyclesSensor(coordinator, entry))
 
-    # EnergyPlanner-sensorer (plan vs faktisk)
+    # Plansensorer (plan vs faktisk)
     entities += [
         DayPlanActionSensor(coordinator, entry),
         DayPlanChargePowerSensor(coordinator, entry),
@@ -110,11 +110,6 @@ async def async_setup_entry(
         DayPlanReasonSensor(coordinator, entry),
         PlanExecutorChargeSensor(coordinator, entry),
         PlanExecutorDischargeSensor(coordinator, entry),
-        PlanBActionSensor(coordinator, entry),
-        PlanBChargePowerSensor(coordinator, entry),
-        PlanBDischargePowerSensor(coordinator, entry),
-        PlanBReasonSensor(coordinator, entry),
-        ActivePlannerSensor(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -366,21 +361,6 @@ class SmartEnergyOperatingModeSensor(_BaseEnergySensor):
     @property
     def native_value(self):
         return self.coordinator.operating_mode
-
-
-class ActivePlannerSensor(_BaseEnergySensor):
-    """Planeraren som faktiskt styr – skiljer sig från väljaren när plan B saknas (fas B5.1)."""
-    _attr_unique_id = "sem_active_planner"
-    _attr_translation_key = "active_planner"
-    _attr_icon = "mdi:source-branch-check"
-
-    @property
-    def native_value(self):
-        return self.coordinator.active_planner
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        return {"selected_planner": self.coordinator.selected_planner}
 
 
 class SmartEnergyLegionellaActiveSensor(_BaseEnergySensor):
@@ -1109,7 +1089,7 @@ class NordpoolPriceScheduleSensor(_BaseEnergySensor):
         return self._cached_attrs
 
 
-# ── EnergyPlanner-sensorer ───────────────────────────────────────────────────
+# ── Plansensorer ───────────────────────────────────────────────────────────
 
 class _DayPlanBase(_BaseEnergySensor):
     """Bas för plan-sensorer – hämtar aktuell planslott."""
@@ -1192,7 +1172,9 @@ class DayPlanReasonSensor(_DayPlanBase):
             "pv_production_ratio": round(plan.pv_production_ratio, 2),
             "solar_takeover": plan.solar_takeover_dt.isoformat() if plan.solar_takeover_dt else None,
             "plan_generated_at": plan.generated_at.isoformat(),
-            "active_planner": self.coordinator.active_planner,
+            "daily_load_kwh_by_date": {
+                str(d): round(v, 1) for d, v in self.coordinator.day_plan_levels.items()
+            },
             # Live-feedback 2026-09-23: användaren kunde inte spåra VARFÖR V
             # (sparvärdet) hamnade där det hamnade utan den här texten - bara
             # sparvärdet, ingen förklaring av vilken slot/möjlighet som satte
@@ -1218,44 +1200,6 @@ class DayPlanReasonSensor(_DayPlanBase):
                 if slot.start < dt_util.now() + timedelta(hours=24)
             ],
         }
-
-
-# ── Fas B4: DP-planeraren i skuggläge ───────────────────────────────────────
-# Samma sensorer och attribut som V-planens, så att planeringskortet kan visa
-# plan B. Exekutorn följer plan B när väljaren står på "dp" (fas B5.1).
-
-class _PlanBMixin:
-    def _plan(self):
-        return self.coordinator.day_plan_b
-
-
-class PlanBActionSensor(_PlanBMixin, DayPlanActionSensor):
-    _attr_unique_id = "sem_plan_b_action"
-    _attr_translation_key = "plan_b_action"
-
-
-class PlanBChargePowerSensor(_PlanBMixin, DayPlanChargePowerSensor):
-    _attr_unique_id = "sem_plan_b_charge_power"
-    _attr_translation_key = "plan_b_charge_power"
-
-
-class PlanBDischargePowerSensor(_PlanBMixin, DayPlanDischargePowerSensor):
-    _attr_unique_id = "sem_plan_b_discharge_power"
-    _attr_translation_key = "plan_b_discharge_power"
-
-
-class PlanBReasonSensor(_PlanBMixin, DayPlanReasonSensor):
-    _attr_unique_id = "sem_plan_b_reason"
-    _attr_translation_key = "plan_b_reason"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        attrs = super().extra_state_attributes
-        if attrs:
-            attrs["daily_load_kwh_by_date"] = {
-                str(d): round(v, 1) for d, v in self.coordinator.day_plan_b_levels.items()
-            }
-        return attrs
 
 
 class PlanExecutorChargeSensor(_DayPlanBase):

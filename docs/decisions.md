@@ -828,3 +828,13 @@ Husets egen grundobalans (16 nov 01:45: L1 0,23, L2 0,76, L3 0,41 kW) förklarar
 **Mätning (plan B, lagerjusterat):** sommar 205,45 → 212,95; vinter 1 357,44 → 1 357,69; utan facit 27 okt–10 nov 320,10 → 321,80; 10–14 nov 129,37 → 129,86. V oförändrad 147,80 / 880,70. Sommar per orsak: 62 kvartar där överskott nu säljs (sälj ≥ V_charge) −34,57 kr nettokostnad, följdeffekt (mindre lagrat) +28,47 kr, slut-SOC 94,1 → 96,2 %. `econ_peak` förekom inte i sommarhistoriken på plan B:s nätladdning.
 
 **Verifiering:** `tests/test_dp_executor.py` (8 tester; econ_peak-fallet laddar ur på V-vägen och laddar på plan B-vägen).
+
+## 2026-11-17 – Fas B, steg B5.4.1: plan B är enda planeraren (v0.9.81)
+
+**Beslut:** V-planeraren tas bort. DP har styrt sedan 2026-11-10 (B5.1) och slagit V både i backtest och mot verkligt utfall (2026-11-14). Användaren valde att ta bort `plan_b_*`-sensorerna och låta de vanliga plansensorerna visa DP-planen; historiken i `plan_b_*` slutar.
+
+**Ändring:** koordinatorn bygger bara DP-planen (samma villkor som plan B: utgången plan, nya priser, nytt Legionella-fönster). `select_active_plan()` → `plan_if_fresh()`: en plan äldre än `valid_until` + 15 min släpps och kontrollerns regler utan plan styr (inte V). Bilens nätladdning kommer bara från planen; V:s deadline-schema och C05 ("billig timme") borta, flaggan `plan_owns_ev_grid` borta, etiketten "plan". `EnergyPlanner` och V:s påslag (`_uncertainty_markup`, `_drought_markup`, `_simulate_drought_days`, `_GRID_CHARGE_SOLAR_BLEND`) borta; `energy_planner.py` har bara `DayPlan`/`PlannedSlot`. Väljaren, sensorn för aktiv planerare och `plan_b_*` tas bort ur entitetsregistret vid start (`__init__._remove_retired_entities`). Planloggens poster är DP-planen med `planner` och `daily_load_kwh_by_date`. Backtesten kör bara DP, `--load-level calib` standard. Tester som bara gällde V borttagna; sommarens regressionstest mäter DP:s lagerjusterade besparing (212,95).
+
+**Kvar till B5.4.2:** `DayPlan.planner` och V-grenen i `apply_plan_executor` (oåtkomlig i drift), `_auto_mode`:s batteripolicy (steg 4) och `sell_solar_min_price`, samt HA-inställningen `cycle_cost_sek_kwh` som ingen läser längre (DP har egen 0,10). Väderprognosen hämtas fortfarande, men bara för prognosdygnens medeltemperatur.
+
+**Mätning:** backtesterna oförändrade på öret: sommar 212,95, vinter 1 357,69, utan facit 27 okt–10 nov 321,80, 10–14 nov 129,86 (lagerjusterat). Max-SOC-invarianten i sommarbacktesten håller nu (DP-vägen laddar inte vid max) och är inte längre xfail.

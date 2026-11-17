@@ -266,7 +266,7 @@ class EnergyState:
     # Opportunistisk nätladdning aktiverad
     opportunistic_charge_enabled: bool = True
 
-    # Aktuell planslot-action från EnergyPlanner ("export", "grid_charge", "cover_load", "idle", …)
+    # Aktuell planslot-action från planen ("export", "grid_charge", "cover_load", "idle", …)
     # Sätts av coordinator precis innan compute() anropas. None = ingen plan tillgänglig.
     plan_action: Optional[str] = None
 
@@ -279,13 +279,11 @@ class EnergyState:
     # av heat_planner.should_dump_to_hot_water(). None = ingen plan tillgänglig.
     plan_marginal_value_charge_sek_kwh: Optional[float] = None
 
-    # v1.0 steg 6: aktuell planslots ev_charge_w + vilken laddare den gäller,
-    # för deadline-garantin i _auto_mode()s EV-loop. None = ingen bil är
-    # deadline-schemalagd just nu (se coordinator._compute_ev_schedule_inputs).
+    # Aktuell planslots ev_charge_w + vilken laddare den gäller – bilens enda
+    # nätladdning (fas B5.2; "billig timme" C05 borttagen i B5.4.1). None = ingen
+    # bil är schemalagd just nu (se coordinator._plan_ev_demand).
     plan_ev_charge_w: Optional[float] = None
     plan_ev_charger_name: Optional[str] = None
-    # Plan B styr och äger bilens nätladdning – "billig timme" (C05) körs inte (B5.2).
-    plan_owns_ev_grid: bool = False
 
     # Driftläge
     operating_mode: str = MODE_AUTO
@@ -579,12 +577,10 @@ class EnergyController:
                     remaining_surplus = max(0.0, remaining_surplus - consumed)
                     decision.reason += f" | {ch.config.name} {cur:.0f}A sol"
 
-        # v1.0 steg 6: deadline-garanti UTÖVER sol-opportunismen ovan - fyll på
-        # från nätet bara om planeraren schemalagt DEN HÄR sloten för att
-        # garantera ev_soc_target i tid (merit-order, billigaste återstående
-        # slots före deadline, se energy_planner.build_plan()) OCH sol-
-        # opportunismen inte redan täckte behovet den här cykeln. Rör inte
-        # remaining_surplus - det här är en nätdragning, inte solöverskott.
+        # Nätladdning UTÖVER solladdningen ovan, bara i kvartar planen schemalagt
+        # (dp_planner.build_plan, billigaste kvartar före deadline) och bara om
+        # solen inte redan laddar bilen den här cykeln. Rör inte remaining_surplus
+        # - det här är en nätdragning, inte solöverskott.
         if state.plan_ev_charger_name and (state.plan_ev_charge_w or 0.0) > 0:
             for i, ch in enumerate(state.chargers):
                 if ch.config.name != state.plan_ev_charger_name:
@@ -597,12 +593,11 @@ class EnergyController:
                 if car and ch.soc_pct is not None and ch.soc_pct >= car.ev_soc_target:
                     break
                 cur = min(MAX_EV_CURRENT, max(MIN_EV_CURRENT, state.plan_ev_charge_w / (self.voltage * ch.car_phases)))
-                label = "plan B" if state.plan_owns_ev_grid else "deadline-garanti"
                 decision.charger_decisions[i] = ChargerDecision(
                     enable=True, current_a=cur,
-                    reason=f"{label} {cur:.0f}A",
+                    reason=f"plan {cur:.0f}A",
                 )
-                decision.reason += f" | {ch.config.name} {cur:.0f}A {label}"
+                decision.reason += f" | {ch.config.name} {cur:.0f}A plan"
                 break
 
         # Återlägg reserverad batterikapacitet – EV-loopen körde på reducerat överskott;
@@ -861,7 +856,7 @@ class EnergyController:
                 f" | Extra varmvatten ({trigger}, {source} {hw_required_w:.0f}W{temp_str})"
             )
 
-        # Export styrs av EnergyPlanner via coordinator – plan_action sätts i EnergyState
+        # Export styrs av planen via coordinator – plan_action sätts i EnergyState
         # precis innan compute() anropas. Kontrollern respekterar beslutet som guard-flagga
         # (blockerar självkonsumtion och opportunistisk laddning under export).
         export_active = state.plan_action == "export"
@@ -935,29 +930,6 @@ class EnergyController:
                                 f" (≤{_price_threshold:.2f}) mål {_charge_target_kwh:.1f} kWh"
                                 f" sol {_trigger}"
                             )
-
-        # EV billigast-timmar på vintern; måttlig ström så att batteriet behåller prioritet. Se docs/decisions.md C05.
-        if (not state.plan_owns_ev_grid and not export_active and not _economic_peak
-                and (_low_solar_today or _low_solar_tomorrow) and ps and ps.slots):
-            _ev_sorted_prices = sorted(s.buy_sek for s in ps.slots if s.end > now_aware)
-            if _ev_sorted_prices:
-                _ev_threshold_idx = max(0, int(len(_ev_sorted_prices) * DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE) - 1)
-                _ev_price_threshold = _ev_sorted_prices[_ev_threshold_idx]
-                if buy_price <= _ev_price_threshold:
-                    _ev_cheap_current = max(MIN_EV_CURRENT, MAX_EV_CURRENT // 2)
-                    for i, ch in enumerate(state.chargers):
-                        if not ch.connected or ch.active_car_name == NO_CAR_SELECTED:
-                            continue
-                        if decision.charger_decisions[i].enable:
-                            continue  # redan laddar (sol-loopen ovan)
-                        car = ch.active_car
-                        if car and ch.soc_pct is not None and ch.soc_pct >= car.ev_soc_target:
-                            continue
-                        decision.charger_decisions[i] = ChargerDecision(
-                            enable=True, current_a=_ev_cheap_current,
-                            reason=f"billig timme {buy_price:.2f} kr/kWh (≤{_ev_price_threshold:.2f})",
-                        )
-                        decision.reason += f" | {ch.config.name} {_ev_cheap_current:.0f}A billig timme"
 
         # Självkonsumtion: täck huslast med batteri när sol inte räcker.
         # Lagrat sol-el är alltid bättre än nätimport oavsett aktuellt pris.

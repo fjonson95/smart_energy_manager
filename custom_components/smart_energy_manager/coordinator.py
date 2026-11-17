@@ -60,9 +60,8 @@ from .const import (
     DEFAULT_DISINFECTING_EXTRA_KWH,
     CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH,
     CONF_BATTERY_POWER_INVERTED,
-    CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
+    CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP,
     MODE_AUTO, MODE_MANUAL,
-    PLANNER_DP, PLANNER_V,
     DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH,
 )
 from .price_scheduler import PriceScheduler
@@ -70,8 +69,8 @@ from .energy_controller import (
     EnergyController, EnergyState, ControlDecision,
     ChargerConfig, CarConfig, ChargerState,
 )
-from .energy_planner import EnergyPlanner, DayPlan, _PLAN_HORIZON_H
-from .dp_planner import DPPlanner, calibrated_daily_levels, select_active_plan
+from .energy_planner import DayPlan, _PLAN_HORIZON_H
+from .dp_planner import DPPlanner, calibrated_daily_levels, plan_if_fresh
 from .legionella import LegionellaManager
 from .savings_tracker import DailySavingsTracker
 
@@ -135,9 +134,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._config = {**entry.data, **entry.options}
         self.operating_mode: str = MODE_AUTO
-        # Fas B5.1: vald planerare (väljaren återställer valet vid omstart) och den som faktiskt styr.
-        self.selected_planner: str = PLANNER_V
-        self._active_planner: str = PLANNER_V
+        self._plan_stale = False
         self._last_decision: Optional[ControlDecision] = None
         self._state: Optional[EnergyState] = None
         self._controller = self._build_controller()
@@ -152,34 +149,22 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._grid_scale = 1000.0 if self._config.get(CONF_GRID_POWER_UNIT, UNIT_W) == UNIT_KW else 1.0
         self._ev_scale   = 1000.0 if self._config.get(CONF_EV_POWER_UNIT,   UNIT_W) == UNIT_KW else 1.0
 
-        # Dag-framåt planerare (parallellt med EnergyController – påverkar inga beslut)
-        self._energy_planner = EnergyPlanner(
-            battery_min_soc=float(self._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
-            battery_max_soc=float(self._config.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)),
-            eta_roundtrip=float(self._config.get(CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP)),
-            cycle_cost_sek_kwh=float(self._config.get(CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)),
-        )
-        self._day_plan: Optional[DayPlan] = None
-        # Fas B4/B5.1: DP-planeraren byggs parallellt och exponeras som plan_b_*-sensorer;
-        # exekutorn följer den planerare väljaren anger (select_active_plan). Reserv och
-        # cykelkostnad är DP:s egna (B3-beslut), inte HA-inställningen som V använder.
+        # Reserv och cykelkostnad är DP:s egna (B3-beslut), inte HA-inställningen
+        # CONF_CYCLE_COST_SEK_KWH som V-planeraren använde (borttagen i B5.4.1).
         self._dp_planner = DPPlanner(
             battery_min_soc=float(self._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
             battery_max_soc=float(self._config.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)),
             eta_roundtrip=float(self._config.get(CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP)),
         )
-        self._day_plan_b: Optional[DayPlan] = None
-        self._day_plan_b_levels: dict = {}
-        self._plan_b_legionella_window: Optional[tuple] = None
-        self._plan_b_ev_reserve_margin_kwh = 0.0
+        self._day_plan: Optional[DayPlan] = None
+        self._day_plan_levels: dict = {}
+        self._plan_legionella_window: Optional[tuple] = None
         # Dygnsmedel av momentan utetemp för dygnshistoriken (DP:s lastnivå).
         # Egen ackumulator: _temp_samples fylls bara när ingen dämpad sensor finns.
         self._outdoor_temp_day_sum = 0.0
         self._outdoor_temp_day_n = 0
-        # v1.0 steg 6: vilken laddare (om någon) senaste DayPlan schemalade en
-        # deadline-garanti för. Se _compute_ev_schedule_inputs().
-        self._ev_scheduled_charger_name: Optional[str] = None
-        self._plan_b_ev_charger_name: Optional[str] = None
+        # Laddaren vars nätladdning planen schemalagt (fas B5.2).
+        self._plan_ev_charger_name: Optional[str] = None
         self._last_plan_ps_sig: tuple = (0, None, None)
 
         # active_car[charger_name] = car_name eller NO_CAR_SELECTED
@@ -547,24 +532,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     ])
                 return out
 
-            def _plan_b_entry():
-                pb = self._day_plan_b
-                if pb is None or pb.generated_at < plan.generated_at:
-                    return None
-                return {
-                    "notes": pb.notes,
-                    "v": round(pb.marginal_value_sek_kwh, 3),
-                    "daily_load_kwh_by_date": {str(d): round(v, 2) for d, v in self._day_plan_b_levels.items()},
-                    "slots": _rows(pb),
-                }
-
             if key == self._plan_log_last_key:
-                last = self._plan_log[-1] if self._plan_log else None
-                if last is not None and last.get("key") == key and "plan_b" not in last:
-                    entry = _plan_b_entry()
-                    if entry is not None:
-                        last["plan_b"] = entry
-                        self.hass.async_create_task(self._save_plan_log_store())
                 return
             rows = _rows(plan)
 
@@ -590,12 +558,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "solar_tomorrow_p10_kwh": _attr(tomorrow_entity, "estimate10"),
                 "solar_tomorrow_p90_kwh": _attr(tomorrow_entity, "estimate90"),
                 "notes": plan.notes,
+                "planner": plan.planner,
+                "daily_load_kwh_by_date": {str(d): round(v, 2) for d, v in self._day_plan_levels.items()},
                 "slot_columns": ["start", "action", "power_w", "soc_pct", "buy", "sell", "hold_battery", "reason"],
                 "slots": rows,
             })
-            _pb = _plan_b_entry()
-            if _pb is not None:
-                self._plan_log[-1]["plan_b"] = _pb
             self._plan_log = self._plan_log[-40:]
             self._plan_log_last_key = key
             self.hass.async_create_task(self._save_plan_log_store())
@@ -1031,12 +998,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     def _compute_ev_schedule_inputs(
         self, chargers: list[ChargerState], now: datetime,
     ) -> tuple[float, Optional[datetime], float, Optional[str]]:
-        """v1.0 steg 6: deadline-garanti UTÖVER dagens sol-opportunistiska
-        laddning (se energy_controller._auto_mode()s EV-loop, oförändrad).
-        Bara den FÖRSTA laddaren/bilen med både `deadline_entity` och
-        `battery_capacity_kwh` konfigurerade och en aktiv bil vald schemaläggs -
-        planeraren (`build_plan()`) tar bara emot ETT globalt EV-behov, inte
-        per laddare, så flera samtidigt schemalagda bilar stöds inte än.
+        """v1.0 steg 6: deadline-garanti UTÖVER solladdningen i
+        energy_controller._auto_mode()s EV-loop. Bara den FÖRSTA laddaren/bilen
+        med både `deadline_entity` och `battery_capacity_kwh` konfigurerade och
+        en aktiv bil vald schemaläggs - planeraren tar bara emot ETT EV-behov.
 
         Returnerar (ev_energy_needed_kwh, ev_deadline, ev_max_power_kw,
         charger_name) - allt 0.0/None om ingen bil är deadline-konfigurerad
@@ -1066,12 +1031,12 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             return energy_needed_kwh, deadline, max_power_kw, ch.config.name
         return 0.0, None, 0.0, None
 
-    def _plan_b_ev_demand(self, state, now: datetime) -> tuple[Optional[dict], Optional[str]]:
-        """Bilens nätladdningsbehov till plan B (fas B5.2) och laddarens namn.
+    def _plan_ev_demand(self, state, now: datetime) -> tuple[Optional[dict], Optional[str]]:
+        """Bilens nätladdningsbehov till planen (fas B5.2) och laddarens namn.
 
-        Bil med deadline: samma behov som V:s schema, 16 A. Utan deadline
-        ersätter plan B vinterns "billig timme" (C05) under samma villkor –
-        lite sol idag eller imorgon – med 8 A och deadline nästa 07:00.
+        Bil med deadline: 16 A fram till deadline. Utan deadline ersätter
+        planen vinterns "billig timme" (C05) under samma villkor – lite sol
+        idag eller imorgon – med 8 A och deadline nästa 07:00.
         """
         energy, deadline, power_kw, name = self._compute_ev_schedule_inputs(state.chargers, now)
         grid_voltage = float(self._config.get(CONF_GRID_VOLTAGE, DEFAULT_GRID_VOLTAGE))
@@ -1773,10 +1738,19 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                     price_schedule.slots[-1].start if price_schedule.slots else None,
                 )
                 plan_expired = self._day_plan is None or now >= self._day_plan.valid_until
-                rebuild_b = False
-                if plan_expired or ps_sig != self._last_plan_ps_sig:
-                    rebuild_b = True
-                    self._plan_b_ev_reserve_margin_kwh = 0.0
+                # Planen byggs också om när Legionellas fönster ändras (valt,
+                # startat, klart) – patronen tar fasutrymmet DP annars laddar i.
+                legionella_window = self._legionella.planned_window
+                if (plan_expired or ps_sig != self._last_plan_ps_sig
+                        or legionella_window != self._plan_legionella_window):
+                    self._plan_legionella_window = legionella_window
+                    known_loads = []
+                    if legionella_window is not None:
+                        known_loads.append((
+                            legionella_window[0], legionella_window[1],
+                            float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
+                            tuple(c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES)),
+                        ))
                     try:
                         # EV-marginal: flat buffert om NÅGON laddare har en vald
                         # bil under sitt SOC-mål och sol inte räcker idag/imorgon
@@ -1797,63 +1771,14 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             if _ev_needs_charge and (_low_solar_today_ev or _low_solar_tomorrow_ev)
                             else 0.0
                         )
-                        self._plan_b_ev_reserve_margin_kwh = ev_reserve_margin_kwh
-                        weather_forecast = await self._fetch_weather_forecast(now)
-                        (
-                            _ev_energy_needed_kwh, _ev_deadline, _ev_max_power_kw, self._ev_scheduled_charger_name,
-                        ) = self._compute_ev_schedule_inputs(state.chargers, now)
-                        self._day_plan = self._energy_planner.build_plan(
-                            now=now,
-                            battery_soc_pct=state.battery_soc_pct,
-                            battery_capacity_kwh=state.battery_capacity_kwh,
-                            battery_max_power_kw=state.battery_max_power_kw,
-                            ps=price_schedule,
-                            predicted_daily_kwh=state.predicted_daily_kwh,
-                            solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
-                            solar_takeover_dt=state.solar_takeover_dt,
-                            house_load_w=state.house_load_w,
-                            battery_avg_cost_sek_kwh=state.battery_avg_cost_sek_kwh,
-                            pv_production_ratio=pv_production_ratio,
-                            yesterday_consumption_kwh=state.yesterday_consumption_kwh,
-                            house_load_avg_w=state.house_load_avg_w,
-                            ev_reserve_margin_kwh=ev_reserve_margin_kwh,
-                            rolling_consumption_kwh=state.rolling_consumption_kwh,
-                            load_shape_p50=self._get_load_shape(0.5),
-                            load_shape_p75=self._get_load_shape(0.75),
-                            current_outdoor_temp_c=state.outdoor_temp_c,
-                            weather_forecast=weather_forecast,
-                            # daily_load_kwh_by_date (self._daily_load_kwh_by_date()) kopplas
-                            # in först med DP-planeraren: V-planeraren blev sämre av den
-                            # (vinterbacktest −1 % även med perfekt temperatur). Se docs/decisions.md B1.
-                            ev_energy_needed_kwh=_ev_energy_needed_kwh,
-                            ev_deadline=_ev_deadline,
-                            ev_max_power_kw=_ev_max_power_kw,
-                        )
-                        self._last_plan_ps_sig = ps_sig
-                        _LOGGER.info("DayPlan byggd: %s | %s", self._day_plan.summary(), self._day_plan.notes)
-                        self._maybe_log_plan(now, state, price_schedule)
-                    except Exception as _plan_err:
-                        _LOGGER.warning("DayPlan: kunde inte byggas: %s", _plan_err)
-
-                # Plan B byggs också om när Legionellas fönster ändras (valt,
-                # startat, klart) – patronen tar fasutrymmet DP annars laddar i.
-                legionella_window = self._legionella.planned_window
-                if rebuild_b or legionella_window != self._plan_b_legionella_window:
-                    self._plan_b_legionella_window = legionella_window
-                    known_loads = []
-                    if legionella_window is not None:
-                        known_loads.append((
-                            legionella_window[0], legionella_window[1],
-                            float(c.get(CONF_HEAT_PUMP_PATRON_POWER_KW, DEFAULT_HEAT_PUMP_PATRON_POWER_KW)),
-                            tuple(c.get(CONF_HEAT_PUMP_PATRON_PHASES, DEFAULT_HEAT_PUMP_PATRON_PHASES)),
-                        ))
-                    try:
-                        self._day_plan_b_levels = calibrated_daily_levels(
+                        # Fyller _forecast_mean_temp_by_date, som lastnivån nedan läser.
+                        await self._fetch_weather_forecast(now)
+                        self._day_plan_levels = calibrated_daily_levels(
                             self._daily_consumption_history, now.date(), self._forecast_mean_temp_by_date,
                         ) or {}
-                        _ev_demand, self._plan_b_ev_charger_name = self._plan_b_ev_demand(state, now)
+                        _ev_demand, self._plan_ev_charger_name = self._plan_ev_demand(state, now)
                         _t0 = time.monotonic()
-                        self._day_plan_b = await self.hass.async_add_executor_job(functools.partial(
+                        self._day_plan = await self.hass.async_add_executor_job(functools.partial(
                             self._dp_planner.build_plan,
                             now=now,
                             battery_soc_pct=state.battery_soc_pct,
@@ -1867,46 +1792,41 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             pv_production_ratio=pv_production_ratio,
                             yesterday_consumption_kwh=state.yesterday_consumption_kwh,
                             house_load_avg_w=state.house_load_avg_w,
-                            ev_reserve_margin_kwh=self._plan_b_ev_reserve_margin_kwh,
+                            ev_reserve_margin_kwh=ev_reserve_margin_kwh,
                             rolling_consumption_kwh=state.rolling_consumption_kwh,
                             load_shape_p50=self._get_load_shape(0.5),
-                            daily_load_kwh_by_date=self._day_plan_b_levels or None,
+                            daily_load_kwh_by_date=self._day_plan_levels or None,
                             known_loads=known_loads,
                             ev_demand=_ev_demand,
                             phase_limit_a=self._controller.max_current_effective,
                             grid_voltage=self._controller.voltage,
                         ))
+                        self._last_plan_ps_sig = ps_sig
                         _LOGGER.info(
-                            "Plan B (DP) byggd på %.0f ms: %s",
-                            (time.monotonic() - _t0) * 1000.0, self._day_plan_b.notes,
+                            "Plan (DP) byggd på %.0f ms: %s",
+                            (time.monotonic() - _t0) * 1000.0, self._day_plan.notes,
                         )
                         self._maybe_log_plan(now, state, price_schedule)
-                    except Exception as _plan_b_err:
-                        _LOGGER.warning("Plan B (DP): kunde inte byggas: %s", _plan_b_err)
+                    except Exception as _plan_err:
+                        _LOGGER.warning("Plan (DP): kunde inte byggas: %s", _plan_err)
 
-            active_plan, active_planner = select_active_plan(
-                self.selected_planner, self._day_plan, self._day_plan_b, now,
-            )
-            if active_planner != self.selected_planner and active_planner != self._active_planner:
-                _LOGGER.warning("Plan B (DP) saknas eller är för gammal – exekutorn följer dagens plan (V) tills vidare")
-            self._active_planner = active_planner
+            active_plan = plan_if_fresh(self._day_plan, now)
+            if (active_plan is None) != self._plan_stale and self._day_plan is not None:
+                if active_plan is None:
+                    _LOGGER.warning("Planen är för gammal – styr utan plan tills en ny byggs")
+                else:
+                    _LOGGER.info("Ny plan – exekutorn följer planen igen")
+            self._plan_stale = active_plan is None and self._day_plan is not None
             if active_plan:
                 _cs = active_plan.slot_at(now)
                 state.plan_action = _cs.action if _cs else None
                 state.plan_export_floor_kwh = active_plan.export_floor_kwh
                 state.plan_marginal_value_charge_sek_kwh = active_plan.marginal_value_charge_sek_kwh
-            # Bilens nätladdning följer den aktiva planen; plan B ersätter då även C05 (B5.2).
-            if active_planner == PLANNER_DP:
-                state.plan_owns_ev_grid = True
-                _ev_cs = active_plan.slot_at(now) if self._plan_b_ev_charger_name else None
+                # Bilens nätladdning kommer bara från planen (B5.2/B5.4.1).
+                _ev_cs = _cs if self._plan_ev_charger_name else None
                 if _ev_cs is not None:
                     state.plan_ev_charge_w = _ev_cs.ev_charge_w
-                    state.plan_ev_charger_name = self._plan_b_ev_charger_name
-            elif self._day_plan and self._ev_scheduled_charger_name:
-                _ev_cs = self._day_plan.slot_at(now)
-                if _ev_cs is not None:
-                    state.plan_ev_charge_w = _ev_cs.ev_charge_w
-                    state.plan_ev_charger_name = self._ev_scheduled_charger_name
+                    state.plan_ev_charger_name = self._plan_ev_charger_name
 
             decision = self._controller.compute(state)
             self._last_decision = decision
@@ -2397,13 +2317,5 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         return self._day_plan
 
     @property
-    def day_plan_b(self) -> Optional[DayPlan]:
-        return self._day_plan_b
-
-    @property
-    def active_planner(self) -> str:
-        return self._active_planner
-
-    @property
-    def day_plan_b_levels(self) -> dict:
-        return self._day_plan_b_levels
+    def day_plan_levels(self) -> dict:
+        return self._day_plan_levels

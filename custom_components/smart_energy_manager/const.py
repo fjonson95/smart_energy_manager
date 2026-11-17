@@ -172,10 +172,8 @@ MODE_FORCE_CHARGE_BATTERY = "force_charge_battery"
 MODE_MANUAL = "manual"
 OPERATING_MODES = [MODE_AUTO, MODE_FORCE_CHARGE_EV, MODE_FORCE_CHARGE_BATTERY, MODE_MANUAL]
 
-# ── Planerare (fas B5): vilken DayPlan exekutorn följer ───────────────────────
-PLANNER_V = "v"
+# ── Planerare: DayPlan.planner ("v" fanns till och med v0.9.80) ───────────────
 PLANNER_DP = "dp"
-PLANNERS = [PLANNER_V, PLANNER_DP]
 
 # ── Laddarsensorvärden som räknas som "ansluten" ──────────────────────────────
 CHARGER_CONNECTED_STATES = {"connected", "charging", "plugged_in", "pluggedin", "waiting",
@@ -222,11 +220,9 @@ CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"
 # Dämpad (utjämnad) utetemp – bättre proxy för värmebehov än momentan avläsning.
 # Valfri: om satt, ersätter den momentana temp_for_model-uppbyggnaden helt.
 CONF_DAMPED_OUTDOOR_TEMP_ENTITY = "damped_outdoor_temp_entity"
-# Torkrisk-påslag (v1.0 steg 3, "Torkrisk-påslag från SMHI:s väderprognos") -
-# weather-entitet (t.ex. weather.smhi_home) vars weather.get_forecasts
-# (type: daily) matar _simulate_drought_days() i energy_planner.py. Valfri:
-# tom/ej konfigurerad ger exakt tidigare beteende (ingen prospektiv
-# torkrisk-simulering, bara dagens produktionskvot som i P3-2).
+# Weather-entitet (t.ex. weather.smhi_home) vars dygnsprognos (weather.get_forecasts,
+# type: daily) ger prognosdygnens medeltemperatur till planens lastnivå
+# (dp_planner.calibrated_daily_levels). Valfri: utan den används gårdagens nivå.
 CONF_WEATHER_ENTITY = "weather_entity"
 
 # ── Förbrukningsprognos ───────────────────────────────────────────────────────

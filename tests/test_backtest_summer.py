@@ -12,7 +12,9 @@ import pytest
 from conftest import REPO_ROOT
 from testdata import backtest
 
-EXPECTED_SUMMER_SAVINGS_SEK = 147.80  # B3: B0 + rättad fasbas och lastform i backtesten
+# Lagerjusterad besparing för planen (DP, kalibrerad lastnivå) – samma siffra som
+# "Lagerjusterad" i backtestens sammanfattning. V-planerarens 147,80 gällde t.o.m. v0.9.80.
+EXPECTED_SUMMER_SAVINGS_SEK = 212.95
 TOLERANCE_SEK = 1.0
 
 
@@ -31,7 +33,7 @@ def summer(tmp_path_factory):
 
 def test_summer_savings_unchanged(summer):
     result, _ = summer
-    assert result["savings_sek"] == pytest.approx(EXPECTED_SUMMER_SAVINGS_SEK, abs=TOLERANCE_SEK)
+    assert result["savings_adj_sek"] == pytest.approx(EXPECTED_SUMMER_SAVINGS_SEK, abs=TOLERANCE_SEK)
 
 
 def test_never_charges_and_discharges_at_once(summer):
@@ -54,7 +56,6 @@ def test_no_discharge_at_min_soc(summer):
     assert not at_min, f"urladdning vid min-SOC: {at_min[:5]}"
 
 
-@pytest.mark.xfail(strict=True, reason="apply_plan_executor klämmer inte överskottsladdning mot battery_max_soc (fas B)")
 def test_no_charge_at_max_soc(summer):
     _, rows = summer
     at_max = [

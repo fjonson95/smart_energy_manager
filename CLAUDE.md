@@ -25,8 +25,8 @@ Tillhörande **SEM LM Bridge** (`C:\Users\Fredrik\Documents\sem_lm_bridge\bridge
 ```
 custom_components/smart_energy_manager/
   coordinator.py        # DataUpdateCoordinator – hämtar state, bygger plan, kör controller, applicerar beslut
-  energy_planner.py     # Ren logik – DayPlan för 48 h (marginalvärdet V, regel 1–4, EV-schema)
-  dp_planner.py         # Ren logik – DayPlan med dynamisk programmering (fas B, skuggläge i B4)
+  energy_planner.py     # Plandatatyper – DayPlan/PlannedSlot (V-planeraren borttagen i B5.4.1)
+  dp_planner.py         # Ren logik – planen för 48 h med dynamisk programmering, inkl. bilens nätladdning
   energy_controller.py  # Ren logik – EnergyState → ControlDecision; apply_plan_executor() skriver batteriet
   price_scheduler.py    # Nordpool-schemaläggning, headroom, negativt-pris-logik
   heat_planner.py       # Rena funktioner för värmepump/varmvatten (steg 7)
@@ -61,8 +61,7 @@ docs/decisions.md       # Daterade beslut och flyttade incidentberättelser (P01
 ### Beslutspipeline (var 30:e sekund)
 1. `coordinator._async_update_data()` hämtar alla sensor-states
 2. Bygger `EnergyState` med laddare, batteri, sol, priser
-3. `EnergyPlanner.build_plan()` bygger om DayPlan (var 15:e min eller när priserna ändras)
-   - Skuggläge (fas B4): `DPPlanner.build_plan()` (`dp_planner.py`) bygger plan B direkt efteråt i en arbetstråd → `plan_b_*`-sensorer och `plan_b` i planloggen. Exekutorn följer den planerare som väljaren `select.smart_energy_manager_planerare` anger (fas B5.1, `select_active_plan()`, reserv till V). Dygnsnivån för lasten kommer från `calibrated_daily_levels()` (delad med backtestens `--load-level calib`). Plan B får Legionellas fönster som känd last (`LegionellaManager.planned_window`) och laddtak per kvart från fasgränsen (B4.1).
+3. `DPPlanner.build_plan()` (`dp_planner.py`) bygger om DayPlan i en arbetstråd (var 15:e min, när priserna ändras eller när Legionellas fönster ändras). Dygnsnivån för lasten kommer från `calibrated_daily_levels()` (delad med backtestens standard `--load-level calib`). Planen får Legionellas fönster som känd last (`LegionellaManager.planned_window`), laddtak per kvart från fasgränsen (B4.1) och schemalägger bilens nätladdning (`coordinator._plan_ev_demand()`, B5.2). `plan_if_fresh()` släpper en plan som är äldre än 30 min; då styr kontrollerns regler utan plan.
 4. `EnergyController.compute()` returnerar `ControlDecision` (EV, varmvatten, fasskydd, preliminärt batteri)
 5. `EnergyController.apply_plan_executor()` ersätter batteridelen med planens slot, klämd mot verkligheten – enda stället som skriver batterieffekt (delas med backtesten)
 6. Coordinator applicerar beslut via HA-tjänster
@@ -80,8 +79,8 @@ docs/decisions.md       # Daterade beslut och flyttade incidentberättelser (P01
 ### Proaktiv absorption
 Håller bara headroom (reducerar `battery_max_soc`) inför kommande negativt pris. Startar **inte** varmvatten eller EV-laddning proaktivt – det sker först när priset är faktiskt negativt eller redan passerat (`had_negative_today`).
 
-### Batteriplanen – marginalvärdet V och regel 1–4
-`energy_planner.build_plan()` allokerar batteriets energi i merit-ordning mot framtida möjligheter (täcka underskott till köppris, exportera till säljpris) inom effekt- och solgränser; V = värdet i billigaste tilldelade möjlighet × (1 + osäkerhetspåslag). Regler per slot: 1 lagra sol om `V_charge > sälj`; 2 täck huset om `köp > V + cykel` (inom slotens öronmärkning); 3 nätladda billigast först om `köp + cykel < V_charge`; 4 exportera om `sälj > max(V, batterikostnad) + cykel`. Den gamla percentil-exporten (exportgolv, `export_min_sell_price`, `_high_slots`) finns inte längre. Känd brist: planen kan hålla ett laddat batteri genom dyra timmar (HANDOFF.md 4.1, `tests/test_planner_probe.py`) – åtgärdas i fas B. Bakgrund per mekanism: `docs/decisions.md` P01–P16.
+### Batteriplanen – dynamisk programmering
+`DPPlanner` löser hela 48 h-horisonten på en gång över (kvart, lagrad energi i 0,1 kWh-steg) mot kända priser, Solcast p50 och lastprognosen, med η delad lika på laddning/urladdning och egen cykelkostnad (0,10 kr/kWh, B3). V = värdegradienten vid aktuell SOC; `marginal_value_charge_sek_kwh` (V_charge = V × √η) är tröskeln exekutorn och varmvattendumpen jämför säljpriset mot. Varje kvart får en åtgärd (`grid_charge`, `solar_charge` med nätdel `grid_charge_w`, `cover_load`, `export`, `idle`) och `hold_battery`. När `DayPlan.planner == "dp"` går kvarten genom `EnergyController._execute_dp_slot()`, som bara klämmer mot fysiken (B5.3). V-planeraren (regel 1–4, merit-ordning) togs bort i B5.4.1; historiken finns i `docs/decisions.md` P01–P16 och i v0.9.80.
 
 ### Observerad solar takeover – Store-format
 `coordinator._takeover_store` (`{DOMAIN}_solar_takeover`) sparar:
@@ -93,8 +92,8 @@ Vid uppstart återställs `_takeover_observed_today = True` om `last_obs_date` �
 ### Legionella – rörligt intervall (5–9 dagar), billigaste fönstret
 `LegionellaManager.should_run_now()` jämför *datum*: från `min`-dagen (standard 5) är det dags, och senast slutet av `max`-dagen (standard 9) körs det bästa kända fönstret oavsett pris. Mellan dem väljs billigaste körfönstret (körtid × **effektivt pris**) bland kvartarna i Nordpools kända prisdata, dygnets alla timmar. Effektivt pris = solöverskott (p10 minus husets last, mot 6 kW patron) värderat till säljpris, resten till köppris. Före max-dagen körs bara om bästa fönstret är ≤ 90 % av snittet i det kända; dagar bortom prishorisonten ses via Solcasts `forecast_day_3..7` (härledda ur imorgon-entiteten) och väntas in om de är minst 10 % billigare. Nödstart undviker natten 23–06. `next_due` = senaste körning + min-dagar.
 
-### Nätladdningens solavdrag och planlogg
-Regel 3 räknar nätladdningsbehov = utrymme till max − väntad gratis solpåfyllning. Påfyllningen använder `p10 + _GRID_CHARGE_SOLAR_BLEND × (p50 − p10)` (0,5); reserver, V och merit-ordningens utrymmeskontroll använder fortfarande ren p10. `coordinator._maybe_log_plan()` sparar fyra planögonblicksbilder per dygn (00/06/14/20, 36 h, motivering per slot) i `.storage/smart_energy_manager_plan_log` (senaste 40) – kopiera filen vid granskning istället för att gissa varför ett beslut togs.
+### Planlogg
+`coordinator._maybe_log_plan()` sparar fyra planögonblicksbilder per dygn (00/06/14/20, 36 h, motivering per slot) i `.storage/smart_energy_manager_plan_log` (senaste 40) – kopiera filen vid granskning istället för att gissa varför ett beslut togs.
 
 ### Daglig besparing och Solcast-arkiv
 `savings_tracker.DailySavingsTracker` integrerar varje cykel nät- och batterieffekt till köp-/säljpris mot en referens utan batteri (`ref_nät = nät − batterieffekt`) → sensorn "Besparing idag" (`sem_daily_savings`), 30 dygn i `.storage/smart_energy_manager_daily_savings`. `coordinator._maybe_archive_solcast()` sparar Solcast p50/p10/p90 per slot efter 06 och 13 (60 dygn) i `.storage/smart_energy_manager_solcast_archive` – använd det, inte backtestens syntetiska p10, för att utvärdera prognosberoende beslut.

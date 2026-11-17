@@ -5,16 +5,38 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import SmartEnergyCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# Entiteter som togs bort när V-planeraren försvann (fas B5.4.1); utan
+# städningen ligger de kvar som "inte längre tillhandahållen" i registret.
+_REMOVED_UNIQUE_IDS = (
+    ("sensor", "sem_plan_b_action"),
+    ("sensor", "sem_plan_b_charge_power"),
+    ("sensor", "sem_plan_b_discharge_power"),
+    ("sensor", "sem_plan_b_reason"),
+    ("sensor", "sem_active_planner"),
+    ("select", "sem_planner_select"),
+)
+
+
+def _remove_retired_entities(hass: HomeAssistant) -> None:
+    registry = er.async_get(hass)
+    for platform, unique_id in _REMOVED_UNIQUE_IDS:
+        entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id)
+        if entity_id:
+            registry.async_remove(entity_id)
+            _LOGGER.info("Tog bort borttagen entitet %s", entity_id)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Energy Manager from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+    _remove_retired_entities(hass)
 
     coordinator = SmartEnergyCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SEM Backtest – replays historical sensor data through the FULL live decision
-pipeline: EnergyPlanner.build_plan() -> EnergyController.compute() ->
+pipeline: DPPlanner.build_plan() -> EnergyController.compute() ->
 EnergyController.apply_plan_executor() (the exact same method coordinator.py
 calls in production, so this reflects real behavior, not just the standalone
 EnergyController.compute() heuristics).
@@ -92,7 +92,6 @@ sys.path.insert(0, REPO_ROOT)
 from custom_components.smart_energy_manager.energy_controller import (
     EnergyController, EnergyState, ChargerState, ChargerConfig, CarConfig,
 )
-from custom_components.smart_energy_manager.energy_planner import EnergyPlanner
 from custom_components.smart_energy_manager.dp_planner import DPPlanner, calibrated_daily_levels
 from custom_components.smart_energy_manager.price_scheduler import (
     PriceSchedule, PriceSlot,
@@ -503,8 +502,7 @@ def run_backtest(
     date_to:   Optional[datetime] = None,
     drought_oracle: bool = False,
     temp_oracle: bool = False,
-    load_level: str = "floor",
-    planner_kind: str = "v",
+    load_level: str = "calib",
     load_oracle: bool = False,
     dp_options: Optional[dict] = None,
     no_foresight: bool = False,
@@ -534,14 +532,13 @@ def run_backtest(
         grid_voltage                = s["grid_voltage"],
         max_export_w                = s["max_export_w"],
     )
-    planner = (DPPlanner if planner_kind == "dp" else EnergyPlanner)(
+    planner = DPPlanner(
         battery_min_soc                = s["battery_min_soc"],
         battery_max_soc                = s["battery_max_soc"],
         eta_roundtrip                  = s["eta_roundtrip"],
-        # DP har egen standard (0,10, B3); V behåller driftens 0,05 tills DP tar över.
-        **({"cycle_cost_sek_kwh": s["cycle_cost_sek_kwh"]}
-           if planner_kind != "dp" or "cycle_cost_sek_kwh" in overrides else {}),
-        **(dp_options if planner_kind == "dp" else {}),
+        # DP har egen standard (0,10, B3); --cycle-cost skriver över.
+        **({"cycle_cost_sek_kwh": s["cycle_cost_sek_kwh"]} if "cycle_cost_sek_kwh" in overrides else {}),
+        **dp_options,
     )
 
     sys.stdout.buffer.write(f"Laddar {data_path} ...\n".encode("utf-8"))
@@ -577,17 +574,17 @@ def run_backtest(
         sys.stdout.buffer.write(b"Inga tidsstamplar matchar filtret.\n")
         return
 
-    # --load-oracle (bara med --planner dp): verklig huslast per kvart som
+    # --load-oracle: verklig huslast per kvart som
     # "prognos" – skiljer prognosfel från planerarens egna brister.
     _dp_extra: dict = {}
-    if load_oracle and planner_kind == "dp":
+    if load_oracle:
         _actual_load: dict = {}
         for _t in timestamps:
             _v = _safe(pivot[_t].get("sensor.el_forbruk_power_power", ""), float)
             if _v is not None:
                 _actual_load[_t.replace(minute=_t.minute - _t.minute % 15, second=0, microsecond=0)] = _v / 1000.0
         _dp_extra["load_kw_by_start"] = _actual_load
-    if planner_kind == "dp" and dp_phase_limit:
+    if dp_phase_limit:
         # Samma fasgräns som coordinatorn ger DP i drift (B4.1).
         _dp_extra["phase_limit_a"] = controller.max_current_effective
         _dp_extra["grid_voltage"] = controller.voltage
@@ -1213,9 +1210,7 @@ def main():
         ),
     )
     parser.add_argument("--load-oracle", action="store_true",
-                        help="Med --planner dp: verklig huslast som perfekt lastprognos.")
-    parser.add_argument("--planner", choices=["v", "dp"], default="v",
-                        help="v = V-heuristiken (energy_planner), dp = dynamisk programmering (dp_planner)")
+                        help="Verklig huslast som perfekt lastprognos.")
     parser.add_argument(
         "--temp-oracle", action="store_true",
         help="Lastnivå per dygn från verklig dygnsmedeltemperatur (perfekt temperaturprognos).",
@@ -1229,8 +1224,8 @@ def main():
                         help=".storage/smart_energy_manager_solcast_archive: planera på riktig prognos i stället för utfallet")
     parser.add_argument("--until", metavar="ISO-UTC",
                         help="stoppa här (sista mätvärdet), annars simuleras framfylld data")
-    parser.add_argument("--load-level", choices=["floor", "calib"], default="floor",
-                        help="calib = kalibrerad dygnsnivå (7 d + temperaturdelta), se _calib_levels")
+    parser.add_argument("--load-level", choices=["floor", "calib"], default="calib",
+                        help="calib = kalibrerad dygnsnivå (7 d + temperaturdelta, som i drift), floor = gamla golvet")
     args = parser.parse_args()
 
     overrides = {}
@@ -1248,7 +1243,7 @@ def main():
     date_to   = datetime.fromisoformat(args.date_to  ).replace(tzinfo=timezone.utc) if args.date_to   else None
 
     run_backtest(args.input, args.out, overrides, date_from, date_to, drought_oracle=args.drought_oracle,
-                 temp_oracle=args.temp_oracle, planner_kind=args.planner, load_level=args.load_level,
+                 temp_oracle=args.temp_oracle, load_level=args.load_level,
                  load_oracle=args.load_oracle, dp_options=dp_options,
                  no_foresight=args.no_foresight, solcast_archive=args.solcast_archive,
                  until=datetime.fromisoformat(args.until).replace(tzinfo=timezone.utc) if args.until else None)

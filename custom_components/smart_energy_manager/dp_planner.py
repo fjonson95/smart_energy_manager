@@ -6,8 +6,8 @@ priser, Solcast p50 och lastprognosen. Ersätter V-heuristiken (regel 1–4,
 merit-order, öronmärkning), vars köp- och urladdningsbeslut inte löstes
 tillsammans (HANDOFF.md 4.1–4.4).
 
-Samma anrop och samma DayPlan som EnergyPlanner, så exekutor, sensorer, kort
-och planlogg fungerar oförändrade. Ren logik utan HA-beroenden.
+Ensam planerare sedan fas B5.4.1 (V-planeraren borttagen). Ren logik utan
+HA-beroenden.
 
 Batterimodell (docs/decisions.md B1): η delas lika på laddning/urladdning,
 konstant maxeffekt inom min–max SOC, cykelkostnad per urladdad kWh. Energin
@@ -21,27 +21,22 @@ from typing import Optional
 
 import numpy as np
 
-from .const import DP_LOAD_BALANCE_TEMP_C, DP_LOAD_K_KWH_DD, PLANNER_DP, PLANNER_V
+from .const import DP_LOAD_BALANCE_TEMP_C, DP_LOAD_K_KWH_DD, PLANNER_DP
 from .energy_planner import DayPlan, PlannedSlot, _PLAN_HORIZON_H
 
 _STEP_KWH = 0.1
 
-# Plan B får vara högst så här gammal innan exekutorn faller tillbaka på V.
-# Båda byggs var 15:e min; en kvart extra täcker en missad ombyggnad.
-_PLAN_B_GRACE = timedelta(minutes=15)
+# Planen får vara högst så här gammal innan exekutorn släpper den och
+# styrningen faller tillbaka på kontrollerns regler utan plan. Den byggs var 15:e min; en
+# kvart extra täcker en missad ombyggnad.
+_PLAN_GRACE = timedelta(minutes=15)
 
 
-def select_active_plan(
-    selected: str,
-    plan_v: Optional[DayPlan],
-    plan_b: Optional[DayPlan],
-    now: datetime,
-) -> tuple[Optional[DayPlan], str]:
-    """(plan exekutorn följer, planerare som faktiskt styr). Faller tillbaka på V
-    om plan B saknas eller är för gammal (fas B5.1)."""
-    if selected == PLANNER_DP and plan_b is not None and now < plan_b.valid_until + _PLAN_B_GRACE:
-        return plan_b, PLANNER_DP
-    return plan_v, PLANNER_V
+def plan_if_fresh(plan: Optional[DayPlan], now: datetime) -> Optional[DayPlan]:
+    """Planen exekutorn följer, eller None om den saknas eller är för gammal."""
+    if plan is not None and now < plan.valid_until + _PLAN_GRACE:
+        return plan
+    return None
 
 
 def calibrated_daily_levels(
