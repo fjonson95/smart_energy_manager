@@ -1063,6 +1063,59 @@ class EnergyController:
 
     # ── Plan-executor (P2-5) ────────────────────────────────────────────
 
+    def _execute_dp_slot(self, decision, slot, plan, state, surplus_w, ev_total_w,
+                         house_def_w, batt_max_w, ev_reason) -> None:
+        """Plan B:s kvart klämd mot fysiken (fas B5.3, HANDOFF.md 4.6).
+
+        Planen har redan vägt pris mot lagrat värde; här finns varken econ_peak,
+        prefer_sell eller kvällsmål. Det verkliga överskottet/underskottet styr
+        riktningen, och om ett oplanerat överskott lagras eller säljs avgörs mot
+        planens eget V_charge."""
+        buy = state.buy_price_sek_kwh
+        sell = state.sell_price_sek_kwh
+        v_charge = plan.marginal_value_charge_sek_kwh
+        can_charge = state.battery_soc_pct < self.battery_max_soc
+        can_discharge = state.battery_soc_pct > self.battery_min_soc
+        batt_surplus_w = max(0.0, surplus_w - ev_total_w) if can_charge else 0.0
+        act = slot.action
+
+        if act == "grid_charge":
+            if can_charge:
+                decision.battery_charge_power_w = min(max(0.0, slot.target_power_w) + batt_surplus_w, batt_max_w)
+            what = "nätladdar"
+        elif act == "solar_charge":
+            # v0.9.78: nätdelen bara när köpet är billigare än det lagrade värdet.
+            cheap = buy <= v_charge
+            grid_part_w = max(0.0, slot.grid_charge_w) if cheap and can_charge else 0.0
+            decision.battery_charge_power_w = min(batt_surplus_w + grid_part_w, batt_max_w)
+            if (decision.battery_charge_power_w == 0.0 and house_def_w > 0.0 and can_discharge
+                    and not (slot.hold_battery and cheap)):
+                decision.battery_discharge_power_w = min(house_def_w, batt_max_w)
+                what = "verkligt underskott → egenförbrukning"
+            elif batt_surplus_w == 0.0 and grid_part_w > 0.0:
+                what = "verkligt underskott → laddar nätdelen"
+            else:
+                what = "solladdar"
+        elif act == "export":
+            if can_discharge:
+                decision.battery_discharge_power_w = min(abs(slot.target_power_w) + house_def_w, batt_max_w)
+            what = "exporterar"
+        elif surplus_w > 100:
+            if sell < v_charge:
+                decision.battery_charge_power_w = min(batt_surplus_w, batt_max_w)
+                what = f"verkligt solöverskott lagras (sälj {sell:.2f} < V {v_charge:.2f})"
+            else:
+                what = f"verkligt solöverskott säljs (sälj {sell:.2f} ≥ V {v_charge:.2f})"
+        elif slot.hold_battery:
+            what = "håller batteriet"
+        else:
+            if can_discharge:
+                decision.battery_discharge_power_w = min(house_def_w, batt_max_w)
+            what = "egenförbrukning"
+
+        power_w = decision.battery_charge_power_w - decision.battery_discharge_power_w
+        decision.reason = f"{ev_reason} | Plan B {act}: {what} {power_w:+.0f}W | {slot.reason}"
+
     def apply_plan_executor(
         self,
         day_plan: Optional["DayPlan"],
@@ -1130,7 +1183,11 @@ class EnergyController:
         decision.battery_charge_power_w = 0.0
         decision.battery_discharge_power_w = 0.0
 
-        if now_slot.action == "solar_charge":
+        if day_plan.planner == "dp":
+            self._execute_dp_slot(decision, now_slot, day_plan, state, solar_surplus_w,
+                                  ev_total_w, house_def_w, batt_max_w, ev_reason)
+
+        elif now_slot.action == "solar_charge":
             # Ingen prefer_sell här – planen har redan valt att spara (2026-09-22). Se docs/decisions.md C07.
             battery_surplus_w = max(0.0, solar_surplus_w - ev_total_w)
             # Nätdelen och spärren gäller bara när köpet är billigare än det lagrade

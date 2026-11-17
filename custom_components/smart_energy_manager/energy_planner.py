@@ -166,6 +166,8 @@ class DayPlan:
 
     slots: list[PlannedSlot] = field(default_factory=list)
     notes: str = ""
+    # "dp" = plan B; exekutorn klämmer då bara mot fysiken (fas B5.3).
+    planner: str = "v"
 
     def slot_at(self, dt: datetime) -> Optional[PlannedSlot]:
         dt_aware = dt if dt.tzinfo else dt.astimezone()

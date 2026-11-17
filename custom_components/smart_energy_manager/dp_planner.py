@@ -406,4 +406,5 @@ class DPPlanner:
             marginal_value_charge_sek_kwh=v_stored * eta_leg,
             slots=planned,
             notes=notes,
+            planner=PLANNER_DP,
         )
