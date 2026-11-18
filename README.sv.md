@@ -53,24 +53,24 @@ Elnät (3-fas, max 20A/fas)
 ### Autoläge (Självkonsumtion)
 1. **Täck hushållslast** – prioritet 1
 2. **Ladda bilar från sol** – när solöverskott ≥ 1 400 W (1-fas) eller 4 140 W (3-fas); ström justeras dynamiskt
-3. **Ladda batteri från solöverskott**
-4. **Extra varmvatten via elpatron** – när batteriet är fullt, sol finns kvar och tanktemperaturen är under konfigurerat max (standard 70°C)
-5. **Batteriets laddning/urladdning följer en plan för 48 h** – dynamisk programmering över kommande prisslots, Solcast-prognosen och lastprognosen hittar det billigaste batterischemat och bestämmer per kvart om sol ska lagras, huset täckas från batteriet, batteriet nätladdas eller el exporteras. Se `sensor.sem_day_plan_*` och planeringskortet
-6. **Negativa elpriser** – absorbera all möjlig solel i batteri, bilar och varmvatten
+3. **Ladda bilar från nätet enligt planen** – en bil med deadline (`deadline_entity`) får de billigaste kvartarna före deadline med 16 A; utan deadline, när lite sol väntas idag eller imorgon, får den de billigaste kvartarna fram till 07:00 med 8 A. Bilen nätladdar bara i kvartar planen schemalagt, och dess last räknas in i fasgränsen
+4. **Lagra solöverskott i batteriet enligt planen** – i en laddande kvart tar batteriet hela överskottet; i övriga kvartar lagras överskottet när säljpriset är under planens lagrade värde (V_charge) och säljs annars. Pannans soldriftläge och varmvattendumpen får bara det batteriet lämnar
+5. **Extra varmvatten från solöverskott** – när överskottet täcker hela lasten (pannan väljer kompressorn, ~3,5 kW, under 47 °C och elpatronen, ~5,8 kW, över) och värmen är värd mer än säljpriset: när batteriet är fullt, när säljpriset är över planens lagrade värde eller efter negativa priser tidigare under dygnet. Tanktemperaturen ska vara under konfigurerat max (standard 70°C)
+6. **Batteriets laddning/urladdning följer en plan för 48 h** – dynamisk programmering över kommande prisslots, Solcast-prognosen och lastprognosen hittar det billigaste batterischemat och bestämmer per kvart om sol ska lagras, huset täckas från batteriet, batteriet nätladdas eller el exporteras. Se `sensor.sem_day_plan_*` och planeringskortet
+7. **Negativa elpriser** – absorbera all möjlig solel i batteri, bilar och varmvatten
 
 ### Prisplanering (kvartstimmar framåt)
 Baserat på Nordpools `raw_today`/`raw_tomorrow`-attribut beräknas varje cykel:
 - **Bästa laddnings-/urladdningstimme** kommande 12h
-- **Proaktiv absorption** – om ≥ 4 kvartstimmar med negativt säljpris väntar inom 2h hålls headroom i batteriet (upp till 30%) för att ge plats åt solelen. Extra varmvatten och EV-laddning startas **inte** proaktivt; de väntar tills priset faktiskt är negativt
+- **Negativa priser framåt** – planen ser negativa säljpriser i sin prishorisont och lämnar själv plats i batteriet för dem. När ≥ 4 kvartstimmar med negativt säljpris väntar inom 2 h visar `sensor.sem_negative_slots_ahead` även ett förslag på headroom (attributen `should_absorb_proactively`, `recommended_headroom_pct`, upp till 30 %) – bara information, batteriet följer planen. Extra varmvatten och EV-laddning startas **inte** proaktivt; de väntar tills priset faktiskt är negativt
 - Resultatet exponeras via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price` och `sensor.sem_best_charge_price`
 
 ### Solcast-prognos med 30-minutersupplösning
 Om Solcast-sensorer är konfigurerade läses `detailedForecast`-attributet (30-minuters `pv_estimate`-värden i kW) varje cykel och matchas mot Nordpools prisslottar:
 - **Sol per slot** – varje prissslott får ett förväntat soleffektvärde (kW) och energimängd (kWh)
-- **Vänta på sol** – om ≥ 2 kWh sol väntas inom 2 timmar *och* aktuellt köppris överstiger 0,50 SEK/kWh hoppas batteriladdning från nät över för att spara utrymme åt gratis solel
 - **Solaggregat** – rullande prognos för kommande 2 h, 4 h och 8 h exponeras som sensorer
 - **Soltopp** – förväntad toppeffekt (kW) inom 8 h och antal timmar tills den inträffar
-- `sensor.sem_wait_for_solar` slår på `on` när systemet håller tillbaka elnätsladdning i väntan på sol
+- `sensor.sem_wait_for_solar` slår på `on` när ≥ 2 kWh sol väntas inom 2 h och köppriset är över 0,50 SEK/kWh – bara information; planen räknar redan med prognosens sol när den beslutar om nätladdning
 
 ### Forcelägen
 - **Force EV Charge** – ladda alla anslutna bilar från elnät (max ström, fasbegränsad)
@@ -232,7 +232,7 @@ Systemet använder en **separat digital switch** för att starta pannans legione
 | `sensor.sem_solar_next_8h_kwh` | Förväntad solenergi kommande 8 h (kWh, Solcast median) |
 | `sensor.sem_peak_solar_kw_next_8h` | Förväntad toppeffekt från sol inom 8 h (kW) – attribut: `peak_solar_time` |
 | `sensor.sem_hours_to_solar_peak` | Timmar tills soltoppen inom 8 h |
-| `sensor.sem_wait_for_solar` | `on` när systemet håller tillbaka elnätsladdning i väntan på sol |
+| `sensor.sem_wait_for_solar` | `on` när ≥ 2 kWh sol väntas inom 2 h och köppriset är över 0,50 SEK/kWh (information; styr inte batteriet) |
 | `sensor.sem_battery_accumulated_cost` | Ackumulerad kostnad (SEK) för energin i batteriet – attribut: `solar_kwh_total`, `grid_kwh_total`, `average_price_sek_kwh`, `last_sell_price` |
 | `sensor.sem_battery_average_price` | Genomsnittlig kostnad per kWh för energin i batteriet (SEK/kWh) |
 | `sensor.sem_daily_savings` | Besparing idag (kr) jämfört med samma hus utan batteri – attribut: delbelopp, igår, senaste 30 dygnen |

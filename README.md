@@ -55,24 +55,24 @@ Grid (3-phase, max 20A/phase)
 ### Auto Mode (Self-Consumption)
 1. **Cover household load** – priority 1
 2. **Charge cars from solar** – when solar surplus ≥ 1,400 W (1-phase) or 4,140 W (3-phase); current adjusted dynamically
-3. **Charge battery from solar surplus**
-4. **Extra hot water via heating element** – when the battery is full, solar surplus remains, and tank temperature is below the configured maximum (default 70°C)
-5. **Battery charge/discharge follows a 48 h plan** – a dynamic program over the coming price slots, Solcast forecast and load forecast finds the cheapest battery schedule and decides per quarter-hour whether to store solar, cover the house from the battery, charge from the grid or export. See `sensor.sem_day_plan_*` and the energy plan card
-6. **Negative electricity prices** – absorb all possible solar power into battery, cars, and hot water
+3. **Charge cars from the grid according to the plan** – a car with a deadline (`deadline_entity`) gets the cheapest quarters before the deadline at 16 A; without a deadline, when little sun is expected today or tomorrow, it gets the cheapest quarters until 07:00 at 8 A. The car only charges from the grid in quarters the plan scheduled, and its load counts towards the phase limit
+4. **Store solar surplus in the battery according to the plan** – in a charging quarter the battery takes the whole surplus; in other quarters the surplus is stored when the sell price is below the plan's stored value (V_charge) and sold otherwise. The boiler's solar mode and the hot-water dump only get what the battery leaves
+5. **Extra hot water from solar surplus** – when the surplus covers the whole load (the boiler picks the compressor, ~3.5 kW, below 47 °C and the heating element, ~5.8 kW, above) and the heat is worth more than the sell price: when the battery is full, when the sell price is above the plan's stored value, or after negative prices earlier in the day. Tank temperature must be below the configured maximum (default 70°C)
+6. **Battery charge/discharge follows a 48 h plan** – a dynamic program over the coming price slots, Solcast forecast and load forecast finds the cheapest battery schedule and decides per quarter-hour whether to store solar, cover the house from the battery, charge from the grid or export. See `sensor.sem_day_plan_*` and the energy plan card
+7. **Negative electricity prices** – absorb all possible solar power into battery, cars, and hot water
 
 ### Price Planning (quarter-hours ahead)
 Based on Nord Pool's `raw_today`/`raw_tomorrow` attributes, the following are calculated each cycle:
 - **Best charging/discharging hour** for the coming 12h
-- **Proactive absorption** – if ≥ 4 quarter-hours with negative sell price are expected within 2h, the battery holds headroom (up to 30%) to make room for solar. Extra hot water and EV charging are **not** started proactively; they wait until the price is actually negative
+- **Negative prices ahead** – the plan sees negative sell prices in its price horizon and leaves room in the battery for them itself. When ≥ 4 quarter-hours with a negative sell price are expected within 2 h, `sensor.sem_negative_slots_ahead` also shows a suggested headroom (attributes `should_absorb_proactively`, `recommended_headroom_pct`, up to 30 %) – informational only, the battery follows the plan. Extra hot water and EV charging are **not** started proactively; they wait until the price is actually negative
 - Results are exposed via `sensor.sem_negative_slots_ahead`, `sensor.sem_best_discharge_price`, and `sensor.sem_best_charge_price`
 
 ### Solcast Solar Forecast (30-minute resolution)
 If Solcast sensors are configured, the `detailedForecast` attribute (30-minute `pv_estimate` values in kW) is read each cycle and matched against Nord Pool price slots:
 - **Per-slot solar data** – each price slot gets an expected solar power value (kW) and energy (kWh)
-- **Wait for solar** – if ≥ 2 kWh of solar is expected within 2 h *and* the current buy price is above SEK 0.50/kWh, battery charging from the grid is skipped to preserve headroom for free solar
 - **Solar aggregates** – rolling forecasts for the next 2 h, 4 h, and 8 h exposed as sensors
 - **Peak solar** – the expected peak power (kW) within 8 h and how many hours until it occurs
-- `sensor.sem_wait_for_solar` turns `on` when the system is holding back grid charging in anticipation of solar
+- `sensor.sem_wait_for_solar` turns `on` when ≥ 2 kWh of solar is expected within 2 h and the buy price is above SEK 0.50/kWh – informational only; the plan already counts on the forecast solar when it decides on grid charging
 
 ### Force Modes
 - **Force EV Charge** – charge all connected cars from the grid (max current, phase-limited)
@@ -234,7 +234,7 @@ The system uses a **separate digital switch** to start the boiler's Legionella p
 | `sensor.sem_solar_next_8h_kwh` | Expected solar energy next 8 h (kWh, Solcast median) |
 | `sensor.sem_peak_solar_kw_next_8h` | Expected peak solar power within 8 h (kW) – attribute: `peak_solar_time` |
 | `sensor.sem_hours_to_solar_peak` | Hours until solar peak within 8 h |
-| `sensor.sem_wait_for_solar` | `on` when the system is holding back grid charging in anticipation of solar |
+| `sensor.sem_wait_for_solar` | `on` when ≥ 2 kWh of solar is expected within 2 h and the buy price is above SEK 0.50/kWh (informational; does not steer the battery) |
 | `sensor.sem_battery_accumulated_cost` | Accumulated cost (SEK) of energy currently in the battery – attributes: `solar_kwh_total`, `grid_kwh_total`, `average_price_sek_kwh`, `last_sell_price` |
 | `sensor.sem_battery_average_price` | Average cost per kWh of energy currently in the battery (SEK/kWh) |
 | `sensor.sem_daily_savings` | Savings today (SEK) compared with the same house without the battery – attributes: components, yesterday, last 30 days |

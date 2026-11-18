@@ -1,338 +1,245 @@
 # Changelog
 
-All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration.
+All notable changes to Smart Energy Manager. See [README.md](README.md) for the current feature set and configuration. Investigations, measurements and the reasons behind each change are in [docs/decisions.md](docs/decisions.md) (Swedish) under the same date.
 
-## What's New in 0.9.83
+Backtest figures are savings against a house without a battery. From 0.9.81 they are inventory-adjusted (energy left in the battery counts): summer = `testdata/history`, winter = Jan–Apr 2026, "without hindsight" = 27 Oct–10 Nov and 10–14 Nov with real Solcast forecasts.
 
-- **Phase warnings only for real overload**: on 18 Nov 04:42–06:09 the log showed 38 warnings "phase L2 import exceeded 17–20.1 A (max 15.0 A)". The meter shows L2 averaging 15.0–15.2 A in every 5-minute window (peak 18.0 A, never the 20 A main fuse): the phase limiter was holding night charging exactly at its regulation target (configured 17 A minus a 2 A margin) while L2 also carried the heat pump's compressor (~5 A). The warning fired as soon as the measured current passed the regulation target, and it printed the current *including the plan's unthrottled 8 kW charge command* – the 20.1 A never happened. The warning now fires only when the measured current exceeds the configured limit (17 A), and its text shows both the measured current and the current with the decision. The same rule applies to the "nothing more to throttle" warning.
-- **Phase B cleanup (B5.4.3)**: plan slots hold plain floats instead of `np.float64`; slot times in the plan sensor's attributes are minute-resolution (`2026-11-18T19:45+01:00`), which keeps the attributes further below the recorder's 16 kB limit (15.4 kB measured live with 97 slots, before EV slots are added); the weather forecast is fetched only for the forecast days' mean temperature the plan uses (the V planner's drought list is gone); the unused `EnergyState` fields from the old evening target (`load_shape_p75`, sun times, battery average cost) are removed.
-- **Verified**: `pytest` 78 passed (2 new tests: regulation at the margin is not a warning, plan slots hold plain floats). Backtests unchanged to the öre: summer 212.95 SEK, winter 1,357.69 SEK, without hindsight 27 Oct–10 Nov 321.80 SEK, 10–14 Nov 129.86 SEK (inventory-adjusted).
+## 0.9.83 – 2026-11-18 – Phase warnings only for real overload
 
-## What's New in 0.9.82
+**Changed**
+- The phase warning fires only when the measured current exceeds the configured limit (17 A), not already at the regulation target (15 A).
+- The warning shows the measured current. Before, it showed the current with the plan's unthrottled charge command ("20.1 A" on 18 Nov, never measured).
 
-- **The battery's share of a solar surplus follows the plan everywhere (phase B5.4.2)**: the controller still guessed the battery's share with the old step-4 rule (do not charge when the sell price is ≥ 0.80 SEK), while the executor charged according to the plan. The guess decided how much surplus the boiler's solar mode (pvmaxcomp cap) and the hot-water dump were allowed to use, so in 107 of 377 summer quarters with a surplus the two disagreed – mostly the boiler was offered surplus the battery was already charging with (summer: 109.6 kWh offered to the boiler cap vs 62.3 kWh actually left over; winter 112.8 vs 11.2 kWh). Both now use one function, `plan_surplus_charge_w()`: a charging quarter takes the whole surplus, an export quarter none, other quarters store it when the sell price is below the plan's stored value (V_charge). The boiler and the dump only get what the battery leaves.
-- **Old battery rules removed**: the executor's V branch (`econ_peak`, `prefer_sell`, evening target, export-floor pause) and the controller's step-4 policy (evening target and evening fill, wait-for-sun, opportunistic grid charging, "economic peak" self-consumption) are gone, about 400 lines. Without a plan the battery simply stores surplus and covers the deficit. The decision text no longer starts with a misleading "Self-consumption (economic peak …)"; the plan part reads "Plan <action>: …" (formerly "Plan B <action>").
-- **Removed settings and entities**: `switch.sem_opportunistic_charge` (removed from the entity registry automatically at start-up – the plan does all grid charging) and the battery setting "Estimated wear cost per cycled kWh" (`cycle_cost_sek_kwh`, unread since v0.9.81 – the plan uses its own 0.10 SEK/kWh). `DayPlan.planner` is gone.
-- **Verified**: `pytest` 76 passed (9 new tests in `tests/test_surplus_share.py`). Backtests unchanged to the öre: summer 212.95 SEK, winter 1,357.69 SEK, without hindsight 27 Oct–10 Nov 321.80 SEK, 10–14 Nov 129.86 SEK (inventory-adjusted). The boiler cap and the dump are not part of the backtest's cost; their effect is measured live.
+**Cleaned up**
+- Plan slots hold plain floats instead of `np.float64`.
+- Slot times in the plan sensor's attributes are minute-resolution (14.8 kB against the recorder's 16 kB limit).
+- The weather fetch only reads the forecast days' mean temperature. Unused fields from the old evening target are gone.
 
-## What's New in 0.9.81
+**Verified:** pytest 78 · backtests unchanged (summer 212.95 · winter 1,357.69 · without hindsight 321.80 / 129.86 SEK)
 
-- **Plan B is the only planner (phase B5.4.1)**: the dynamic-programming plan (DP) has controlled the battery since 10 Nov, and the V planner (rules 1–4 around the marginal value V, merit order, earmarks) only ran alongside it. V is now gone: the integration builds one plan every 15 minutes, when prices change and when Legionella's window changes, and the executor always follows it. If the plan is missing or older than 30 minutes, control falls back to the controller's own rules without a plan (as before prices are loaded) instead of switching to V; those rules are replaced by plain self-consumption in B5.4.2. v0.9.80 is the rollback point for anyone who wants V back.
-- **The car's grid charging comes only from the plan**: V's deadline schedule and the winter "cheap hour" rule (C05) are removed; the plan schedules the car as in v0.9.79 (deadline at 16 A, otherwise 8 A until 07:00 when there is little sun). The decision text shows "plan 8A" instead of "plan B 8A".
-- **Entities**: the planner selector (`select.smart_energy_manager_planerare`), the active-planner sensor and the four `plan_b_*` sensors are removed from the entity registry automatically at start-up. The ordinary plan sensors (`sensor.sem_day_plan_*`, the plan executor sensors and the plan log) now show the DP plan, and the plan reason sensor gains the `daily_load_kwh_by_date` attribute from the old plan B sensor. The plan log's `plan_b` sub-entry is gone; each snapshot is the DP plan with `planner` and `daily_load_kwh_by_date`.
-- **Plan card**: reads only `day_plan_sensor` (the `follow_active_planner` and `plan_b_sensor` options are gone). Rebuild/copy the card if you load it manually.
-- **Backtest**: `--planner` is gone; the backtest always runs DP and `--load-level calib` is the default. V-only tests are removed, and the summer regression test checks DP's inventory-adjusted savings.
-- **Verified**: `pytest` 65 passed, 0 expected failures (the max-SOC invariant in the summer backtest now holds and is no longer marked xfail). Backtests unchanged to the öre: summer 212.95 SEK, winter 1,357.69 SEK, without hindsight 27 Oct–10 Nov 321.80 SEK, 10–14 Nov 129.86 SEK (inventory-adjusted).
+## 0.9.82 – 2026-11-18 – The battery's share of a solar surplus follows the plan
 
-## What's New in 0.9.80
+**Changed**
+- The controller and the executor compute the battery's share of a solar surplus with the same function (`plan_surplus_charge_w()`). The boiler's solar mode and the hot-water dump only get what the battery leaves – before, they were offered surplus the battery was already charging with (107 of 377 summer quarters).
+- Without a plan the battery stores surplus and covers the deficit, nothing more.
+- The decision text reads "Plan <action>: …" (formerly "Plan B …") and no longer starts with "Self-consumption (economic peak …)".
 
-- **Plan B's executor only clamps to physics (phase B5.3)**: the executor still made decisions plan B had already made. `econ_peak` (buy ≥ 1.2 × the cheapest price in 12 h) stopped a planned grid charge and discharged instead; `prefer_sell` (sell ≥ 0.80 SEK and SOC above the evening target) exported an unplanned solar surplus; and the evening target came from the old battery logic. When plan B is in control, its quarter now goes through its own executor path: grid charging charges the planned power plus any real solar surplus, self-consumption covers the real deficit, a quarter that holds the battery never discharges, export discharges the planned power plus the house deficit down to min SOC, and an unplanned solar surplus is stored when the sell price is below plan B's stored value (V_charge) and sold otherwise. The decision text shows "Plan B <action>: …". V's plan keeps the old path unchanged until V is removed (B5.4).
-- **Verified**: `pytest` 87 passed, 3 expected failures (8 new tests in `tests/test_dp_executor.py`). V backtests unchanged (147.80 / 880.70 SEK). Plan B: summer 205.45 → 212.95 SEK, winter 1,357.44 → 1,357.69 SEK, without hindsight 27 Oct–10 Nov 320.10 → 321.80 SEK, 10–14 Nov 129.37 → 129.86 SEK. The summer gain comes from selling unplanned surplus above the stored value (62 quarters, −34.57 SEK net cost, partly given back later as less stored energy).
+**Removed**
+- The executor's old V branch (`econ_peak`, `prefer_sell`, evening target, export-floor pause) and the controller's step-4 battery rules (evening fill, wait for solar, opportunistic grid charging), about 400 lines.
+- `switch.sem_opportunistic_charge` (removed from the entity registry at start-up) and the wear-cost setting (`cycle_cost_sek_kwh`).
 
-## What's New in 0.9.79
+**Verified:** pytest 76 · backtests unchanged (summer 212.95 · winter 1,357.69 · without hindsight 321.80 / 129.86 SEK)
 
-- **Plan B schedules the car's grid charging (phase B5.2)**: until now the car's grid charging came from V's plan (deadline schedule) or from the winter "cheap hour" rule, and plan B could not see it. On 15 Nov 02:00–06:45 the car charged at 8 A on L1 while plan B planned 7.6–7.8 kW of battery charging; the phase limiter cut the battery to 5.3 kW and 11 kWh of planned night charging was lost. When plan B is in control it now schedules the car itself: a car with a deadline gets the cheapest quarters before the deadline at 16 A (as before); without a deadline, plan B replaces the cheap-hour rule under the same condition (little sun today or tomorrow) at 8 A with a 07:00 deadline. The car avoids the battery's charging quarters; if it cannot fit, it shares them and plan B lowers its battery charge cap by the car's load on its phase. The car counts only towards the phase limit – the battery never discharges into the car. The decision text shows "plan B 8A". With V in control nothing changes. The plan sensors' slots show `ev_charge_w` in quarters with the car scheduled.
-- **Verified**: `pytest` 79 passed, 3 expected failures (6 new tests in `tests/test_dp_ev_schedule.py`). Backtests unchanged (the car is removed from the backtest data): V 147.80 / 880.70 SEK, plan B summer 205.45, winter 1,357.44, without hindsight 320.10 SEK.
+## 0.9.81 – 2026-11-17 – Plan B is the only planner
 
-## What's New in 0.9.78
+**Changed**
+- The V planner is removed. The DP plan is built every 15 minutes, when prices change and when Legionella's window changes, and the executor always follows it.
+- If the plan is older than 30 minutes the controller runs without a plan instead of switching to V.
+- The car's grid charging comes only from the plan: 16 A before a deadline, otherwise 8 A until 07:00 when there is little sun. The "cheap hour" rule (C05) is removed.
+- The plan sensors, plan log and plan card show the DP plan. The plan reason sensor gains the `daily_load_kwh_by_date` attribute.
 
-- **Plan B's solar charging no longer turns into discharging when the sun falls short of the forecast**: on 15 Nov 12:00–12:30 plan B planned to charge 876 W (70 % sun, the rest from the grid at 1.53 SEK), but the sun only covered the house. The executor treated the missing surplus as a deficit and covered the house from the battery – on average ~400 W discharge instead of 876 W charging, ~0.65 kWh that was later replaced at 4.20 SEK in the evening. Plan B's charging quarters now carry the planned grid share (`grid_charge_w`) and hold the battery. When the real surplus is missing, the executor buys the grid share (surplus + grid share when the sun is better than forecast) and does not discharge – but only when the buy price is at or below the stored value (V_charge). When the grid is more expensive, it covers the house from the battery as before: buying the grid share at 2.2–3.7 SEK cost 3.7 SEK in the no-hindsight backtest. V's solar charging is unchanged.
-- **Verified**: `pytest` 73 passed, 3 expected failures (5 new tests in `tests/test_dp_solar_share.py`; three fail without the fix). V backtests unchanged (147.80 / 880.70 SEK). Plan B: summer 205.02 → 205.45 SEK, winter 1,357.82 → 1,357.44 SEK, without hindsight 27 Oct–10 Nov 320.10 SEK (unchanged – the sun never fell short in a cheap quarter there), 10–14 Nov 129.37 SEK (unchanged).
+**Removed**
+- The planner selector, the "Active planner" sensor and the four `plan_b_*` sensors (removed from the entity registry at start-up).
+- The card options `follow_active_planner` and `plan_b_sensor`. The backtest's `--planner`; `--load-level calib` is the default.
 
-## What's New in 0.9.77
+**Verified:** pytest 65 · backtests unchanged (summer 212.95 · winter 1,357.69 · without hindsight 321.80 / 129.86 SEK) · rollback point for V: v0.9.80
 
-- **Plan B labels small solar surpluses as solar charging**: plan B plans in 0.1 kWh steps, which are often larger than a small solar surplus. Such a quarter used to be labelled grid charging, so the plan card showed "Grid charging" on 12 Nov 10:30–11:30 (Solcast p50 2 kW, buy price 2.90 SEK), and the executor bought the grid share at full price. A quarter where at least half of the step comes from the sun is now solar charging: the executor charges from the real surplus and buys nothing. The decision text shows the solar share. Backtests with plan B: winter 1,339.82 → 1,357.82 SEK, summer 204.80 → 205.02 SEK, without hindsight 27 Oct–10 Nov 304.83 → 320.10 SEK.
-- **Solar surplus is stored during an "economic peak"**: when a plan slot said grid charging and the buy price counted as an economic peak (≥ 1.2 × the cheapest price in the next 12 h), the executor only covered a house deficit and ignored a solar surplus. On 12 Nov at 10:26 2.5 kW was exported for 1.66 SEK while the battery sat at 9 %. That branch now charges from a real surplus over 100 W, like the idle and self-consumption branches. No change in the backtests (the case does not occur in the history).
-- **Plan card shows the solar forecast plan B uses**: the solar line now follows Solcast p50 per half hour (new option `solcast_today`, default `sensor.solcast_pv_forecast_forecast_today`) instead of a bell curve around the peak, and its scale follows the day's peak, which is labelled in kW. Before, the line had a fixed 0–12 kW scale with no axis, so 2.1 kW read as 0.6 on the price axis.
-- **Verified**: `pytest` 68 passed, 3 expected failures (3 new tests in `tests/test_dp_solar_share.py`; two fail without the fixes). V backtests unchanged (147.80 / 880.70 SEK).
+## 0.9.80 – 2026-11-17 – The executor only clamps to physics (B5.3)
 
-## What's New in 0.9.76
+**Changed**
+- When plan B is in control the executor no longer makes its own decisions. `econ_peak` stopped planned grid charging, and `prefer_sell` exported unplanned solar surplus.
+- Unplanned solar surplus is stored when the sell price is below the plan's stored value (V_charge) and sold otherwise.
 
-Two fixes found while reviewing plan B's first day in control (10–11 Nov).
+**Verified:** pytest 87 · plan B summer 205.45 → 212.95 · winter 1,357.44 → 1,357.69 · without hindsight 320.10 → 321.80 / 129.37 → 129.86 SEK
 
-- **EV charging no longer starts on battery export**: when the grid exported, the solar surplus for EV charging was taken as grid export + battery charging, so export coming *out of* the battery counted as sun. On 11 Nov at 16:15 plan B exported 8 kW from the battery with 0 W of sun and the charger was told to charge at 13–16 A "solar". The surplus now subtracts battery discharge and never exceeds solar production. Had the car been drawing, up to 3.7 kW of battery energy would have gone into it during the evening peak instead of being sold.
-- **Phase limiter only warns about real overloads**: "Pass 0 … exceeded" was logged every 30 s while the limiter merely trimmed a charging decision that would otherwise have gone over the limit (951 warnings in 16 hours). That trimming is normal operation and is now logged at debug level. A warning is logged when the *measured* phase current is already over the limit, and when a phase is still over after the limiter has done what it can.
-- **Verified**: `pytest` 65 passed, 3 expected failures (4 new tests in `tests/test_ev_surplus_and_phase_log.py`; two of them fail without the fix). Backtests unchanged (147.80 / 880.70 SEK).
+## 0.9.79 – 2026-11-16 – Plan B schedules the car's grid charging (B5.2)
 
-## What's New in 0.9.75
+**New**
+- Plan B schedules the car: 16 A in the cheapest quarters before a deadline, otherwise 8 A until 07:00 when there is little sun. The car avoids the battery's charging quarters and counts towards the phase limit.
+- The plan sensors' slots show `ev_charge_w` in quarters with the car scheduled.
 
-Phase B, step B5.1: plan B (the DP planner) can now control the battery. A new selector chooses which planner the executor follows; the default is still today's planner.
+**Fixed**
+- The car throttled the night charging: on 15 Nov it charged at 8 A on L1 and 11 kWh of planned battery charging was lost.
 
-- **Background**: over 13.7 days (27 Oct – 10 Nov), simulated without hindsight, plan B would have cost about 171 SEK less than today's control (12.5 SEK/day), after wear, end-of-period battery level and EV charging. See `docs/decisions.md`.
-- **New selector "Planner"** (`select.smart_energy_manager_planerare`): *Current (V)* or *Plan B (DP)*. The choice survives a restart. The plan that is not selected is still built in shadow, so the comparison continues.
-- **Fallback**: if plan B is missing or more than 15 minutes past its validity, the executor follows today's plan and a warning is logged.
-- **New sensor "Active planner"** (`sensor.smart_energy_manager_aktiv_planerare`): which planner actually controls; it differs from the selector during a fallback. The plan reason sensors get an `active_planner` attribute.
-- **Unchanged**: the EV schedule still comes from today's plan (plan B gets it in B5.2), and the executor, phase limiter, hot-water dump, Legionella, negative prices and manual modes work as before. With plan B the dump compares against plan B's marginal value.
-- **Plan card**: shows plan B automatically while it controls (`follow_active_planner: false` turns this off; `plan_b_sensor` overrides the derived entity). Rebuilt `dist/smart-energy-manager-cards.js`.
-- **Rollback**: set the selector back to *Current (V)*, or install release v0.9.74.
-- **Verified**: `pytest` 61 passed, 3 expected failures (5 new tests for the selection and fallback). Backtests unchanged (147.80 / 880.70 SEK), since they do not use the selector. Not yet verified live.
+**Verified:** pytest 79 · backtests unchanged (the car is not in the backtest data)
 
-## What's New in 0.9.74
+## 0.9.78 – 2026-11-16 – Solar charging no longer turns into discharging when the sun falls short
 
-Fix: a full battery no longer sits idle all morning while tomorrow's prices are unpublished.
+**Fixed**
+- When the sun gave less than forecast in a solar-charging quarter, the executor discharged the battery instead (15 Nov 12:00–12:30). Now the plan's grid share (`grid_charge_w`) is bought and the battery is held – but only when the buy price is at or below the stored value.
 
-- **Background**: on 9 Nov at 09:15 the battery was at 99 % and the house bought power at 4–5 SEK/kWh, with an evening peak of 6.9 SEK ahead. The plan showed "idle" for the whole day and the marginal value V was 7.61 SEK.
-- **Cause**: before tomorrow's prices are published (~13:00), a floor reserved tomorrow's expected deficit. With a low solar forecast for tomorrow the floor became the whole battery (30.4 kWh). With nothing free, V fell back to the day's highest opportunity, and no price could beat it.
-- **Change**: until the real prices arrive, the planner assumes tomorrow has today's prices, quarter by quarter, with Solcast's forecast for the sun. The battery's value now weighs today's peak against tomorrow's needs. The assumed prices are only used for V and the allocation; the plan, sensors and card never show them. The plan notes say "morgondagens priser antagna = idag" while it applies. The old floor stays only as a fallback when there is no reference day.
-- **Effect in the 9 Nov case**: the battery covers the house 15:00–20:00 (99 → 73 %) and keeps the rest. On a flat-price day it covers only the peak (81 → 60 %) and buys nothing.
-- **Refill limit (10 Nov)**: the first version held a full battery all morning while the house bought at up to 6.22 SEK, because the assumed tomorrow copied today's 7 SEK peaks and half the battery was saved for them. The assumed tomorrow is now worth no more than buying the energy back before it (cheapest earlier price / efficiency + cycle cost), e.g. ~2.9 SEK with a 2.4 SEK night. Real price days are not affected: the same limit there, and removing the 10 % risk markup, each lowered the winter backtest (−14 and −35 SEK), so both were left out.
-- **Start-up**: right after a restart the Sonnen SOC sensor has no value yet and SEM fell back to 50 %. A plan built on that stayed for 15 minutes (on 9 Nov V became 6.20 SEK with the battery at 99 %). The plan is now not built until the SOC is known.
-- **Verified**: `pytest` 56 passed, 3 expected failures (5 new tests; the old floor locks the battery in the same case). Backtests unchanged (summer 147.80, winter 880.70 SEK), because they always see 24 h of prices and never hit this path. Not yet verified live.
+**Verified:** pytest 73 · plan B summer 205.02 → 205.45 · winter 1,357.82 → 1,357.44 SEK · without hindsight unchanged
 
-## What's New in 0.9.73
+## 0.9.77 – 2026-11-14 – Solar share in plan B's charging steps
 
-Fix: the planner no longer buys expensive grid power because of the reserve it holds while tomorrow's prices are unknown.
+**Fixed**
+- A quarter where at least half of the charging step comes from the sun counts as solar charging, not grid charging. Before, the grid share was bought at full price (12 Nov, 2.90 SEK).
+- Solar surplus is stored even when the quarter counts as an "economic peak". On 12 Nov 2.5 kW was exported for 1.66 SEK while the battery sat at 9 %.
 
-- **Background**: on 30 Oct at 10:30 the battery charged 6.6 kW for 15 minutes and bought 1.34 kWh at 3.14 SEK. The sun then filled the battery by 12:45 and 7.4 kWh was sold at about 1.6 SEK, so the purchase cost about 2 SEK net.
-- **Cause**: before tomorrow's prices are published, the reserve is raised by tomorrow's expected deficit (24.7 kWh that morning). With almost no energy free, the marginal value V was set by the day's most expensive quarters (4.37 SEK), and grid charging compared against that value.
-- **Change**: grid charging (rule 3) now values the battery with the normal reserve. The raised reserve still holds back discharge and export until the prices are known, and solar charging is unchanged.
-- **Verified**: `pytest` 51 passed, 3 expected failures (3 new tests; the purchase test fails on the old code). Backtests: summer unchanged at 147.80 SEK, winter 880.64 → 880.70 SEK. Not yet verified live.
+**Changed**
+- The plan card's solar line follows Solcast p50 per half hour (new option `solcast_today`) with a kW scale following the day's peak.
 
-## What's New in 0.9.72
+**Verified:** pytest 68 · plan B winter 1,339.82 → 1,357.82 · summer 204.80 → 205.02 · without hindsight 304.83 → 320.10 SEK
 
-Fix: a full battery was kept idle while the house bought power at 3.4–3.8 SEK/kWh (27–29 Oct).
+## 0.9.76 – 2026-11-11 – EV charging and phase warnings
 
-- **Cause**: the risk markup on the battery's marginal value V depends on the 3-day production ratio (actual solar / Solcast forecast). The ramp started already at ratio 0.9, so the autumn ratio of 0.74–0.84 (forecast noise, not snow-covered panels) raised V by 40–87 %, to 3.3–4.3 SEK. Buy prices below that made the plan hold the battery and buy from the grid, and with the battery full, solar was sold directly at ~1.1 SEK.
-- **Change**: the markup is 10 % down to ratio 0.6 and then rises linearly to 3.0× at 0.3, as originally intended. Snow-covered panels are handled as before; the SMHI drought markup is unchanged.
-- **Effect tonight**: V 3.91 → 3.08 SEK against a buy price of 3.36 SEK, so the battery covers the house.
-- **Verified**: `pytest` 48 passed, 3 expected failures (8 new tests). Backtests unchanged (summer 147.80, winter 880.64 SEK) since they always run at ratio 1.0.
+**Fixed**
+- EV charging no longer starts on export from the battery. On 11 Nov the charger was ordered 13–16 A "solar" while the battery exported 8 kW with no sun.
+- The phase limiter warns only when the measured current is already over the limit, not every time it throttles a decision (951 warnings in 16 hours).
 
-## What's New in 0.9.71
+**Verified:** pytest 65 · backtests unchanged
 
-Phase B, step B4.1: plan B (the DP planner in shadow mode) now plans with the same physical limits as the executor, so it can be compared fairly with today's planner. Today's planner and the executor are unchanged.
+## 0.9.75 – 2026-11-10 – Plan B can control the battery (B5.1)
 
-- **Background**: on 26 Oct plan B planned 7.9 kW battery charging 06:00–06:45 while the Legionella programme ran the immersion heater (~6 kW on L1/L3). That is about 25 A on L1/L3 against the 17 A limit, so it was not possible. The real SEM's phase limiter held the charging back until the heater stopped, then charged at full power. Plan B's plan counted on quarters that could not be used.
-- **Known loads**: the Legionella window (running, or the window it waits for) is passed to plan B as a load of `heat_pump_patron_power_kw` on `heat_pump_patron_phases` for `legionella_duration_minutes`. `LegionellaManager.planned_window` exposes it. Plan B is also rebuilt when the window changes.
-- **Phase headroom per quarter**: plan B's maximum charge power is the smallest room on any phase, up to the executor's effective limit (`max_current_per_phase` − 2 A). Base load (load − solar) is assumed evenly split, and known loads sit on their own phases. During Legionella that leaves about 0.2 kW instead of 8 kW.
-- **Backtest**: DP now gets the same phase limit (`--dp no_phase_limit=1` turns it off). Winter 1325.29 → 1328.11 SEK, summer unchanged (170.07 SEK).
-- **Evaluation**: the shadow evaluation runs plan B through the same executor and phase limiter as today's plan, on real load per quarter. The procedure is in `docs/decisions.md` B4.1.
-- **Verified**: `pytest` 40 passed, 3 expected failures (7 new tests for the phase cap and the Legionella window).
-
-## What's New in 0.9.70
-
-Phase B, step B4 (HANDOFF.md): the DP planner runs live in **shadow mode**. It plans next to today's planner, with the same inputs and the same timing, but controls nothing; the executor still follows today's plan.
-
-- **New sensors** `Plan B: action`, `Plan B: charge power`, `Plan B: discharge power` and `Plan B: reason`.
-  - `Plan B: reason` has the same attributes as `Plan: reason` (`slots`, `marginal_value_…`, `notes`), plus `daily_load_kwh_by_date` showing the daily load level DP used.
-  - To compare the plans side by side, add a second plan card with `day_plan_sensor:` set to the plan B reason sensor. No card change is needed.
-- **Calibrated daily load level for DP** (from B3), shared by the integration and the backtest: `dp_planner.calibrated_daily_levels()` returns the 7-day mean of net consumption (excluding dump) + 2.53 kWh × degree-day difference, with a 15 °C balance temperature.
-  - The day's temperature comes from the SMHI forecast, otherwise the latest daily mean.
-  - The daily consumption history now also stores each day's mean outdoor temperature (`mean_temp_c`, measured, not damped). Older entries without it are still counted in the mean.
-  - The temperature term starts working once the history has temperatures, after 1–7 days.
-- **DP settings decided in B3**: reserve 0 kWh above min SOC and cycle cost 0.10 SEK/kWh, for DP only. Today's planner and the `cycle_cost_sek_kwh` setting (0.05) are unchanged until DP takes over (B5).
-- **Plan log**: each of the four daily snapshots (00/06/14/20) in `.storage/smart_energy_manager_plan_log` also holds plan B (`plan_b`), for comparing decisions afterwards.
-- **Safety**: plan B is built in a worker thread (~15–25 ms) in its own error handling. A failure is logged as `Plan B (DP): kunde inte byggas` and never affects today's plan or the executor.
-- **Verified**:
-  - `pytest` 33 passed, 3 expected failures (7 new tests for the daily level)
-  - backtests unchanged: DP summer 170.07, winter 1325.29 SEK; V summer 147.80 SEK
-
-## What's New in 0.9.69
-
-Phase B, step B3 (HANDOFF.md): backtest measurement fixes and DP tuning. Behaviour in Home Assistant is unchanged; the DP planner is still not used live.
-
-- **Three backtest errors fixed** (all made the numbers wrong, not the live system):
-  - The simulation's phase limiter started from the measured phase power, which includes the *real* battery's power. The real 5 kW charge sat on top of the simulated 8 kW and charging was cut to 0: 409 of 2,225 DP grid-charge slots in winter. The simulation now has its own controller, and the phase baseline swaps the real battery for the simulated one. Only 2 slots are still cut, by real phase limits.
-  - The load shape was built per UTC hour but looked up per local hour, 1 h off in winter and 2 h in summer. It also used only the last quarter of each hour. It now uses the local hour, averaged over the hour's quarters, like `coordinator._update_hourly_shape()`.
-  - Energy left in the battery at the end was worth nothing (DP ended at 98 %/65 %, V at 79 %/22 %). There is a new **stock-adjusted** saving, valued at the period's mean buy price × √η; `oracle_dp.py` values it the same way.
-- **Calibrated daily load level** (`--load-level calib`, DP only): 7-day actual mean + 2.53 kWh × (degree days for the day − 7-day mean degree days), balance temperature 15 °C.
-  - Error on the daily level: MAE 3.2 kWh, against 6.7 kWh and +3 kWh bias for today's max(yesterday, 7 days).
-  - The live degree-day model (base 1 kWh, 2.39 kWh/DD) sits about 20 kWh/day too low and is always overridden by the floor. That is why the temperature forecast gave nothing in B1.
-- **Results** (savings / stock-adjusted, SEK):
-
-  | | V | DP B2 | DP + calibrated level, reserve 0 | Perfect load | Oracle |
-  |---|---|---|---|---|---|
-  | Summer | 147.80 / 171.37 | 144.88 / 178.64 | **172.55 / 207.27** | 175.53 / 209.67 | – / 237.82 |
-  | Winter | 880.64 / 872.30 | 1196.02 / 1211.32 | **1324.89 / 1336.45** | 1359.10 / 1369.78 | – / 1898.72 |
-
-  - Winter DP reaches 70 % of the oracle, which was the acceptance target; V reaches 46 %. The calibrated level gets within 33 SEK of a perfect load forecast.
-  - Real temperature instead of yesterday's barely matters (1326.88 SEK).
-  - Reserve 2 kWh instead of 0 costs 23 SEK in winter and 6 SEK in summer. A synthetic third day as terminal value is worse (−22 SEK). Cycle cost 0.10 instead of 0.05 gives the same saving with 54 instead of 58 full cycles in winter.
-- **Verified**: `pytest` 26 passed, 3 expected failures; the summer regression test now expects 147.80 SEK.
-
-## What's New in 0.9.68
-
-Phase B, step B2 (HANDOFF.md): a new DP planner, measured in the backtest. Behaviour in Home Assistant is unchanged; the planner is not used live yet.
-
-- **New `dp_planner.py`** (`DPPlanner`, same `build_plan()` interface as `EnergyPlanner`):
-  - dynamic programming over (15-minute slot, stored energy in 0.1 kWh steps), backward recursion over the known price horizon
-  - per slot it picks charge, discharge or idle with real buy/sell prices, round-trip efficiency 0.848 split per leg, 8 kW both ways and a 0.05 SEK/kWh cycle cost on discharge
-  - reserve: min-SOC + 2 kWh (+ EV margin); below the reserve the plan may only charge
-  - terminal value: remaining energy at the mean buy price of the last 24 h; without tomorrow's prices, energy up to tomorrow's deficit is valued at the highest buy price
-  - export slots carry only the exported part as target, since the executor already adds the house deficit
-- **Backtest** (`testdata/backtest.py --planner dp`, new `--load-oracle` for a perfect load forecast):
-
-  | | V planner (B0) | DP | DP + perfect load | Oracle |
-  |---|---|---|---|---|
-  | Summer | 146.25 SEK | **153.30 SEK** (+4.8 %) | 170.06 SEK | 211.94 SEK |
-  | Winter | 833.81 SEK | **1033.74 SEK** (+24 %) | 1175.13 SEK | 1899.91 SEK |
-
-  - Full cycles go up: summer 5.53 → 6.89, winter 25.60 → 43.87.
-  - The per-day temperature level from B1 (`--temp-oracle`) gives nothing with DP either (winter 1031.21 SEK).
-  - The acceptance target (winter ≥ 1330 SEK) is not reached yet. A perfect load forecast is worth ~140 SEK; terminal value, reserve and horizon are next (B3).
-- **Tests**: the planner probe now passes with `DPPlanner` (it discharges through both price peaks); new tests cover the reserve/SOC limits and the export target. CI installs `numpy`.
-- **Verified**:
-  - `pytest` 26 passed, 3 expected failures
-  - backtests with the V planner unchanged (146.25 / 833.81 SEK)
-
-## What's New in 0.9.67
-
-Phase B, step B1 (HANDOFF.md): inputs for the coming DP planner. Behaviour in Home Assistant is unchanged.
-
-- **Battery power vs SOC measured** (~2,700 hours of history):
-  - full 8 kW charging up to 98 % SOC
-  - discharge follows the command down to ~10 %, about 70 % of it at 8–10 %, and stops at 8 %
-  - the DP planner will use 8 kW both ways within 8–98 % with 8 % as a hard floor
-- **Load level per day from the weather forecast** (prepared, not active): `EnergyPlanner.build_plan(daily_load_kwh_by_date=…)` and `coordinator._daily_load_kwh_by_date()` scale the load shape per day using SMHI's forecast daily mean temperature.
-  - New backtest flag `--temp-oracle`: actual temperature as a perfect forecast.
-  - Result: summer unchanged, winter 833.81 → 825.56 SEK (−1 %). A colder tomorrow raises V and the current planner holds and buys more.
-  - So it is not wired into the current planner; it will be connected and measured with the DP planner.
-- **Verified**:
-  - `pytest` 21 passed, 3 expected failures
-  - backtests without the flag identical to B0 (146.25 / 833.81 SEK)
-
-## What's New in 0.9.66
-
-Phase B, step B0 (HANDOFF.md): new baseline before the planner is replaced.
-
-- **Settings changed in HA and in the backtest together**:
-  - grid fee 0.389 SEK/kWh and energy tax 0.36 SEK/kWh, excl. VAT. The buy price is now 1.25 × spot + 0.937, matching the September 2026 invoice; the old values gave ~0.30 SEK/kWh too much.
-  - minimum SOC 8 %, the Sonnen's real stop on the "real" SOC sensor
-  - round-trip efficiency 0.848 (measured)
-- **Fixed: the min/max SOC `number` entities overwrote a changed option after reload.** They restored their previous state (e.g. 5 %) and wrote it to the controller while the planner read the new option (8 %). They now restore only when the option is missing.
-- **New `testdata/oracle_dp.py`**: perfect-foresight upper bound on a backtest CSV, same battery model as the backtest.
-- **New baselines**:
-  - summer: 146.25 SEK (5.53 cycles); oracle 211.94 SEK, so the current planner gets 69 %
-  - winter (2026-01-01…04-30): 833.81 SEK (25.60 cycles); oracle 1,899.91 SEK, so 44 %
-  - savings are lower than before because the cheaper buy price makes stored energy worth less
-  - acceptance for the coming DP planner: winter ≥ 1,330 SEK, summer ≥ 146 SEK
-  - details in `docs/decisions.md`
-- **Verified**:
-  - `pytest` 21 passed, 3 expected failures (summer regression test updated to 146.25)
-  - live buy price 0.9363 SEK/kWh at spot 0
-  - min SOC 8 in options and in the number entity
-
-## What's New in 0.9.65
-
-- **No false warnings at Home Assistant start.** For the first 5 minutes after SEM starts, a battery operating-mode entity or weather entity that is missing or `unavailable` counts as "not ready yet" instead of an error. Seen at the 2026-10-24 18:13 restart: "battery operating mode is not 'manual'" and "could not fetch weather forecast" ~12 s before the Sonnen and SMHI integrations had started. After 5 minutes SEM warns as before, so an integration that has really stopped is still caught. The first plan after a start is built without the weather forecast if it is not available yet; the next rebuild (≤15 min) includes it.
-- **Verified**: `pytest` 21 passed, 3 expected failures; import with HA installed. Not verified live.
-
-## What's New in 0.9.64
-
-Extra hot water (Extra VV) now knows how the boiler actually heats, and the solar-surplus dump follows stricter rules. Background and measurements: `docs/decisions.md` (2026-10-24).
-
-- **The boiler picks compressor or heating element itself.** Measured over 21 Extra VV starts:
-  - With the tank below ~47 °C it heats with the compressor (~3.5 kW, one phase).
-  - Above that it goes straight to the heating element (~5.8 kW, between the two other phases).
-  - SEM used to assume the element every time.
-- **Fixed: false phase-limit export and throttled battery discharge.**
-  - When the compressor ran Extra VV on L2 and the minimum runtime held it on, the phase limit subtracted the element (3 kW) from L1 and L3. That predicted 20 A export and cut battery discharge to 39–600 W for ~10 minutes while the house bought 3.9 kW from the grid (2026-10-24 14:24–14:34).
-  - The phase limit now adds the expected load when Extra VV starts and subtracts only what is actually running when it stops. It uses the heat pump's per-phase currents when configured.
-  - Turning Extra VV off for a phase limit is now a hard stop that the minimum runtime cannot override.
-- **New dump rules (only when the solar surplus would otherwise be sold):**
-  - The surplus must cover the whole expected load, not 70 % of the element as before.
-  - The heat must be worth more than the sell price: mean buy price over the next 24 h divided by 3.5 for the element, the full mean buy price for the compressor.
-  - A running dump's own load counts back into the surplus. This stops the 11-minute on/off cycling: 13 starts in 3 hours on 2026-10-14.
-  - If the surplus covers less than half the load, the dump stops at once, even within the minimum runtime.
-  - The minimum-runtime lock is now known to the controller and the phase limit (`extra_hot_water_locked_on`), not just applied afterwards.
-  - The decision text says whether the compressor or the element is expected, and the heat value versus the sell price.
-- **New optional options** under Heat pump: "Heat pump phase current L1/L2/L3 (A)".
-  - In this installation: L1 = `sensor.ivt_phase_b_current`, L2 = `sensor.ivt_phase_a_current`, L3 = `sensor.ivt_phase_c_current`. B and C can be swapped: the element always loads both equally.
-  - Without these sensors SEM uses the expected load.
-- `EnergyController`: the `extra_hot_water_min_surplus_ratio` parameter is removed (replaced by full coverage).
-- **Verified**:
-  - `pytest`: 21 passed, 3 expected failures. The new dump and phase-limit tests (7) fail on the old code.
-  - Backtests: summer 157.18 SEK, unchanged; Extra VV quarter-hours 16 → 4.
-  - Winter 914.27 → 914.83 SEK, 24.17 → 24.12 cycles; Extra VV quarter-hours 328 → 64; battery discharge differs in 45 quarter-hours because the false phase limit is gone.
-  - The backtest does not cost hot water, so only the battery effect shows.
-  - Not verified live.
-
-## What's New in 0.9.63
-
-Phase A steps 5 and 6 (HANDOFF.md). Documentation only: the code's behaviour is unchanged.
-
-- **Incident narratives moved out of the code**: 26 comment blocks (367 lines) in `energy_planner.py` and `energy_controller.py` now live verbatim in `docs/decisions.md` (entries P01–P16 and C01–C10). Each block is replaced by one line saying why the code does what it does, plus a pointer. Verified by comparing the syntax tree (AST) before and after: identical.
-- **README (en + sv) brought up to date**:
-  - removed the winter mode, `switch.sem_winter_mode`, the `number.sem_winter_*` entities, `number.sem_ev_soc_target` and the winter-mode example automation (none of them exist)
-  - the battery is described as plan-driven instead of the old "discharge above SEK 0.20/kWh"
-  - Legionella is described with the 5–9 day interval, cheapest window and 110 min run time
-  - added `switch.sem_opportunistic_charge` and the "Savings Today" sensor
-- **CLAUDE.md**:
-  - the repo layout now includes `energy_planner.py`, `heat_planner.py`, `savings_tracker.py`, `tests/`, `testdata/backtest.py`, `docs/decisions.md` and the HACS bundle
-  - the pipeline describes the planner and the executor
-  - the `winter` mode is gone
-  - the sections on the old percentile exporter (export floor, absolute minimum price) are replaced by a short description of V and rules 1–4
-- **Not done – step 4 is skipped**: the battery policy in `_auto_mode` is not dead. It controls the surplus left for the boiler and hot water, the phase limiting of EV and heating element, and the battery when there is no plan, and the backtest does not cover those. It moves to phase B together with the executor rewrite.
-- **Verified**:
-  - `pytest`: 14 passed, 3 expected failures
-  - AST of both changed modules identical to before
-
-## What's New in 0.9.62
-
-Phase A step 3 (HANDOFF.md 5.2): removed settings and entities that had no effect since the v1.0 marginal-value planner (v0.9.8) replaced the percentile exporter.
-
-- **Removed from the options flow**:
-  - "Proactive export: price percentile" (`export_sell_percentile`)
-  - "Proactive export: min Solcast tomorrow" (`export_min_solar_tomorrow_kwh`)
-  - "Proactive export: absolute minimum sell price" (`export_min_sell_price_sek_kwh`)
-  - their constants in `const.py` and their texts in `translations/sv.json`/`en.json`
-- **Removed the two `number` entities** `sem_export_sell_percentile` and `sem_export_min_sell_price` (in Swedish installs: `number.smart_energy_manager_proaktiv_export_prispercentil` and `…_proaktiv_export_absolut_minpris`). **After updating, they show as unavailable in HA: delete them under Settings → Entities.** Remove them from any dashboard as well.
-- **Removed unused constructor parameters**:
-  - in `EnergyPlanner`: `export_sell_percentile`, `export_min_sell_price_sek_kwh`, `export_min_solar_tomorrow_kwh`, `sell_solar_min_price`, `cheap_charge_buy_percentile`
-  - in `EnergyController`: `auto_discharge_threshold_sek`
-  - `EnergyController.sell_solar_min_price` is still used by the executor and is unchanged.
-- **Already saved values** of the three keys stay in the config entry with no effect, and disappear the next time the options are saved.
-- `testdata/backtest.py`: the `--percentile` flag and the three `SETTINGS` keys are gone.
-- **Fixed: the CI test job failed** (it was introduced in 0.9.60).
-  - **Savings sensor**: it picked the day in the host's time zone, not in the timestamp's (HA's) own zone, so in UTC the day rolled over two hours late. It now uses the timestamp's zone, and so does the Solcast archive's 06/13 split.
-  - **Summer backtest**: the planner looks up the load-profile hour in the host's local zone (`dt.astimezone().hour`), and the backtest data has UTC timestamps. CI (UTC) therefore got 160.60 instead of 157.18 SEK. The tests and the CI job now run in `Europe/Stockholm`, reproduced locally with `TZ=UTC0`.
-  - **Not fixed**: the planner itself still depends on the host's time zone, which is correct in HA as long as the container's zone matches HA's. Noted for phase B.
-- **Verified**:
-  - `pytest`: 14 passed, 3 expected failures
-  - backtests unchanged to the öre: summer 157.18 SEK, winter 914.27 SEK (with date filter)
-  - both timeline CSVs byte-identical to the run before the change, which proves the removed code was dead
-  - not verified live
-
-## What's New in 0.9.61
-
-Phase A step 2b (HANDOFF.md): two kinds of data that are lost for every day they are not collected.
-
-- **New sensor "Savings Today"** (`unique_id` `sem_daily_savings`): today's savings in SEK compared with the same house without the battery. Resets at midnight.
-  - **Reference**: the grid would have had to take the battery's charging/discharging (`ref_grid = grid − battery power`).
-  - **Prices**: both sides use the buy/sell price in force at that moment.
-  - **Attributes**: import/export kWh and SEK for the actual and reference cases, battery charge/discharge kWh, yesterday's savings, the 30-day sum, and `history` (`[date, SEK]` per day).
-  - **Storage**: kept for 30 days in `.storage/smart_energy_manager_daily_savings`, saved every 15 minutes so a restart only loses minutes.
-  - **Gaps and unavailable sensors**: a step longer than 2 minutes is not integrated, and a cycle is skipped while a grid or battery sensor is unavailable. A 0 W reading would otherwise be booked as a large saving.
-  - **Note**: buy prices still come from the configuration, which according to the September 2026 invoice is about 0.30 SEK/kWh too high. This makes the sensor overstate the value of discharging until the price is corrected together with phase B (`docs/decisions.md`).
-- **Solcast forecast archive**: p50/p10/p90 per 30-minute slot for today and tomorrow, at the first update after 06:00 and after 13:00 each day. The last 120 snapshots (60 days, ~400 kB) are kept in `.storage/smart_energy_manager_solcast_archive`. The backtest's p10 is a fixed 0.7 × actual, so decisions that depend on the real p10–p50 spread (`_GRID_CHARGE_SOLAR_BLEND`, the reserve, the phase-B terminal value) can only be evaluated against this archive.
-- **New pure module** `savings_tracker.py` with 7 tests (`tests/test_savings_tracker.py`).
-- **Verified**:
-  - `pytest`: 14 passed, 3 expected failures
-  - coordinator and sensor import with HA installed
-  - backtests unchanged: summer 157.18 SEK, winter 914.27 SEK (with date filter)
-  - not verified live: the sensor's first value and the archive's first snapshot appear after the integration restarts
-
-## What's New in 0.9.60
-
-First step of the cleanup plan in HANDOFF.md (phase A): automated tests, and one long-standing bug.
-
-- **Fixed: "extra hot water after a negative-price morning" never worked.** `negative_slots_passed_today` counted negative slots that had already started, but in a slot list that only contained future slots, so it was only ever non-zero *during* a negative slot. It now counts over all of today's slots (`parse_nordpool_attributes(..., include_past=True)`).
-- **New condition on that trigger**: the counter now stays above zero for the rest of the day, so the trigger also needs a solar surplus that covers the heating element (the same surplus check as the other two hot-water dump triggers). Without it the ~6 kW element would have started on grid power in the evening peak after any negative price. No effect expected before spring: negative prices are rare from October to March.
-- **Tests that run without Home Assistant**: `tests/` + `pytest.ini`, plus a CI job (`.github/workflows/tests.yaml`). `tests/conftest.py` stubs `homeassistant` when it is not installed. Covered:
-  - the negative-slot counter
-  - the hot-water trigger with and without surplus
-  - the summer backtest result (157.18 SEK ± 1)
-  - two invariants: never charge and discharge at once, and never discharge at min SOC
-- **Known gaps, kept as expected failures** for phase B:
-  - the planner holds a charged battery through both price peaks (HANDOFF.md 4.1)
-  - the executor never clamps surplus charging to `battery_max_soc`: it commands charging at 100 % SOC, which the Sonnen ignores, so the 99 % setting has no effect on solar charging
-- `testdata/backtest.py`: `run_backtest()` now returns its result, so tests can read it.
-- **Verified**:
-  - `pytest`: 7 passed, 3 expected failures, both with HA installed and in a clean venv without HA
-  - backtests unchanged: summer 157.18 SEK (4.98 cycles); winter 914.27 SEK (24.17 cycles) with `--date-from 2026-01-01 --date-to 2026-04-30`
-  - the 907.75 SEK winter figure in HANDOFF.md is the same run without the date filter, so there is no drift
-  - not verified live
-
-## What's New in 0.9.59
+**New**
+- The "Planner" selector (`select.smart_energy_manager_planerare`): *Current (V)* or *Plan B (DP)*. The choice survives restarts, and the plan not selected is built as a shadow.
+- The "Active planner" sensor shows which planner is actually in control. If plan B is missing the executor follows V and logs a warning.
+- The plan card shows plan B automatically while it is in control.
+
+**Verified:** pytest 61 · backtests unchanged · background: plan B would have cost about 171 SEK less over 13.7 days without hindsight
+
+## 0.9.74 – 2026-11-10 – A full battery no longer sits idle before tomorrow's prices
+
+**Fixed**
+- Before tomorrow's prices are published, the planner assumes today's prices for tomorrow instead of reserving the whole battery. On 9 Nov the battery sat at 99 % while the house bought at 4–5 SEK.
+- The assumed tomorrow is never worth more than buying the energy back before it.
+- The plan is not built until the battery's SOC is known after a restart. Before, it was built on the fallback value of 50 %.
+
+**Verified:** pytest 56 · backtests unchanged (summer 147.80 · winter 880.70 SEK)
+
+## 0.9.73 – 2026-11-02 – No expensive grid charging because of the reserve
+
+**Fixed**
+- Grid charging values the battery with the normal reserve, not the raised one that applies until tomorrow's prices are known. On 30 Oct 1.34 kWh was bought for 3.14 SEK and later sold for about 1.6 SEK.
+
+**Verified:** pytest 51 · backtests summer 147.80 · winter 880.64 → 880.70 SEK
+
+## 0.9.72 – 2026-10-29 – Marginal-value markup fixed
+
+**Fixed**
+- The risk markup on V starts rising only at a production ratio of 0.6, not 0.9. Autumn forecast noise raised V by 40–87 %, so a full battery sat unused while the house bought at 3.4–3.8 SEK (27–29 Oct).
+
+**Verified:** pytest 48 · backtests unchanged
+
+## 0.9.71 – 2026-10-27 – Plan B plans with the phase limit (B4.1)
+
+**Changed**
+- Plan B (shadow mode) gets Legionella's heating element as a known load and a per-quarter charge cap from the phase limit. On 26 Oct it planned 7.9 kW charging while the element ran, which was impossible.
+- Plan B is rebuilt when Legionella's window changes.
+
+**Verified:** pytest 40 · DP winter 1,325.29 → 1,328.11 SEK, summer unchanged
+
+## 0.9.70 – 2026-10-25 – DP planner in shadow mode (B4)
+
+**New**
+- The DP planner plans live next to the current planner but controls nothing. Sensors `Plan B: action`, `charge power`, `discharge power` and `reason`.
+- Calibrated daily load level (7-day average + 2.53 kWh per degree day), shared with the backtest. The daily history stores the day's mean temperature.
+- The plan log also stores plan B.
+
+**Verified:** pytest 33 · DP summer 170.07 · winter 1,325.29 SEK
+
+## 0.9.69 – 2026-10-25 – Backtest fixed, DP tuned (B3)
+
+**Fixed (backtest only)**
+- The simulation's phase limiter counted the real battery's charging on top of the simulated one.
+- The load shape was looked up with the wrong hour (UTC instead of local time).
+- Energy left in the battery was valued at zero. New metric: inventory-adjusted savings.
+
+**New**
+- Calibrated load level (`--load-level calib`) for DP. DP reaches 70 % of the oracle in winter (the acceptance target).
+
+**Verified:** pytest 26 · V summer 147.80 · winter 880.64 · DP 172.55 / 1,324.89 SEK
+
+## 0.9.68 – 2026-10-25 – New DP planner (B2)
+
+**New**
+- `dp_planner.py`: dynamic programming over quarter and stored energy (0.1 kWh steps) for the whole price horizon. Used only in the backtest (`--planner dp`), not in production.
+
+**Verified:** pytest 26 · DP summer 153.30 · winter 1,033.74 SEK vs V 146.25 / 833.81 SEK
+
+## 0.9.67 – 2026-10-25 – Inputs for DP (B1)
+
+**New**
+- Battery power vs SOC measured: 8 kW both ways within 8–98 %, hard stop at 8 %.
+- Daily load level from the weather forecast, prepared but not wired in. It made V worse (winter −1 %).
+
+**Verified:** pytest 21 · backtests unchanged (146.25 / 833.81 SEK)
+
+## 0.9.66 – 2026-10-25 – New baseline (B0)
+
+**Changed**
+- Buy price per the invoice: grid fee 0.389 and energy tax 0.36 SEK/kWh excl. VAT. Min SOC 8 %, round-trip efficiency 0.848 (measured).
+
+**Fixed**
+- The min/max SOC number entities overwrote a changed setting after a reload.
+
+**New**
+- `testdata/oracle_dp.py`: upper bound with perfect foresight.
+
+**Verified:** pytest 21 · new baseline summer 146.25 · winter 833.81 SEK
+
+## 0.9.65 – 2026-10-24 – No false warnings at start-up
+
+**Fixed**
+- For the first 5 minutes after start-up a missing operating-mode or weather entity counts as "not ready yet" instead of an error.
+
+**Verified:** pytest 21
+
+## 0.9.64 – 2026-10-24 – Extra hot water: compressor or heating element
+
+**Changed**
+- SEM knows that the boiler picks the compressor (~3.5 kW, one phase) below ~47 °C and the heating element (~5.8 kW, two phases) above.
+- The dump requires the surplus to cover the whole load and the heat to be worth more than the sell price. It no longer toggles on and off (13 starts in 3 h on 14 Oct).
+
+**Fixed**
+- The phase limiter removed the element from the wrong phases while the compressor ran and throttled battery discharge (24 Oct).
+
+**New**
+- Optional settings for the heat pump's phase current L1/L2/L3.
+
+**Verified:** pytest 21 · backtests summer 157.18 (unchanged) · winter 914.27 → 914.83 SEK
+
+## 0.9.63 – 2026-10-24 – Documentation cleanup
+
+**Cleaned up**
+- The incident narratives in the code moved to `docs/decisions.md` (P01–P16, C01–C10). The code is unchanged.
+- README and CLAUDE.md no longer describe winter mode and other features that do not exist.
+
+**Verified:** pytest 14 · the code's syntax tree identical before and after
+
+## 0.9.62 – 2026-10-24 – Dead settings removed
+
+**Removed**
+- The three proactive-export settings and their two number entities, unused since v0.9.8. Remove the entities under Settings → Entities if they show as unavailable.
+
+**Fixed**
+- The CI test job: the savings sensor and the backtest depended on the host's time zone.
+
+**Verified:** pytest 14 · backtests unchanged to the öre (157.18 / 914.27 SEK)
+
+## 0.9.61 – 2026-10-24 – Savings sensor and Solcast archive
+
+**New**
+- The "Savings today" sensor (`sem_daily_savings`): today's savings against the same house without a battery, 30 days of history.
+- Solcast archive: p10/p50/p90 per half hour after 06:00 and 13:00 each day, 60 days in `.storage/smart_energy_manager_solcast_archive`.
+
+**Verified:** pytest 14 · backtests unchanged
+
+## 0.9.60 – 2026-10-24 – Tests without Home Assistant
+
+**Fixed**
+- "Extra hot water after negative prices" never worked, because the counter only saw future quarters. The trigger now also requires a solar surplus large enough for the heating element.
+
+**New**
+- Tests that run without Home Assistant (`tests/`, CI job), including the summer backtest as a regression test.
+
+**Verified:** pytest 7 · backtests summer 157.18 · winter 914.27 SEK
+
+## Older versions (before phase A)
+
+The entries below use the old format.
+
+### What's New in 0.9.59
 
 Three changes from the 2026-10-03…10 weekly review.
 
@@ -342,7 +249,7 @@ Three changes from the 2026-10-03…10 weekly review.
 - **Not changed**: the round-trip efficiency setting (default 0.87 vs measured 0.848). It is the existing `eta_roundtrip` option, no code change needed.
 - **Verified**: syntax check and backtests. Summer 158.81 → 157.18 SEK (−1.0 %), winter 918.94 → 914.27 SEK (−0.5 %) with weight 0.5 (0.25: 158.71 / 915.78; 1.0: 156.98 / 908.09). The backtest's "p10" is a fixed 0.7 × p50 haircut, not real Solcast spread, so it can only show direction — real days have a far wider p10–p50 gap, which is exactly what the change targets. Not verified live; the plan log's first snapshots will show the effect.
 
-## What's New in 0.9.58
+### What's New in 0.9.58
 
 Both Lovelace cards (`sem-charger-card` and `sem-energy-plan-card`) can now be installed via HACS, instead of only by manually copying `www/*.js` to `/config/www/`.
 
@@ -353,20 +260,20 @@ Both Lovelace cards (`sem-charger-card` and `sem-energy-plan-card`) can now be i
 - **Maintenance note**: `build_hacs_bundle.py` must be run (and `dist/smart-energy-manager-cards.js` committed) after any edit to either card — HACS downloads repo files as-is, no build step runs on install. Added to CLAUDE.md's dev workflow.
 - **Verified**: bracket-balance check on the generated bundle (no `node` available in this environment for a real JS syntax check) and a scan for top-level identifier collisions between the two source files (none). Not yet verified against a live HACS install.
 
-## What's New in 0.9.57
+### What's New in 0.9.57
 
 The default Legionella run duration is now 110 minutes (was 60), matching the boiler program's measured runtime (2026-09-26: 12:30–14:21). The cheapest-window choice averages price over this duration, so 60 minutes undercounted the tail of each run.
 
 - **Note**: only affects installs that never saved a value; an already-saved "Körtid (minuter)" keeps its value — set it to ~110 under the Legionella options if it still says 60.
 - **Verified**: syntax check only.
 
-## What's New in 0.9.56
+### What's New in 0.9.56
 
 The reason behind the Legionella decision is now visible as the `reason` attribute on `sensor.smart_energy_manager_legionella_next_due` ("Nästa legionella"), e.g. "väntar på bästa fönstret 27 12:30", "väntar på soligare dag …", "väntar på billigare dag …" or the start reason. Previously the text only reached "Senaste beslut" while a run was active, so waiting was invisible.
 
 - **Read-only**: no behavior change. **Verified**: syntax check only.
 
-## What's New in 0.9.55
+### What's New in 0.9.55
 
 Legionella runs now use a flexible 5–9 day interval and pick the cheapest day and time instead of a fixed 7-day cycle in a fixed 10–15 window.
 
@@ -375,7 +282,7 @@ Legionella runs now use a flexible 5–9 day interval and pick the cheapest day 
 - **Beyond the price horizon**: Solcast `forecast_day_3`–`forecast_day_7` (hourly p10, derived from the configured "tomorrow" entity name; skipped silently if absent) are used so the run waits for a clearly sunnier day (≥ 10 % cheaper) instead of being blind past ~48 h. Solcast only gives solar, so unknown days are priced at the known average buy/sell price.
 - **Verified**: syntax check and an offline run against real prices (not-due, wait-for-best-window, wait-for-sunny-day, deadline-day and never-run cases behaved as intended). Not verified live. Translations (sv/en) updated. `sensor` "Nästa legionella" now shows the earliest eligible date (last run + min days).
 
-## What's New in 0.9.54
+### What's New in 0.9.54
 
 The plan card now shows the real buy price (spot + grid fee + energy tax + VAT) as a stepped line over the spot-price bars, plus the plan's marginal value V (the "sparvärde") as a dashed horizontal line on the same axis — buy price above the line means discharge, below it means buy from the grid and keep the battery.
 
@@ -385,7 +292,7 @@ The plan card now shows the real buy price (spot + grid fee + energy tax + VAT) 
 - **Shared price axis**: bars and line now share one kr/kWh axis (auto-scaled, previously fixed 0-160 öre, which clipped everything above 1.6 SEK — today's spot peaks are 2.5+ SEK). Legend updated ("Spotpris", "Köppris").
 - **Card-only change**, no backend impact. Not run in a browser by me — please hard-reload (Ctrl+Shift+R) and check both themes.
 
-## What's New in 0.9.53
+### What's New in 0.9.53
 
 Fixes the load-shape percentile (`coordinator._get_load_shape()`) producing a physically impossible daily total — found live 2026-09-23 by reconstructing the actual shape store: the P75 shape's evening hours (18:00-23:00) alone summed to 108% of an entire day's consumption. This inflated evening's apparent deficit far beyond reality in the planner's merit-order, which set `V` (the sparvärde) at 4.78 SEK/kWh — above even tomorrow's morning price peak (~3.8 SEK/kWh) — so the plan kept buying fresh grid power straight through the morning peak instead of discharging a battery that had just been charged overnight for ~2.6 SEK/kWh.
 
@@ -393,7 +300,7 @@ Fixes the load-shape percentile (`coordinator._get_load_shape()`) producing a ph
 - **Fix**: renormalize the returned 24-value shape to sum to 1.0 (a valid daily distribution) after picking each hour's percentile. P75's intended signal — some hours are historically riskier than others — survives as a *relative* reweighting between hours; it just no longer inflates the daily total. Applied in both `coordinator.py` (production) and `testdata/backtest.py` (which had its own, independently-written copy of the same bug — that's why earlier backtests in this session didn't catch it).
 - **Verified**: syntax check; reproduced locally against real price/solar/shape data extracted from the live store (`testdata/smart_energy_manager_daily_consumption`, `testdata/smart_energy_manager_hourly_shape`) — before the fix, V-equivalent came out too high to fund the morning peak at all; after, both the morning (07:30) and evening (17:30-21:00) peaks get real `cover_load` discharge instead of idle. Backtests: summer 158.60 → 158.81 SEK (roughly unchanged), winter 943.24 → 918.94 SEK (-2.6%) — a genuine, modest decrease in raw savings, not a regression in the usual sense: the old, over-inflated P75 was accidentally over-cautious in a way that sometimes paid off in the backtest's narrow cost metric without being a sound mechanism.
 
-## What's New in 0.9.52
+### What's New in 0.9.52
 
 Exposes the planner's marginal-value bookkeeping (`V`, `V_charge`, which slot set it, and the full `notes` summary) as attributes on `Plan: anledning`, so a surprising sparvärde (e.g. why a cheaper morning price peak gets skipped in favor of a pricier evening one) can be traced without guessing or reconstructing the plan offline.
 
@@ -402,7 +309,7 @@ Exposes the planner's marginal-value bookkeeping (`V`, `V_charge`, which slot se
 - **Not a behavior change**: read-only exposure of numbers the planner already computes internally.
 - **Verified**: syntax check.
 
-## What's New in 0.9.51
+### What's New in 0.9.51
 
 Fixes the planner projecting near-zero household load for every hour of the day — including tomorrow's morning price peak — on a mild day with little or no heating demand, silently skipping regel 2 (self-consumption discharge) everywhere it should have applied.
 
@@ -410,7 +317,7 @@ Fixes the planner projecting near-zero household load for every hour of the day 
 - **Fix**: `_load_kw_at()` now scales the shape by `_eff_daily_kwh` (`max(predicted_daily_kwh, rolling/yesterday consumption)`) instead of the raw heating-only figure — the same floor `hourly_load_kw`'s own fallback already uses a few lines above, just extended to the shape-based path too. Still reacts immediately upward on a genuinely cold day (the heating-degree-day term dominates the `max()` then); only stops the level from collapsing below already-measured real consumption on a mild one.
 - **Verified**: syntax check and backtests, unchanged (158.60 SEK summer, 943.24 SEK winter incl. April alone) — the available historical datasets don't exercise the divergence this fixes: the summer set is too short for the 21-day shape window to populate, and Sweden's Jan-Apr winter data never has a mild enough day for `_eff_daily_kwh` to differ from the heating-model figure. The bug and fix are both confirmed directly against live sensor data instead (`sensor.smart_energy_manager_predicted_house_load` showing 1.0 kWh with `heating_degree_day: 0`).
 
-## What's New in 0.9.50
+### What's New in 0.9.50
 
 Full color pass on `sem-energy-plan-card.js` for both light and dark themes, after live feedback that the Nordpool-price bars and the "Egenförbrukning" (cover_load) column tint were too close in hue/contrast to tell apart on a small screen in dark mode, that light mode was only somewhat better, and that the axis scale numbers were invisible in light mode.
 
@@ -420,7 +327,7 @@ Full color pass on `sem-energy-plan-card.js` for both light and dark themes, aft
 - **Not a backend change**: card-only.
 - **Verified**: manual review of the diff (no `node` available in this environment to run a JS syntax check; the change is a small, mechanical color/detection swap with no new control flow).
 
-## What's New in 0.9.49
+### What's New in 0.9.49
 
 Fixes the executor silently refusing to charge the battery on a `solar_charge` plan slot even with several kW of solar surplus available. Found live 2026-09-22: SOC sat flat at 16% for 40+ minutes with 8.4 kW solar production against 1.2 kW house load and the plan saying `solar_charge`, "Batteri laddar" in the decision text — but the actual charge setpoint stayed 0 W. The stripped-wattage decision text (v0.9.43) hid the mismatch.
 
@@ -428,7 +335,7 @@ Fixes the executor silently refusing to charge the battery on a `solar_charge` p
 - **Fix**: the `solar_charge` branch now just charges with the available surplus, full stop — the planner already made this call for this exact slot; the executor's job here is to realize it, not re-decide it. `prefer_sell`'s real-time "the plan didn't expect surplus but reality has some" role is unchanged in the idle/cover_load branch, where it's the correct fallback (no planned decision to defer to there).
 - **Verified**: syntax check and backtests (same `apply_plan_executor()` path the backtest actually exercises, not planner-only). Winter: 940.53 → 943.24 SEK, small further improvement. Summer: unchanged at 158.60 SEK.
 
-## What's New in 0.9.48
+### What's New in 0.9.48
 
 Fixes the planner exporting the battery in the afternoon/evening on a day when tomorrow is already known (via Solcast) to be a low-solar day — before Nordpool has published tomorrow's prices (typically ~13:00-14:00). Found live 2026-09-22: at 11:30, with tomorrow's Solcast forecast already at 12.5 kWh (a fraction of a normal day) and today sunny, the plan still scheduled evening export, because the merit-order horizon (`future_slots`, built from `ps.slots`) had no price data for tomorrow yet and so had no way to represent tomorrow's deficit at all. The user pointed out correctly: not knowing tomorrow's *price* doesn't change the fact that we already know tomorrow's *solar* is short.
 
@@ -436,7 +343,7 @@ Fixes the planner exporting the battery in the afternoon/evening on a day when t
 - **Self-limiting**: only active in the window before tomorrow's prices are published; once they arrive, `future_slots` covers tomorrow directly and the existing price-aware merit-order (v0.9.46) takes over — this reserve becomes irrelevant and is not applied on top of it.
 - **Verified**: syntax check and backtests. Winter (2026-01-01 to 04-30): 950.95 → 940.53 SEK — a small further improvement, not a regression (the backtest dataset mostly has full price foresight, so this path rarely triggers there). Summer dataset: unchanged at 158.60 SEK.
 
-## What's New in 0.9.47
+### What's New in 0.9.47
 
 Fixes `sem-energy-plan-card.js`'s "Exporterbart" stat tile (and the matching export phase card) showing a tiny or misleading kWh figure that didn't match the export block actually drawn on the chart. Found live 2026-09-22: at 11:15, with the battery freshly discharged to 16%, the plan already scheduled ~6 kWh of export for 17:45-19:00 (after solar charging filled the battery back to 99%) — but the stat tile showed "1.4 kWh", because it read `DayPlan.total_exportable_kwh`, a snapshot of `batt_kwh - reserved` at the moment the plan was *generated*, not what the plan actually intends to export later once the battery refills.
 
@@ -444,7 +351,7 @@ Fixes `sem-energy-plan-card.js`'s "Exporterbart" stat tile (and the matching exp
 - **Not a backend change**: `DayPlan.total_exportable_kwh` itself is unchanged and still correct for its other use (the planner's own headroom accounting) — this is purely a display fix in the card.
 - **Verified**: syntax check (no backtest coverage — card-only, not part of the planner simulation).
 
-## What's New in 0.9.46
+### What's New in 0.9.46
 
 Fixes the planner reserving battery capacity for the day's most expensive slot (typically the evening peak) at the expense of an earlier, cheaper-but-still-valuable opportunity (the morning peak) — even when a large, high-confidence solar window sits between the two and would refill the battery anyway. Found live 2026-09-22: at 05:30 the plan sat `idle` straight through the actual morning price peak (07:00-07:45, buy up to 4.68 SEK/kWh) while still buying from the grid, because the battery's earmarked value was pinned to the evening peak (19:00, buy 6.51 SEK/kWh) — despite a 41 kWh (P10) solar forecast and a `solar_charge` slot already planned for 13:45.
 
@@ -452,7 +359,7 @@ Fixes the planner reserving battery capacity for the day's most expensive slot (
 - **Fix**: solar surplus that the ceiling would otherwise discard for lack of headroom (`_increment > _headroom`) is now banked as `_banked_extra_kwh` and added to the ceiling for all later timestamps — representing the room a withdrawal earlier in the day would free up for that same solar to refill. Still uses P10 solar and P75 load throughout, so this doesn't reintroduce the earlier P50-optimism regression (v1.0 step 3).
 - **Verified**: syntax check and backtests. Winter (2026-01-01 to 04-30): 952.93 → 950.95 SEK (essentially unchanged). Summer dataset: 159.54 → 158.60 SEK (essentially unchanged).
 
-## What's New in 0.9.45
+### What's New in 0.9.45
 
 The battery's accumulated energy cost (and thus the "Batterisnittpris" sensor) is now reset to zero when the battery is effectively empty, so rounding and sensor errors from the proportional write-down (`cost *= new_energy / old_energy`) no longer carry over from cycle to cycle and make the average price drift.
 
@@ -460,7 +367,7 @@ The battery's accumulated energy cost (and thus the "Batterisnittpris" sensor) i
 - **Scope**: only `BatteryAccumulatedCostSensor._cost_sek` is zeroed; the informational `solar_kwh_total`/`grid_kwh_total` counters are left alone. The average-price sensor reads from it and follows automatically. The cost is only used by regel 4 (export) as `max(V, snittkostnad)`.
 - **Verified**: syntax check. Not covered by the backtest (the accumulator is a Home Assistant sensor, not part of the planner simulation).
 
-## What's New in 0.9.44
+### What's New in 0.9.44
 
 Fixes "idle" plan slots that the plan meant as "buy from the grid, save the battery" still draining the battery in real time. Found live 2026-09-21: from 22:45 the plan said "Nätpris < sparvärde → köper från nätet, sparar batteriet", yet SOC fell 15 → 8 % between 23:40 and 02:10 on 1.4 SEK/kWh hours, the battery sat at its floor from 02:10, and the morning peak (06:30-07:30, 2.06-2.72 SEK/kWh) was bought entirely from the grid — the opposite of CLAUDE.md priority #1.
 
@@ -469,14 +376,14 @@ Fixes "idle" plan slots that the plan meant as "buy from the grid, save the batt
 - **Not changed**: `cover_load` slots that do discharge still cover the full real deficit rather than being capped at the planner's (throttled) power — a possible follow-up.
 - **Verified**: syntax check and backtests. Winter (2026-01-15 to 02-15): savings 93 → 217 SEK (2.0 → 4.6 %), 10.2 → 6.4 equivalent cycles. Summer dataset: 160.4 → 159.5 SEK (essentially unchanged).
 
-## What's New in 0.9.43
+### What's New in 0.9.43
 
 Fixes `sensor.smart_energy_manager_last_decision_reason` ("Senaste beslut") changing state almost every 30s cycle purely because an embedded wattage number (house load, battery setpoint) jittered by a few watts — even when the actual reasoning behind the decision hadn't changed at all.
 
 - **Fix**: `SmartEnergyDecisionReasonSensor` now strips embedded power values (`\d+W`) from the reason text before returning it. No new sensor needed — the same numbers are already available as dedicated entities (`Husförbrukning`, `Laddningssetpunkt batteri`, `Urladdningssetpunkt batteri`), so nothing is lost, only de-duplicated. The sensor's state now only changes when the qualitative decision path actually changes.
 - **Verified**: syntax check, regex tested against real logged reason strings (prices and kWh values pass through untouched, only `NNNW` tokens are removed).
 
-## What's New in 0.9.42
+### What's New in 0.9.42
 
 Rewrites two of the most-seen decision/plan reason strings, which used a comparative word ("billigare"/"cheaper") without stating what it was being compared to — read on their own, they sounded self-contradictory (e.g. "nät billigare" next to a 2.37 SEK/kWh price, which isn't cheap in absolute terms; it meant "cheaper than spending the battery's reserved value").
 
@@ -485,7 +392,7 @@ Rewrites two of the most-seen decision/plan reason strings, which used a compara
 - **Not done this release**: the broader jargon cleanup (V/V_charge/merit-order/economic_peak used verbatim in Swedish sentences) and the still-open `_slot_load_kwh`/"verkligt solöverskott" mislabeling bug (logs `battery_charge_power_w` under a label that says it's the real solar surplus) — flagged for a follow-up, not blocking this readability fix.
 - **Verified**: syntax check, full backtest run (no crash, unchanged savings — text-only change).
 
-## What's New in 0.9.41
+### What's New in 0.9.41
 
 Fixes regel 2 (self-consumption discharge) spending battery capacity the merit-order had already earmarked for a higher-value future opportunity — the same blind spot regel 4 (export) was already fixed for, never applied to regel 2. Found live 2026-09-16: the battery drained from 24% to 15% between 00:55-03:57 on ordinary self-consumption (each hour individually cleared `buy_price > V + cycle_cost`), projected to hit the 5% floor around 07:00-07:20 — right in the middle of the morning price peak the whole system's top CLAUDE.md priority exists to protect.
 
@@ -493,7 +400,7 @@ Fixes regel 2 (self-consumption discharge) spending battery capacity the merit-o
 - **Fix**: new `_accepted_cover_kwh_by_slot` (same pattern as regel 4's export map, built from `_accepted` opportunities valued at `buy_sek`). Regel 2's discharge is now also capped by what the merit-order specifically earmarked for that slot — if nothing was earmarked (because it's reserved for something better later), the slot now falls through to grid import instead of spending reserved battery.
 - **Verified**: syntax check, full backtest run (no crash, unchanged output on this dataset — the earmark cap didn't bind differently for these particular historical days).
 
-## What's New in 0.9.40
+### What's New in 0.9.40
 
 Fixes regel 3 (grid_charge) filling from whatever slot came first chronologically instead of the cheapest available slot — found live 2026-09-15: `V_charge` jumped to 2.87 SEK/kWh (battery had drained further since the evening's earlier plan), which meant essentially every remaining hour that night cleared the `buy_price + cycle_cost < V_charge` gate, not just the genuinely cheap ones — and the planner charged starting immediately at 21:15 (2.19 SEK/kWh) instead of waiting for the near-free hours after midnight (as low as 0.07-0.10 SEK/kWh spot).
 
@@ -501,14 +408,14 @@ Fixes regel 3 (grid_charge) filling from whatever slot came first chronologicall
 - **Fix**: slots that pass the gate are now collected into candidates instead of charged immediately; a second pass sorts them by `buy_sek` ascending and allocates the total need cheapest-first. A third pass replays the finalized plan to recompute each slot's `battery_soc_est_pct`, since reordering the charge changes the SOC trajectory for everything after it.
 - **Verified**: syntax check, full backtest run (no crash; savings improved slightly, 159.40→160.39 SEK over the test period — consistent with charging at genuinely cheaper hours).
 
-## What's New in 0.9.39
+### What's New in 0.9.39
 
 Fixes `sem-energy-plan-card.js`: the `cover_load` ("Egenförbrukning") plan-zone shading used the exact same blue as the Nordpool price bars (`#2a78d6`), so the two visually merged into a single indistinguishable blue mass across most of the chart (cover_load covers most night/day hours). Also hardcoded `#888` for the "Nattvila" phase-card label, ignoring the dashboard's light/dark theme.
 
 - **Fix**: `cover_load` now uses a distinct purple (`#7f77dd`), separating it visually from the price bars (still blue) and from the other three plan actions (orange/green/amber). The "Nattvila" label now uses `var(--secondary-text-color)` instead of a fixed gray, so it stays legible in both themes.
 - Copy `www/sem-energy-plan-card.js` to `/config/www/custom_components/` (not `/config/www/` directly) and hard-reload the browser (Ctrl+Shift+R) to see the change.
 
-## What's New in 0.9.38
+### What's New in 0.9.38
 
 Wires the learned hourly consumption shape (`load_shape_p75`, already used by `energy_planner.py` for V/V_charge) into `_auto_mode()`'s dynamic evening-fill need calculation (`evening_needed_kwh`), which previously spread the night's energy need flat across all dark hours (`hourly_load_kw × hours_dark`) — missing the morning-peak-vs-overnight-lull shape entirely and underestimating how much the battery needs to survive until solar takeover.
 
@@ -516,7 +423,7 @@ Wires the learned hourly consumption shape (`load_shape_p75`, already used by `e
 - **No behavior change yet in practice**: with the current 5-day, evening-only shape history, every dark hour still falls back to the flat average — this release only becomes active as real night/morning coverage accumulates under v0.9.37's more frequent saves. Deliberately shipped now so it's ready rather than needing another deploy+restart once the data exists.
 - **Verified**: syntax check, full backtest run (no crash, unchanged output — expected, since the backtest's `EnergyState` doesn't set `load_shape_p75`, so it stays on the flat-average fallback exactly as before).
 
-## What's New in 0.9.37
+### What's New in 0.9.37
 
 Fixes the hourly consumption-shape learner (`_update_hourly_shape`, introduced v0.9.6) losing an entire day's accumulated data on any same-day restart — found while investigating why `evening_needed_kwh` underestimates overnight/morning energy need: the live Storage file showed 5 days of history, but every single day had data only for late-evening hours (roughly 18:00-23:00) — night and morning hours were `null` across the board, because the shape data was only ever persisted to disk at midnight day-rollover, so an evening restart (routine during active development, like this session) wiped everything accumulated since the previous midnight.
 
@@ -524,7 +431,7 @@ Fixes the hourly consumption-shape learner (`_update_hourly_shape`, introduced v
 - **Not yet done**: the learned shape (`load_shape_p75`) still isn't wired into `_auto_mode()`'s `evening_needed_kwh` calculation (energy_controller.py:694), which still uses a flat `hourly_load_kw * hours_dark` average instead of the actual per-hour shape — deliberately left for a follow-up once real night/morning coverage has accumulated with this fix in place.
 - **Verified**: syntax check.
 
-## What's New in 0.9.36
+### What's New in 0.9.36
 
 Fixes the phase-limit oscillation still occurring in production *after* v0.9.34 shipped — live data 2026-09-14 (19:41-19:45) showed the exact same 8000W↔~3000W bang-bang pattern the v0.9.34 fix was meant to eliminate, at 30s intervals, `number...number_discharge` (SEM's own command entity, confirmed via history) toggling every single cycle even though v0.9.34's `_last_battery_command_w` mechanism was already deployed and running.
 
@@ -532,7 +439,7 @@ Fixes the phase-limit oscillation still occurring in production *after* v0.9.34 
 - **Fix**: `_apply_phase_limits()` takes a new `update_memory` parameter (default `True`). `_auto_mode()`'s two internal calls now pass `update_memory=False`, since `apply_plan_executor()` always runs afterward in auto mode and owns the final write. `apply_plan_executor()`'s two early-return paths (negative price, no plan slot for `now`) now finalize the memory themselves on the way out, since those are the cases where it doesn't re-run `_apply_phase_limits()` itself.
 - **Verified**: syntax check, full backtest run (no crash).
 
-## What's New in 0.9.35
+### What's New in 0.9.35
 
 Fixes extra hot water dumping (`should_dump_to_hot_water`, wired in 0.9.31) triggering on a trivial solar surplus and immediately importing most of its 6kW draw from grid/battery — found via live data 2026-09-14: it fired twice in the evening (18:20 and 18:37) with only 300-500W of actual solar surplus and a sell price of 2.93-3.06 SEK/kWh (high, not low), each time locking the heater on for the full 11-minute minimum-runtime window.
 
@@ -541,7 +448,7 @@ Fixes extra hot water dumping (`should_dump_to_hot_water`, wired in 0.9.31) trig
 - **Same fix applied to the sibling "battery full" trigger**: `varmvatten_ok`'s other surplus-gated branch (battery at max SOC with leftover surplus) had the identical flat-floor bug at 500W, found during the same audit — now shares the same ratio-based `battery_full_dump` check.
 - **Verified**: syntax check. Simulated against today's actual logged data (2026-09-14): with the new gate, none of the four real triggers that fired today (16:30, 16:53, 18:20, 18:37 — solar never exceeded ~1.9kW at any of them, all well under the 4.2kW/70% floor) would have fired.
 
-## What's New in 0.9.34
+### What's New in 0.9.34
 
 Fixes a real live oscillation found via data analysis 2026-09-14: the battery repeatedly swung between full 8000W charge and a hard-clamped value every 30-second decision cycle for hours overnight, instead of settling smoothly.
 
@@ -550,14 +457,14 @@ Fixes a real live oscillation found via data analysis 2026-09-14: the battery re
 - **Verified**: syntax check, a full backtest run (no crash, savings unchanged/marginally improved: 4.0% vs 3.9%), and a standalone scenario test reproducing the exact lag condition — confirms the fix lets charging ramp up cycle-over-cycle instead of oscillating back down to a re-clamped value.
 - **Known tradeoff**: `_last_battery_command_w` starts at 0.0 after a restart (briefly assumes no ongoing battery activity), a one-cycle (30s) self-healing discrepancy — same class of benign startup transient as the SMHI race condition found earlier this session.
 
-## What's New in 0.9.33
+### What's New in 0.9.33
 
 Fixes `sem-charger-card.js`: the battery SOC bar (the selected car's battery, not the house battery) stayed visible after deselecting a car, showing a stale/meaningless value with no car to attribute it to.
 
 - **Fix**: the `.batt-side` element is now hidden (`hidden` attribute, with an explicit `.batt-side[hidden]{display:none}` override since the card's own `display:flex` rule would otherwise beat the browser's default `[hidden]` styling) whenever no car is selected, and the SOC value is only read/rendered while a car is selected.
 - Copy `www/sem-charger-card.js` to `/config/www/custom_components/` (not `/config/www/` directly) and hard-reload the browser (Ctrl+Shift+R) to see the change.
 
-## What's New in 0.9.32
+### What's New in 0.9.32
 
 Wires step 6 (EV scheduling) into live control as a deadline-guarantee fallback — solar-opportunistic charging is unchanged and still takes priority; the new scheduler only tops up from the cheapest remaining grid slots if solar alone won't reach the target SOC in time.
 
@@ -567,7 +474,7 @@ Wires step 6 (EV scheduling) into live control as a deadline-guarantee fallback 
 - **Deliberately not done**: legionella scheduling (the other half of step 7 point 6) stays on its own existing, live-verified mechanism — not migrated to the generic `schedule_cheapest_window()` helper.
 - **Verified**: syntax check across all six touched files, a full backtest run (no crash, unchanged 3.9% savings — expected, since no backtest dataset configures a deadline entity, so the new path stays fully inert there), and a standalone scenario test confirming `build_plan()` schedules the exact needed kWh into the cheapest pre-deadline slots and the new current-clamping formula stays within `MIN_EV_CURRENT`/`MAX_EV_CURRENT`.
 
-## What's New in 0.9.31
+### What's New in 0.9.31
 
 Wires step 7 point 6's first half ("dump surplus to hot water instead of selling") into live control.
 
@@ -575,7 +482,7 @@ Wires step 7 point 6's first half ("dump surplus to hot water instead of selling
 - **Verified**: syntax check, and a full backtest run confirming no crash and unchanged savings (3.9%) — expected, since this branch only sets `decision.extra_hot_water`, never touches battery charge/discharge power, which is what the backtest's savings metric measures.
 - **Not done this release**: step 6 point 6's second half (`schedule_cheapest_window()` for legionella scheduling) is deliberately NOT wired in — `legionella.py` already has a different, live-verified scheduling mechanism (`price_schedule.is_best_opportunity_now()`, P5-4) solving essentially the same problem, and swapping it for `schedule_cheapest_window()` would replace working health-safety-relevant logic, not just connect an unused function. Left for a separate decision.
 
-## What's New in 0.9.30
+### What's New in 0.9.30
 
 Wires step 7 point 5 ("solar drive via the boiler's own path") into live control — the first of `heat_planner.py`'s five functions to actually reach `coordinator.py`/`energy_controller.py`.
 
@@ -583,7 +490,7 @@ Wires step 7 point 5 ("solar drive via the boiler's own path") into live control
 - **Verified**: syntax check across all five touched files, plus a full backtest run (`testdata/history_jan_apr2026`) confirming no crash and unchanged savings (3.9%) — expected, since no `boiler_pvmaxcomp_entity` is configured in the backtest, so the new write path stays inert and doesn't touch the battery/EV decisions it runs alongside.
 - Step 7 points 2, 4, 6 and Step 6 (EV scheduling) remain unwired — point 2 needs a real cold-weather calibration window against `binary_sensor.eltillskott_aktivt`, point 4 needs a calibrated COP model (the raw sensor is too noisy), and points 6/Step 6 are separate, larger wiring efforts still in progress.
 
-## What's New in 0.9.29
+### What's New in 0.9.29
 
 Adds weekly-grouped real-data tracking of the export floor's pretakeover deficit risk — the first step toward evaluating whether `main`'s flat reserve buffer is safe, not a fix itself.
 
@@ -592,7 +499,7 @@ Adds weekly-grouped real-data tracking of the export floor's pretakeover deficit
 - **Verified**: syntax check, and a full backtest run against `testdata/history_jan_apr2026` confirmed no crash and unchanged planner output (3.9% savings, 912 export slots) — expected, since this addition is coordinator-level observation only and isn't exercised by the planner-only backtest.
 - Same tracking mechanism as the hotfix branch's v0.9.15, ported (not a copy-paste — `main` has no `_EXPORT_PRETAKEOVER_MARGIN_KWH` constant to compare against, since it has no equivalent fix yet).
 
-## What's New in 0.9.28
+### What's New in 0.9.28
 
 New baseline data collection for step 7, point 2's future tuning ("keep the immersion heater out") — `export_history` gains a fourth history dimension.
 
@@ -601,7 +508,7 @@ New baseline data collection for step 7, point 2's future tuning ("keep the imme
 - **Why now, in September**: collecting this starting today (even though it'll mostly be zeros until real cold weather) means a real baseline exists the day step 7 point 2's `elpatron_avoidance_setpoints()` (v0.9.25, still not wired to live control) is ready to be tuned against `binary_sensor.eltillskott_aktivt` this winter.
 - Same addition applied to the v0.9.13 hotfix branch as v0.9.14, since that's the branch actually running live — data collection starts on the real system, not just `main`.
 
-## What's New in 0.9.27
+### What's New in 0.9.27
 
 Wires the drought-risk markup (v0.9.17, "Torkrisk-påslag från SMHI:s väderprognos") into live control — the intentional stop-and-ask point from that release, now explicitly requested.
 
@@ -610,7 +517,7 @@ Wires the drought-risk markup (v0.9.17, "Torkrisk-påslag från SMHI:s väderpro
 - **`current_outdoor_temp_c=state.outdoor_temp_c` and `weather_forecast=...` now passed into `build_plan()`** — previously always `None`/unset, so `_simulate_drought_days()` and `_drought_markup()` (implemented and backtest-calibrated since v0.9.17) never actually ran with real data.
 - **Known caveat, unchanged from v0.9.17's own conclusion**: the mechanism is verified safe (no regression) but *unproven* — the only backtest available showed it byte-identical to not having it at all, because the drought period in that dataset never happened to trigger rule 2/4's sell/hold-back side. Whether it helps in a real winter drought is not yet known and won't be until one occurs live.
 
-## What's New in 0.9.26
+### What's New in 0.9.26
 
 Fixes `_apply_phase_limits()` approximating per-phase current from power/voltage instead of using the real current sensors that were already configured and wired but never read.
 
@@ -619,7 +526,7 @@ Fixes `_apply_phase_limits()` approximating per-phase current from power/voltage
 - **Verified**: five hand-built scenarios — no current sensor configured (falls back to power, no regression), current sensor matching power at high load, current sensor showing higher current than power implies (the reactive-current case the fix targets), export direction with a magnitude-only current sensor, and a real overcurrent case (18A on an uncontrollable phase) still detected and logged correctly without crashing.
 - Same fix applied to the v0.9.12 hotfix branch (built on `a57cea2`, which has the identical function) as v0.9.13.
 
-## What's New in 0.9.25
+### What's New in 0.9.25
 
 Step 7, points 2 & 5 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — two standalone, tested functions added to `heat_planner.py`. **Still not wired to live control**, same boundary as points 4/6.
 
@@ -627,7 +534,7 @@ Step 7, points 2 & 5 of the [v1.0 implementation plan](docs/v1_implementation_pl
 - **`solar_compressor_boost_kw(...)`** (point 5 — "solar operation via the boiler's own path"): `number.boiler_pvmaxcomp` (0-25 kW, verified live at 0) is the compressor's max power during PV surplus — the boiler's own built-in solar mode. The function just sets the ceiling the boiler regulates the compressor within; it deliberately takes the surplus left over *after* SEM's own priority order (house load → EV → battery), not raw solar surplus, so the boiler's solar mode doesn't compete with SEM's own priorities for the same kWh.
 - **Verified**: 4 + 5 hand-built scenarios respectively — all passing.
 
-## What's New in 0.9.24
+### What's New in 0.9.24
 
 Fixes a real live bug found via a live incident report on 2026-09-11: the battery sat idle at 63% SOC while the grid bought ~537W at the day's peak price (2.14 SEK/kWh) to cover a house deficit.
 
@@ -636,15 +543,15 @@ Fixes a real live bug found via a live incident report on 2026-09-11: the batter
 - **Verified**: three hand-built scenarios replaying the actual incident's readings (solar 468W, load 933W, SOC 63%, price 2.14 SEK/kWh) — confirmed the bug reproduces on the pre-fix code (discharge stayed 0W) and resolves on the fix (discharge 465W, matching the real deficit); a control case with genuine solar surplus confirmed no regression; a floor-protection case confirmed the battery isn't touched at `battery_min_soc`.
 - Same bug and fix applied to the v0.9.11 hotfix branch (built on `a57cea2`, which has the identical branch) as v0.9.12.
 
-## What's New in 0.9.23
+### What's New in 0.9.23
 
 - **New service: `smart_energy_manager.export_history`** — exports the four internal history stores (production ratio, daily consumption, hourly load shape, solar takeover observations) to CSV files. These were already tracked internally (in `.storage/`) but never user-visible. Defaults to `config/www/smart_energy_manager_export/`, downloadable via `/local/smart_energy_manager_export/`; an optional `path` field overrides the target directory.
 
-## What's New in 0.9.22
+### What's New in 0.9.22
 
 Removed `solar_power_l1_entity`/`l2`/`l3` (Configure → Solar) — confirmed dead: read into `EnergyState.solar_power_l1/l2/l3` in `coordinator.py` but never consumed anywhere in `energy_controller.py`, `energy_planner.py`, or any sensor. Phase protection (`_apply_phase_limits`) uses `state.grid_power_l1/l2/l3` (the grid meter's net per-phase readings, which already reflect solar's effect) plus computed deltas for battery/EV/immersion heater — it never needed solar's raw per-phase output separately. Removed the config keys, schema fields, `EnergyState` fields, and translations; no behavior change.
 
-## What's New in 0.9.21
+### What's New in 0.9.21
 
 Fixes a crash introduced by v0.9.20's `damped_outdoor_temp_entity` field, hit live on 2026-09-10 right after configuring it: `Error updating Smart Energy Manager: cannot access local variable 'outdoor_temp' where it is not associated with a value`.
 
@@ -652,7 +559,7 @@ Fixes a crash introduced by v0.9.20's `damped_outdoor_temp_entity` field, hit li
 - **Fix**: read `outdoor_temp` from `CONF_OUTDOOR_TEMP_ENTITY` unconditionally, before the damped/rolling-average branching, since it's needed regardless of which value feeds the consumption model.
 - Same bug existed in the v0.9.8 hotfix branch (built on `a57cea2`, which already had the damped-temp feature); fixed there too as v0.9.9.
 
-## What's New in 0.9.20
+### What's New in 0.9.20
 
 Fixes a real live bug found via a fresh incident report on 2026-09-10 (running v0.9.7/`a57cea2` in production): the battery grid-charged to ~98% in the early afternoon on a sunny day with 37+ kWh of solar still forecast, because the system believed **zero** solar was left for the rest of the day.
 
@@ -661,7 +568,7 @@ Fixes a real live bug found via a fresh incident report on 2026-09-10 (running v
 - **Action required after deploying**: in HA, set the new **Solcast detailed forecast today (30 min)** option to `sensor.solcast_pv_forecast_forecast_today` (or whichever Solcast sensor exposes `detailedForecast` on your instance) — the field defaults to blank, so nothing changes until this is set.
 - **Not yet verified against a backtest or a live redeploy** — this was diagnosed and fixed directly from the live incident report and confirmed HA sensor attributes, not yet replayed through `testdata/backtest.py`.
 
-## What's New in 0.9.19
+### What's New in 0.9.19
 
 Two related fixes to rules 3 and 4 (grid-charge and export) in `energy_planner.py`, triggered by a real live incident on 2026-09-10 (main was briefly deployed after v0.9.18's release, per explicit request, and grid-force-charged at full power at 09:11 despite Solcast showing 75 kWh of solar still forecast for the day). **Still not wired to live control; still not recommended for deployment — see below for why this doesn't change that.**
 
@@ -671,7 +578,7 @@ Two related fixes to rules 3 and 4 (grid-charge and export) in `energy_planner.p
 - **Verified**: hand-built scenarios for both rules (incident replication + a "no better alternative exists" control case, confirming the fix doesn't block legitimate grid-charging/export) — all passing. Backtest against `testdata/history_jan_apr2026`: rule 3 alone showed no measurable change (this dataset is winter-skewed; the failure mode is more of a spring/summer pattern), but rule 4's fix improved savings from 3.7% to **3.9%** — simulated export dropped from ~41.5 kWh to 11.3 kWh over the period, holding capacity for better-priced moments instead of dumping it at the first acceptable price.
 - **Checked all four rules for the same blind spot, not just 3 and 4**: rule 1 (solar-charge) is already protected by its own existing same-day merit-order mechanism from step 5 (`_charge_priority_kwh`); rule 2 (cover load from battery) isn't exposed the same way, since its action size is capped by the slot's own already-existing physical deficit, not a discretionary "how much to acquire" decision the way rules 3 and 4 both are.
 
-## What's New in 0.9.18
+### What's New in 0.9.18
 
 Response to an external code review (2026-09-10) of the v1.0 plan against the actual code. **Not wired to live control beyond one live-safety fix; still not recommended for deployment as a whole — see the backtest-methodology finding below, which is more consequential than any single item on the review's list.**
 
@@ -681,7 +588,7 @@ Response to an external code review (2026-09-10) of the v1.0 plan against the ac
 - **Major backtest-methodology finding**: `testdata/backtest.py` never passed `load_shape_p50/p75` or a real `predicted_daily_kwh` to `build_plan()` — every step 0-3 savings percentage reported this entire project (including the "step 2 = 5.5%, step 3 = 3.9%" comparison from v0.9.16/17) was computed against a flat/reactive load fallback, not the load model production has always actually used. Wired in a faithful reconstruction (same formula as `coordinator.py`, verified against the live config — no override exists, so the defaults are exactly what's live). Result once fixed: **step 2 collapses to 0.1% savings** (battery barely cycles, sits near-full most of the period) while **step 3 (current main) becomes comparatively better at 3.7%** — the opposite of every prior comparison this session. Consistent with the already-documented "battery too small for a full winter night" finding, not an obvious bug — but **unverified against real hardware**: the integration didn't exist before end of June 2026, so there's no real deployment history from the backtest's January–April window to cross-check against.
 - New CLI-adjacent test-only additions in `testdata/backtest.py`: causal (no lookahead) rolling load-shape and degree-day-model reconstruction, mirroring `coordinator.py`'s own logic exactly.
 
-## What's New in 0.9.17
+### What's New in 0.9.17
 
 Drought-risk markup on V, driven by SMHI's weather forecast — an attempt at the horizon problem from a different angle than v0.9.16's data extension. **Not wired to live control, not recommended for deployment. Verified safe (no regression) but unproven (net-zero effect) in backtest.**
 
@@ -692,7 +599,7 @@ Drought-risk markup on V, driven by SMHI's weather forecast — an attempt at th
 - New test tooling: `testdata/history_jan_apr2026/weather_oracle.csv` + `_build_weather_oracle.py` (real historical weather from Open-Meteo, used as an oracle stand-in for a perfect SMHI forecast — an optimistic upper bound, not a real forecast simulation) and a `--drought-oracle` flag in `testdata/backtest.py`.
 - **Not done**: the `coordinator.py`/`const.py`/`config_flow.py` wiring (`CONF_WEATHER_ENTITY`, the actual `weather.get_forecasts` call) — the deliberate stop point before touching live-update code, per this session's standing rule.
 
-## What's New in 0.9.16
+### What's New in 0.9.16
 
 Extended the real-data backtest window from one month to four, at explicit request. **No code changes — testdata and documentation only, not a functional release.**
 
@@ -701,7 +608,7 @@ Extended the real-data backtest window from one month to four, at explicit reque
 - **Backtest results over the full 4 months**: step 2 (`a57cea2`, safe/deployed) — 5.5% savings (625.04 SEK, 5.21 SEK/day), well above January alone (1.3%) since Feb–Apr have far more sun. Step 3+5+6 (current, undeployed) — 3.9% (445.25 SEK, 3.71 SEK/day). The gap versus step 2 narrows sharply compared to January alone (1.3% vs 0.2% there) but doesn't close — the 48h-horizon weakness is worst in deep winter but doesn't fully disappear once spring months are mixed in.
 - See `docs/v1_implementation_plan.md`, "Utökning till januari–april 2026" under "Steg 2 implementerat", for the full writeup.
 
-## What's New in 0.9.15
+### What's New in 0.9.15
 
 Step 7, point 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the dump/disinfection scheduling rules, by explicit request. **Still not wired to live control, not recommended for deployment.**
 
@@ -710,7 +617,7 @@ Step 7, point 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md
 - Both verified with hand-built scenarios (5 for the dump rule, 4 for the window scheduler) — all passed.
 - **Scope boundary extended on purpose**: `legionella.py` was deliberately left untouched too, not just `coordinator.py`/`energy_controller.py` — it's a stateful class with real side effects (drives a switch, persists run state, has hygiene/safety implications if it misbehaves), just as much "live control" as `apply_plan_executor()` despite the different filename. Same caution as steps 4 and 6, applied to the right file regardless of its name.
 
-## What's New in 0.9.14
+### What's New in 0.9.14
 
 Step 7 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the house as thermal storage — point 4 only (the COP profitability rule), by explicit request. Points 1 and 3 (room-level thermal regression/strategy) are parked: a live-data check found the room temperature sensors only have data since ~2026-07-25 (~6 weeks), not since October 2025 as the plan assumed — a meaningful regression needs a heating season. **Not wired to any live control, not recommended for deployment.**
 
@@ -720,7 +627,7 @@ Step 7 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the
 - Verified against six hand-computed scenarios (large price gap/modest COP loss → profitable; small gap/large COP loss → not; equal prices → never; no COP loss → always profitable when peak > preheat; undefined COP → never; preheat pricier than the peak → never) — all passed.
 - **Not done**: wiring this into an actual preheat decision/schedule (which slot is "preheat" vs. "peak", where the COP values come from in practice, actually driving `number.boiler_tempparmode` or equivalent) — requires `coordinator.py`/`energy_controller.py`, same boundary as steps 4 and 6.
 
-## What's New in 0.9.13
+### What's New in 0.9.13
 
 Step 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the car as a schedulable load. **Planning-only, not wired to live control, still not recommended for deployment.**
 
@@ -730,7 +637,7 @@ Step 6 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the
 - **Explicitly out of scope for this change, per user instruction**: wiring this schedule into actual charger dispatch (`coordinator.py`/`energy_controller.py`'s live EV control) and the plan's point 3 invariant ("the car only charges from solar surplus or explicitly scheduled slots") — both require touching live control code, held off pending the same review as step 4's pause.
 - `energy_planner.py` still contains only step 3+5+6's code, not recommended for deployment. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance.
 
-## What's New in 0.9.12
+### What's New in 0.9.12
 
 Step 5 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — summer charging timing. **Still not recommended for deployment** (part of step 3's undeployed rewrite).
 
@@ -739,7 +646,7 @@ Step 5 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — sum
 - Phase protection (`_apply_phase_limits`) is unaffected — it already runs unconditionally at the end of `apply_plan_executor()` for every decision, so the more active exporting this step can produce is already clamped by existing, deployed protection.
 - `energy_planner.py` still contains only step 3's code (plus this step 5 addition), not recommended for deployment. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance.
 
-## What's New in 0.9.11
+### What's New in 0.9.11
 
 Closed part of the remaining step 3 gap by re-enabling `battery_avg_cost_sek_kwh` as a floor under rule 4 (export) — **still not recommended for deployment**, but the gap to step 2 narrowed further.
 
@@ -748,7 +655,7 @@ Closed part of the remaining step 3 gap by re-enabling `battery_avg_cost_sek_kwh
 - **Result:** export average price rose from 1.43 to 1.72 SEK/kWh (fewer, better-quality exports — 26.6 kWh instead of 34.0, all clearing the real cost floor). Net cost improved from −99.26 to −102.87 SEK over the same 10 days. Step 3 now reaches **~90%** of step 2's profit (up from ~86%), gap narrowed from ~15.6 to ~12.0 SEK / 10 days.
 - `energy_planner.py` still contains only step 3's code, not recommended for deployment. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance.
 
-## What's New in 0.9.10
+### What's New in 0.9.10
 
 A fifth finding — this time in the **backtest tooling itself**, not the planner — that substantially revises how step 3's prior results (v0.9.8's 45%, v0.9.9's 55%) should be read. **Still not recommended for deployment**, but the gap to step 2 turns out to be much smaller than previously reported.
 
@@ -757,7 +664,7 @@ A fifth finding — this time in the **backtest tooling itself**, not the planne
 - Also added a cycle-cost term to rule 2 (self-consumption discharge), matching the cost already applied to rules 3/4 — consistent with "wear cost per cycled kWh" applying equally regardless of which of the three discharge paths a kWh takes. No measurable backtest effect on its own, but correct to keep the four rules' thresholds consistent.
 - `energy_planner.py` still contains only step 3's code. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance. The now-small remaining gap (~15.6 SEK / 10 days) is judged worth continuing to close with targeted fixes rather than requiring a new architecture, per `docs/v1_implementation_plan.md`.
 
-## What's New in 0.9.9
+### What's New in 0.9.9
 
 A fourth bug in step 3's V computation, found via user code review — **still not recommended for deployment**, but a substantial improvement (45% → 55% backtest savings, up from v0.9.8, still short of step 2's 91%).
 
@@ -766,7 +673,7 @@ A fourth bug in step 3's V computation, found via user code review — **still n
 - **Still short of step 2.** The model has become considerably more active with opportunistic grid-charging (47 charge events vs. step 2's 5) whose net profitability after round-trip loss hasn't been fully verified, and the previously-identified 48h-horizon limitation (protection only for ~2 nights ahead) is untouched by this fix. `docs/v1_implementation_plan.md` updated with the finding.
 - `energy_planner.py` still contains only step 3's code. v0.9.7 (commit `a57cea2`) remains the last version verified against backtest and safe to run on the live HA instance.
 
-## What's New in 0.9.8
+### What's New in 0.9.8
 
 Step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — attempted, **not recommended for deployment**. Kept in source control as documented in-progress work, not a working release.
 
@@ -775,7 +682,7 @@ Step 3 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — att
 - **Even after those fixes, the result is a regression, not an improvement**: 45% savings in backtest vs. step 2's 91% on the same data. Root cause: the model only protects against deficits visible within its 48h horizon, so on a sunny day it treats capacity beyond ~2 nights of visible need as available for low-value same-day export, discarding a protection that step 2's simpler "always store surplus" floor provided for free by never needing to see that far ahead. This is a structural limitation of the current design, not a fixable edge case — documented in full in `docs/v1_implementation_plan.md` under "Steg 3 implementerat" for whoever picks this back up.
 - **`energy_planner.py` now contains only step 3's code — step 2's verified `reserve_at(t)` mechanism is gone from this file, replaced, not kept alongside.** Do not deploy this version to the live HA instance; step 2 (v0.9.7, commit `a57cea2`) is the last version verified against backtest and safe to run. Anyone picking step 3 back up should start from a fresh design for the "protect capacity beyond the visible horizon" problem described above, not from patching this file further.
 
-## What's New in 0.9.7
+### What's New in 0.9.7
 
 Step 2 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the export/discharge floor becomes a trajectory instead of a single scalar.
 
@@ -785,7 +692,7 @@ Step 2 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the
 - `DayPlan.export_floor_kwh` and the evening-target SOC are still reported as single numbers (now `reserve_at(now)`) — external contract (sensors, dashboard) unchanged.
 - **Known gap, unchanged by this step:** the plan's own acceptance test calls for a January week; the available backtest window is still only ~10 days in late August/September (`testdata/history/Series info.txt`), so the deep-winter, near-min-SOC bottoming behavior is verified by construction (the math), not yet by a full cold-weather backtest.
 
-## What's New in 0.9.6
+### What's New in 0.9.6
 
 Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part four (step 1A) — the flat hourly load rate replaced with a shape × level model.
 
@@ -793,7 +700,7 @@ Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part f
 - **P50 for general planning, P75 for the reserve** (the floor sum and tomorrow's net-solar check) — a small conservative margin, roughly 1–10% above P50.
 - Falls back to the previous flat rate whenever shape history isn't available yet (a fresh install) or a specific hour has no coverage in the window — this is a strictly additive change, verified to reproduce the old behavior exactly when no shape data exists.
 
-## What's New in 0.9.5
+### What's New in 0.9.5
 
 Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part three (step 1B) — the daily-budget "dump" exclusion reworked around real sensors instead of an approximation.
 
@@ -801,13 +708,13 @@ Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part t
 - **Classification no longer assumes a weekly disinfection schedule.** Auxheater energy is only kept in the daily budget (not excluded as dump) while `legionella_switch_entity` is actually on, plus a 45-minute trailing grace period for EMS-ESP reporting lag — never inferred from a configured weekday, which turned out not to match when the cycle actually runs.
 - **Unavailable sensor readings skip the accounting interval** rather than being read as zero or as "not disinfecting" — the same principle as the P3-2 fix (v0.9.1). When the disinfection switch itself is unavailable, the interval defaults to *not* excluding the energy — wrongly treating real necessary consumption as dump is more dangerous than the reverse, so ambiguity resolves toward keeping energy in the budget.
 
-## What's New in 0.9.4
+### What's New in 0.9.4
 
 Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part two — a new sensor to monitor the cycle-cost assumption against reality instead of just asserting it.
 
 - **New optional `sem_battery_equivalent_cycles` sensor**, computed as accumulated AC discharge energy ÷ usable battery capacity. Two new optional config fields (cumulative AC discharge/charge energy entities) — the sensor is only created when the discharge entity is configured. Also exposes `measured_eta_roundtrip` as an attribute whenever both entities are set, so the round-trip efficiency constant (see v0.9.3) can be re-verified going forward without manually querying two sensors. The warranty (10 years or 10,000 cycles) binds on the calendar, not the cycle count, as long as the actual rate stays under ~2.74 cycles/day (10,000 ÷ 3,650) — this sensor lets that assumption be watched rather than assumed.
 
-## What's New in 0.9.3
+### What's New in 0.9.3
 
 Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part one — two assumed constants replaced with measured ones.
 
@@ -815,7 +722,7 @@ Step 1 of the [v1.0 implementation plan](docs/v1_implementation_plan.md), part o
 - **`sell_extra_revenue` default corrected from a stale 0.07 to 0.065** — the live configuration already had the correct value (0.065, Lerum Energi's grid-benefit compensation, 6.50 öre incl. VAT); only the code default shown to new installations was out of date.
 - Verified the corresponding break-even formulas (`spot_high > 1.178 × spot_low + 0.215` buy-side, `+ 0.070` sell-side) reproduce exactly against the updated constants — but only when tested against the merit-order-weighted average of the hours the battery actually trades at, never a day's raw min/max spot price (which overstates the achievable spread by roughly 2×, and would have misclassified a real day as profitable to cycle when it wasn't). Documented in `docs/v1_implementation_plan.md` as a general caution for step 3's implementation.
 
-## What's New in 0.9.2
+### What's New in 0.9.2
 
 Step 0 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the observed live bug (battery idle through a price peak) traced to one specific interaction, fixed at its source instead of patched around further.
 
@@ -824,14 +731,14 @@ Step 0 of the [v1.0 implementation plan](docs/v1_implementation_plan.md) — the
 - **Removed the `pv_production_ratio ≥ 0.8` condition gating the price relaxation.** It closed the relaxation exactly on the low-confidence (snow-covered-panel) days the floor's reserve exists for. Forecast uncertainty is already reflected in the floor size itself via `_uncertainty_markup()` — gating the relaxation on *additionally* being confident was redundant with, and worked against, that existing mechanism.
 - **Replaced the flat `_DARK_SOLAR_KW = 2.0 kW` "is this slot dark" threshold with a comparison against the slot's own hourly load rate** (`solar_kw < hourly_load_kw`). A fixed 2 kW cutoff classified much of shoulder-season and winter daylight as "night" even when solar was covering the actual load, inflating the export window and the floor's dark-slot count unnecessarily.
 
-## What's New in 0.9.1
+### What's New in 0.9.1
 
 - **`export_floor_kwh` is now capped so it can never exceed 85% of the usable SOC range (`battery_max_soc − battery_min_soc`), not just clamped against total capacity.** Live-tested against a real high-consumption day (28.76 kWh, low `pv_production_ratio`), the reserve (`hourly_load_kw × dark-window hours`, marked up by up to +300% for forecast uncertainty) came out larger than the *entire* usable range — 24.4 kWh needed against 24.25 kWh available — which pins `evening_target_soc_pct` at `battery_max_soc` via the existing `min()` clamp. Because `apply_plan_executor()`'s `self_consume_ok` check requires `battery_soc_pct > evening_target`, a target pinned at the ceiling can never be satisfied: the battery sat idle at 98% SOC through an entire evening price peak (1.58 SEK/kWh) instead of discharging. A deeper look at a full year of hourly consumption (`docs/forbrukningsanalys.md` §8) found this isn't fixable by a better night-specific load rate alone — the night/24h consumption ratio is close to 1.0 on autumn/winter high-consumption days (the exact days that trigger this), and only drops meaningfully in summer (~0.73), when the floor is rarely a problem anyway. The new cap is a season-agnostic safety net: it guarantees at least 15% of the usable range stays reachable for self-consumption or export regardless of what the reserve formula computes.
 - **`build_plan()`'s reserve calculation now uses a 7-day rolling daily-consumption average instead of a single day, and excludes solar-driven extra hot water from it.** The 28.76 kWh trigger case above was itself ~20% above the real 17-day September average (1002 W) — a single unusually-high day was inflating the floor on its own, before the safety cap even engaged; with the rolling average the same scenario's floor comes out at 20.0 kWh, under the cap threshold without needing it. The rolling total also now nets out energy drawn while `heat_pump_extra_hot_water_entity` is on (the absorption ladder's opportunistic solar/negative-price hot water step) — confirmed that switch never runs concurrently with space heating, so 100% of `heat_pump_power_entity`'s draw during those windows is attributable to it — since that energy came from solar surplus during the day and has no bearing on what the battery needs to cover at night. The legionella disinfection cycle (`legionella_switch_entity`, every 7 days) is deliberately *not* excluded: a 7-day window naturally captures exactly one cycle, representing its real recurring cost correctly on its own. New `EnergyState.rolling_consumption_kwh`, maintained via a new `{DOMAIN}_daily_consumption` storage file (falls back to the single-day figure until 7 days of history have accumulated).
 - **Fixed P3-2 (`_update_pv_production_ratio()`) never detecting a genuine zero-production day.** `_get_state_float()` returns `0.0` both when a sensor is unavailable/unknown AND when it correctly reads a real zero (e.g. snow-covered panels) — the day-rollover commit was gated on `_pv_last_actual_reading > 0`, so a true zero-output day was silently skipped from the ratio history entirely, exactly like a missing reading, instead of being recorded as a 0% day. Reconstructed against a real production chart showing a ~2-week near-zero stretch in January 2026: the ratio would have stayed frozen at whatever it was before the event for the entire outage, only reacting once production rose back above zero — after the risk had already passed. Now tracks state-availability (`_pv_last_actual_available`) separately from the numeric reading, so a real zero is correctly committed to history and drags the ratio down (triggering `_uncertainty_markup()`'s cap) instead of being invisible to it.
 - **New interim price-gated floor relaxation ("Option B")** in `build_plan()`'s dark-slot logic: when the battery is at the reserve floor but the grid buy price exceeds what the stored battery energy itself cost (`battery_avg_cost_sek_kwh + cycle_cost_sek_kwh`) and `pv_production_ratio` is high enough (≥0.8) to trust tomorrow's forecast, discharge is now allowed down to the hard floor instead of stopping at the reserve. This is explicitly a first pass, not the final design — tested against a zero-solar-tomorrow scenario, it can spend nearly the whole reserve overnight on modest savings and leave the battery short for the *next* evening's price peak, and a safer relative-threshold or narrower-relaxation variant is still being evaluated (see `docs/forbrukningsanalys.md`).
 
-## What's New in 0.9.0
+### What's New in 0.9.0
 
 Season-aware charge/discharge handling — no new manual mode, `auto` itself now behaves correctly winter and summer, following a consumption-analysis deep dive (`docs/forbrukningsanalys.md`) that started from an oversized export floor on a sunny day.
 
@@ -840,7 +747,7 @@ Season-aware charge/discharge handling — no new manual mode, `auto` itself now
 - **EV charging now has a reserve margin and can charge at cheap hours — both previously absent from the planner entirely.** A new `ev_reserve_margin_kwh` (default 2.5 kWh) is added to the floor whenever a selected car is below its target SOC during a low-solar window, so the reserve calculation no longer pretends the car doesn't exist. Separately, `_auto_mode()` gained a cheap-hour EV charging block — mirroring the battery's existing opportunistic grid-charge logic — since previously the car only charged from solar surplus, forced mode, or as step 4 of the negative-price cascade, with no equivalent to the battery's winter cheap-hour charging at all.
 - **Export dispatch now concentrates on the single best price window instead of smearing proportionally across every qualifying slot.** Previously, exportable energy was split by a straight price-weighted average across all "high" slots in the 20h dispatch window — tonight's evening peak and tomorrow morning's peak included together — even when one was clearly worth more than the other. It's now grouped by calendar day, valued by kWh-weighted average price, and allocated to the higher-value group first (spilling to the other only if the first can't absorb it all).
 
-## What's New in 0.8.0
+### What's New in 0.8.0
 
 Stage 4 of the development roadmap, complete — the negative-price absorption ladder (P4-2), building on P4-1's live calibration of the inverter's curtailment response.
 
@@ -848,23 +755,23 @@ Stage 4 of the development roadmap, complete — the negative-price absorption l
 - **New step 5: proportional inverter curtailment**, using P4-1's live-measured finding that `number.sg_power_limitation_setting` is calibrated against the inverter's *rated* capacity, not current production. When steps 1-4 are saturated and solar would still be exported at a negative price, the setpoint is computed directly (`target_output_w / rated_kw × 100`, clamped to 20-100%) so inverter output drops to exactly local consumption — no export, no unnecessary throttling. Two new optional config fields: inverter curtailment entity and rated power (kW).
 - **Fixed a bug that made the entire ladder dead code whenever a day-plan existed** (i.e., almost always): `apply_plan_executor()`, the sole write path for battery setpoints, unconditionally overwrote whatever `_auto_mode()`'s negative-price logic had just decided with the day-plan's ordinary cover_load/export logic — which has no concept of negative prices at all. It now returns immediately, untouched, whenever the sell price is negative.
 
-## What's New in 0.7.7
+### What's New in 0.7.7
 
 - **Fixed a periodic single-cycle power glitch during otherwise-stable charging/discharging.** Sonnen's API description ("the setpoint is kept until the battery receives a new charging or discharging value") reads as ONE shared internal setpoint (direction + magnitude) behind the separate "force charge"/"force discharge" number entities, not two independent registers — the latest write wins regardless of which direction issued it. P6-1's heartbeat (re-send an unchanged value at least every 5 minutes, for self-healing against a dropped write) was rewriting the *inactive* direction's 0 on that schedule even while the other direction was actively driving a real value — on a shared setpoint, that briefly zeroes it until the next cycle's write catches up, visible as a single ~30s near-zero blip in `battery_inout` roughly every 5-10 minutes during an otherwise clean, continuously-rising charge or discharge ramp. `_write_battery_setpoints()` now only heartbeat-rewrites the inactive direction's 0 when *both* directions are meant to be idle (the case the self-healing actually protects); while one direction is active, the other is only touched for a genuine correction, never on the heartbeat schedule alone.
 
-## What's New in 0.7.6
+### What's New in 0.7.6
 
 - **Fixed a transient house-load spike silently switching off self-consumption discharge for minutes at a time.** `_auto_mode()`'s evening-target-SOC projection (`hourly_load_kw = max(_eff_daily_kwh / 24.0, house_load_w / 1000.0, 0.5)`) fed the *instantaneous* `house_load_w` straight into an hours-ahead energy-need estimate: a kettle, oven, or shower running for a few minutes got projected across the entire dark period, briefly inflating the evening target SOC above the actual battery SOC. That flips `self_consume_ok` to `False` in `apply_plan_executor()`'s cover_load branch, which zeroes the discharge setpoint outright rather than just under-covering the load — confirmed against real decision-log data where "Plan cover_load egenförbrukning" dropped to exactly 0W in lockstep with a house-load jump to 1000-1900W, for as long as the elevated load lasted. New `EnergyState.house_load_avg_w`, a 15-minute rolling average maintained by the coordinator (`_get_house_load_avg_w()`), now feeds this specific projection instead — `house_load_w` itself is untouched everywhere else (cover_load sizing, EV/phase logic) so real-time response elsewhere is unaffected.
 
-## What's New in 0.7.5
+### What's New in 0.7.5
 
 - **Fixed manual mode actively fighting the user** — switching `select.sem_operating_mode` to `manual` is documented as "no automatic control, drive the battery/chargers/hot water yourself", but `EnergyController.compute()` returns an empty `ControlDecision` for manual mode (all fields at their zero/`False` default) rather than skipping execution, and the coordinator wrote that decision to hardware unconditionally every 30s cycle regardless of mode. In practice: manual mode zeroed the Sonnen charge/discharge setpoints, turned off the EV charger switch, and turned off extra hot water, every cycle — the opposite of "manual control", and the direct cause of a user-reported case where a manually-set discharge power kept getting reset to 0 within seconds. `_execute_decision()` (the sole write path to all of these) is now skipped entirely while in manual mode.
 
-## What's New in 0.7.4
+### What's New in 0.7.4
 
 - **Removed the three `testdata/timdata/htestdata*.csv` samples** — running the new P7-2 model-fidelity replay against them (as a comparison against `testdata/history/`'s results) confirmed what their docstring already warned about, quantitatively: each file spans months on paper but is really ~50 hourly rows glued to a single multi-week-to-multi-month gap, which the forward-simulation/replay integration treats as one real hour. Measured SOC errors up to 63 percentage points and import errors over +1800%, against -18%/+2pp on the genuinely continuous `testdata/history/` data. The old HA-logbook CSV format (`load_csv()`) is still supported for a real single-file sample — it just needs to actually be hourly-continuous for the P7-2 columns to mean anything.
 
-## What's New in 0.7.3
+### What's New in 0.7.3
 
 Extends P7-1 with the grid-phase and battery-inout history P7-2's model-fidelity replay needs, since the original P7-1 extraction only pulled house-load/solar/outdoor-temp/battery-SOC/price.
 
@@ -872,7 +779,7 @@ Extends P7-1 with the grid-phase and battery-inout history P7-2's model-fidelity
 - **The P7-2 model-fidelity replay actually runs now**: over the 10-day `testdata/history/` window it reproduces measured grid import within -17.7% and export within +17.6%, and the simulated end-of-period SOC within 2.3 percentage points of the real value — a real answer to the plan's acceptance criterion, not just an "unavailable" placeholder.
 - **Fixed a leak in the forward-simulation pass discovered while validating this**: `sim_state.battery_power_w` was being copied from the real historical reading via `dataclasses.replace(state, ...)`, but `EnergyController._apply_phase_limits()` reads that field as "current battery power" to compute a delta against the new decision. Once the simulated SOC trajectory diverges from history, that real reading is the wrong baseline — it now carries the *previous simulated slot's own* battery power instead, initialized from the real reading only for the very first slot.
 
-## What's New in 0.7.2
+### What's New in 0.7.2
 
 Stage 7 of the development roadmap, complete — both P7-1 (real historical extraction, done earlier but never given its own changelog entry) and P7-2 (the forward-simulating battery model).
 
@@ -880,7 +787,7 @@ Stage 7 of the development roadmap, complete — both P7-1 (real historical extr
 - **P7-2 — the simulator runs three passes per slot now, not one**: alongside the existing "shadow" pass (what SEM would decide, given the *real* historical SOC), the backtest now also runs (a) a **forward simulation** that feeds SEM's decisions back into its own running SOC via a simplified battery model (`_simulate_battery_soc`, round-trip efficiency split evenly across the charge/discharge legs) instead of reading next hour's SOC from the CSV, deriving grid import/export/cost from the energy balance since the real historical grid reading no longer applies once the SOC trajectory diverges from history; (b) a **no-battery/no-control reference** (grid = house load − solar only) to measure savings against, per the plan's acceptance criterion; and (c) a **model-fidelity replay** that feeds the *historically measured* battery power (not SEM's decisions) through the same energy-balance formula and compares the result against the real measured grid import/export — this is what actually tests whether the physics are trustworthy, since comparing SEM's new (different, hopefully better) decisions against history's old ones will always show a large gap by design.
 - **Honest result on the bundled `testdata/timdata/*.csv` samples**: the model-fidelity replay shows large errors on them, but that's a data-quality finding, not a simulator bug — those files were already documented as "small, sparse, manually-curated" (mostly one-hour gaps punctuated by a single multi-week gap), which the forward/replay integration can't sensibly bridge. Against the continuous `testdata/history/` data, the forward simulation reproduces the real end-of-period battery SOC to within 1 percentage point over a 10-day run — a sound sanity check, even though that source still can't run the fidelity replay itself (no historical grid-phase data extracted for it yet, see P7-1 above).
 
-## What's New in 0.7.1
+### What's New in 0.7.1
 
 Stage 7 of the development roadmap, partial (P7-2 only; P7-1 — extracting continuous history via HA's statistics API — is not implemented).
 
@@ -889,7 +796,7 @@ Stage 7 of the development roadmap, partial (P7-2 only; P7-1 — extracting cont
 - **Solar per price-slot is approximated from actual historical production** (no historical Solcast p10/p50 archive exists to replay) — a p50 proxy from the real reading, with a fixed haircut for p10, just enough to exercise the floor/export logic meaningfully.
 - **Honest scope note**: this is a "shadow mode" evaluator — at each historical hour it asks "what would SEM have decided right now", using the *real* historical battery SOC, not a simulated one following SEM's own prior decisions. P7-2's full ambition (a simplified battery model integrating decisions forward into its own SOC trajectory) and P7-1 (pulling continuous history from HA's statistics API instead of the small hand-curated `testdata/timdata/*.csv` samples) are both still open.
 
-## What's New in 0.7.0
+### What's New in 0.7.0
 
 Stage 6 of the development roadmap — reliability hygiene. No behavior change to decisions, just to how often and how safely they're written and stored.
 
@@ -901,26 +808,26 @@ Stage 6 of the development roadmap — reliability hygiene. No behavior change t
 - **Legionella never marks a run as started until it's confirmed** — previously, deciding "time to start" immediately set the manager's internal "running" flag, before the `switch.turn_on` call was even attempted. If that call failed (device offline, network hiccup), the manager would believe a run was in progress that never physically happened, and wouldn't retry. It now only ever considers a run "running" once the boiler's switch is *observed* on — a stronger guarantee than a successful API call, and it comes with automatic retry for free: as long as the switch reads off, the same start decision fires again next cycle.
 - **Removed the old manual control helpers** the plan flagged (`Charge_uncharge`, `Max Charge`, `Ladda effekt batteri`, `In_Out_Charge`, `Stop urladdning pris negativt`, `VV På`, `VV_fran`, `vv_till`) from Home Assistant. All eight were confirmed inert first: seven were read-only template sensors nothing referenced, and the eighth (`VV På`, a template switch) had `turn_on`/`turn_off` actions containing only a `wait_template` with no actual service call, so toggling it never did anything. Deleted with the user's confirmation.
 
-## What's New in 0.6.7
+### What's New in 0.6.7
 
 Stage 5 of the development roadmap, partial — legionella scheduling (the rest of Stage 5 needs a real winter day first; see below).
 
 - **Legionella now targets the actual best slot in its preferred window, not the first one crossing a fixed threshold** – `PriceSchedule` gained `is_best_opportunity_now()`: is the current slot's forecast solar ≥ 6 kW, or is its buy price within the cheapest third of today's slots in the configured window? `LegionellaManager.should_run_now()` uses it when a price schedule is available, falling back to the old absolute thresholds otherwise. The solar threshold moved from 3 kW to 6 kW — the old value was lower than what the electric heating elements themselves draw, so "starting on solar surplus" could mean starting on a surplus smaller than the load about to switch on.
 
-## What's New in 0.6.6
+### What's New in 0.6.6
 
 - **Fix: forcing EV charging stopped the battery from capturing solar, exporting it instead** – reported live: with `switch.sem_force_ev_charge` on, `_force_charge_ev()` never touched `decision.battery_charge_power_w`, which defaults to 0 — since the coordinator writes that value to the battery's force-charge number every cycle, this actively commanded the battery to stop charging, so any solar surplus beyond the EV's draw went straight to export. It now charges the battery from whatever surplus remains after the forced EV load.
 - **Fix: the mirror-image bug in `_force_charge_battery()`** – forcing the battery to charge similarly left every `ChargerDecision` at its `enable=False` default, blocking EV charging entirely even with ample solar surplus left over after the battery's charge rate. It now allocates remaining surplus to a connected, selected car the same way normal auto mode does.
 
-## What's New in 0.6.5
+### What's New in 0.6.5
 
 - **Fix: `sem_decision_reason` silently dropped EV/hot-water reasoning whenever a plan existed** – found while investigating why an EV charging decision wasn't visible in the reason text. The 0.6.1 plan-executor consolidation *replaced* `decision.reason` outright in all its branches instead of extending it, discarding `_auto_mode`'s own reason text (which names which charger got solar current, whether hot water started, etc.) even though the underlying EV/hot-water decisions were still being applied correctly — only the visible explanation was wrong. The executor now prepends its battery-specific reasoning to the original reason instead of overwriting it.
 
-## What's New in 0.6.4
+### What's New in 0.6.4
 
 - **Fix: `idle`/`cover_load` plan slots never charged the battery, even with a large real solar surplus** – found live: the plan classified the current slot as `cover_load` (dark/self-consumption) based on its 15-minute-old forecast, but actual solar surplus was over 10 kW. The 0.6.1 plan-executor consolidation only charged the battery for `solar_charge`/`grid_charge` actions, so `cover_load`/`idle` slots sat at 0 W both ways instead of capturing the unplanned surplus — exporting it at a near-zero sell price instead. The executor now also charges from real surplus during `idle`/`cover_load` slots (respecting the same `prefer_sell` check as `solar_charge`), falling back to self-consumption discharge only when there's a real deficit instead of a surplus.
 
-## What's New in 0.6.3
+### What's New in 0.6.3
 
 Stage 4 of the development roadmap — the negative-price absorption ladder (partial: steps 1, 2, 4).
 
@@ -929,7 +836,7 @@ Stage 4 of the development roadmap — the negative-price absorption ladder (par
 - **New: an explicit, sequential absorption ladder for negative prices** — battery (full power) → hot water → EV, each step activating only once the previous one is saturated, instead of splitting solar surplus proportionally across all of them. `sem_decision_reason` now names the active step (e.g. "Negativt pris steg 1: batteri full effekt").
 - **Not yet implemented**: heating setpoint uplift (belongs to Stage 5) and inverter curtailment (Stage 4's last rung). Curtailment specifically requires manually calibrating `number.sg_power_limitation_setting`'s response curve first — the plan is explicit that this can't be tuned blind. When every other absorption step is saturated and the battery still exports at a negative price, the reason string says so plainly instead of pretending it's handled.
 
-## What's New in 0.6.2
+### What's New in 0.6.2
 
 Stage 3 of the development roadmap — forecast reserve and snow detector.
 
@@ -937,13 +844,13 @@ Stage 3 of the development roadmap — forecast reserve and snow detector.
 - **New: production ratio sensor detects snow/soiling** (`sem_pv_production_ratio`) – a rolling 3-day ratio of actual solar production (new optional config: `actual_solar_daily_entity`) against that day's Solcast forecast, persisted across restarts. Normal days sit around 0.8–1.3; a ratio below ~0.6 (snow-covered or dirty panels the forecast doesn't know about) automatically scales the export floor up toward full night-autonomy and the export gate tightens, until production recovers. Exposed as its own sensor and as an attribute on `sem_day_plan_reason` so it's visible *why* the system got cautious.
 - **New floor formula**: `behov_kwh` (p10-based need until solar takeover) → `reserv_kwh` (scaled up by an uncertainty markup driven by the production ratio) → `golv_kwh = min(battery_max, max(hard_floor, reserv_kwh))`. The hard floor is fixed at 10% of battery capacity and is now always enforced regardless of how small the computed reserve is on a sunny day.
 
-## What's New in 0.6.1
+### What's New in 0.6.1
 
 - **Consolidated the three parallel copies of battery decision logic** (`_auto_mode`'s self-consumption blocks, the coordinator's plan-mode override, and a shadow-calculation in `PlanExecutorCharge/DischargeSensor`) into a single plan-executor in `coordinator.py`. It now sets the battery charge/discharge setpoint for **every** plan slot action (`solar_charge`, `grid_charge`, `export`, `idle`/`cover_load`), not just the two it used to override — using real-time solar surplus and house deficit, not the plan's forecast numbers. The executor re-runs phase/export-limit clamping (`_apply_phase_limits`) after setting the new values, closing a gap where a plan-driven override could bypass the phase protection added in 0.6.0.
 - `sem_plan_executor_charge`/`sem_plan_executor_discharge` now simply report the coordinator's actual last decision instead of independently recomputing a shadow estimate — they're guaranteed to match `sem_battery_charge_power_setpoint`/`..._discharge_power_setpoint` by construction.
 - The plan-vs-actual deviation log now compares against the *final* post-executor decision and no longer needs the "soft match" heuristics that previously masked known planner gaps — a logged deviation is now a real one, with `sem_decision_reason` explaining which real-time limit it hit.
 
-## What's New in 0.6.0
+### What's New in 0.6.0
 
 Stage 2 of the development roadmap — a controller with a correct value model.
 
@@ -953,11 +860,11 @@ Stage 2 of the development roadmap — a controller with a correct value model.
 - **New: separate export power cap** (`max_export_w`, default 14000 W, configurable in the Grid section) — the inverter's AC export rating is a different constraint than per-phase current; battery discharge is now also clamped so `solar + discharge` never exceeds it.
 - **Removed winter mode entirely** – `_winter_mode()`, the `WinterModeSwitch`, the four `winter_*` number entities, and all associated config were deleted. The day-plan's percentile-based pricing (already season-agnostic, using each day's own price distribution) and the export/grid-charge dispatch already cover what winter mode was for; the `winter` operating mode option is gone from the select entity.
 
-## What's New in 0.5.63
+### What's New in 0.5.63
 
 - **Fix: reloading the integration mid-legionella-run could trigger a spurious duplicate start** – `LegionellaManager`'s run-tracking (`running`, `run_started_at`, `temp_confirmed`) only lived in memory. An options-flow save (or any config entry reload) recreated the coordinator and reset this state; if the boiler's switch happened to read `unavailable` for even one cycle right after the reload (a routine ems-esp communication blip), the manager mistook that for "the boiler just turned itself off" and, on the next due-check, started a second run — even though the original was still physically running and never actually finished. Two fixes: (1) run-tracking now persists to the same storage as `last_run`, restored on `async_load()`, so a reload/restart no longer loses an in-progress run or its true start time; (2) the switch is now read as a tri-state (on/off/unavailable) — an `unavailable` reading holds the current run status instead of being treated as "off".
 
-## What's New in 0.5.62
+### What's New in 0.5.62
 
 - **Fix: solar energy per price slot was roughly double** – `_match_solar_to_slots()` in `price_scheduler.py` always converted average solar kW to kWh using a hardcoded 0.5 h (assuming a 30-minute slot), but Nordpool price slots are 15 minutes. Now uses the price slot's actual duration.
 - **Fix: house-load floor overrode legitimate real-meter readings** – the yesterday's-average floor was applied unconditionally whenever solar was active, even when `house_load_entity` was providing a real, valid reading — clamping away genuine midday dips. The floor now only applies when the entity is missing/unavailable and the code falls back to the grid-balance formula (the actual source of the transition-glitch bug it was meant to guard against). Added a rolling median over the last 3–5 samples of the real sensor to smooth transient meter glitches instead.
@@ -966,58 +873,58 @@ Stage 2 of the development roadmap — a controller with a correct value model.
 - **Removed `EvSocTargetNumber`** (global "EV SOC target" number entity) — it wrote to an `EnergyController.ev_soc_target` attribute that was never read anywhere; each car's own per-car SOC target (set in the charger configuration) is what actually governs charging.
 - **All `number.py` entities now inherit `RestoreEntity` and persist changes to `entry.options`** — a value changed via the UI previously lived only in memory and reset to the config-flow default on restart. Now it's written back to the config entry (survives restart/reload) with `RestoreEntity` as a fast-path restore on entity add.
 
-## What's New in 0.5.61
+### What's New in 0.5.61
 
 - **Fix: crash in opportunistic grid charging** – `_auto_mode()` referenced `_export_floor_kwh` and `_battery_energy_kwh` without ever defining them in scope, causing a `NameError` whenever opportunistic charging conditions were met (low solar forecast, not in economic peak, no active export). The floor is now derived from the day plan (`state.plan_export_floor_kwh`, set by the coordinator from `DayPlan.export_floor_kwh`) with a fallback to `battery_min_soc` when no plan is available; the battery energy is derived from SOC × capacity. Also removed a duplicate/dead assignment of `_charge_target_kwh`.
 - **Safety: battery setpoints always zeroed on unload** – `async_unload_entry` now writes 0 to both the charge and discharge setpoint entities before unloading, so a config reload or HA restart never leaves the battery frozen mid-charge or mid-discharge.
 - **Safety: guaranteed zero-first write ordering** – battery setpoint writes now always zero whichever direction (charge/discharge) is inactive *before* writing the active direction's power, using a blocking service call for the zero. This prevents a brief window where the inverter could see both charge and discharge setpoints non-zero during a direction switch.
 - **New optional config: battery operating-mode watchdog** – added `battery_operating_mode_entity` (Battery section). When configured, SEM checks this `select` entity every cycle and raises a persistent notification + log warning if it isn't set to `manual`, since in that case all setpoints SEM writes have no effect on the inverter.
 
-## What's New in 0.5.60
+### What's New in 0.5.60
 
 - **Refactor: removed duplicate export logic from EnergyController** – the controller previously contained ~230 lines of proactive-export and morning-export logic that duplicated what EnergyPlanner already decides. Since the coordinator's plan-executor already overrides the controller's battery setpoints for `export` and `grid_charge` slots, the controller's own export calculation was never actually applied. Removed it entirely. The controller now reads `state.plan_action` (set by the coordinator from the current plan slot) and uses it only as a guard flag — blocking self-consumption discharge and opportunistic grid charging during an active export slot. Export power targets continue to come exclusively from the planner via the coordinator's plan-executor.
 
-## What's New in 0.5.59
+### What's New in 0.5.59
 
 - **Fix: day-plan incorrectly scheduled export at low sell prices** – the planner's "max night-buy" filter compared the sell price against `PriceSchedule.slot.buy_sek`, which is only the Nordpool spot component (~1.7 SEK/kWh) and lacks electricity tax and grid fees. The actual full buy price was ~3.18 SEK/kWh, so the 90 % threshold was 1.53 SEK/kWh — making the check almost always pass and allowing export slots to appear in the plan even when selling at 1.63 SEK/kWh is a losing trade vs future grid purchase at 3.18 SEK/kWh. Fix: the coordinator now passes the actual full buy price (`state.buy_price_sek_kwh`) into `build_plan()`. The filter now uses 3.18 × 0.90 = 2.86 SEK/kWh as the threshold, correctly blocking export slots when sell price is below this level.
 
-## What's New in 0.5.58
+### What's New in 0.5.58
 
 - **Improvement: Energy plan card clarity** (`sem-energy-plan-card.js`) – three UI improvements to make the current state unambiguous: (1) The plan-time row now shows the current plan action, e.g. "Plan skapad 19:00 · Nu: Egenförb. · slots: 12", so you can instantly see what the system is doing without inspecting sensors. (2) A colored action label is drawn directly in the canvas at the "nu" marker, making it clear whether the system is exporting, doing self-consumption, charging, etc. (3) Fixed a display bug where the export phase card showed "19:00–19:00" (identical start and end) when only one export slot exists — it now shows just the start time in that edge case.
 
-## What's New in 0.5.57
+### What's New in 0.5.57
 
 - **Fix: EV blocked when battery is nearly full and Sonnen throttles** – v0.5.56 pre-empted all solar surplus for the house battery regardless of whether Sonnen was actually absorbing it. When the battery is near full (~94 % SOC), Sonnen enters standby and accepts only a few watts, but the pre-empted power was still withheld from the EV — resulting in 2.7 kW going to the grid with no one charging. Fix: the pre-emption now only runs when the battery is actually absorbing more than 100 W (`state.battery_power_w > 100`). When Sonnen throttles (e.g. 7 W), no surplus is pre-empted and the EV receives the full solar surplus.
 
-## What's New in 0.5.56
+### What's New in 0.5.56
 
 - **Fix: house battery priority over EV charging** – the EV surplus loop ran before the battery charging block, so with e.g. 2342 W solar surplus the EV consumed ~2300 W and left only 42 W for the battery (below the 100 W threshold). Result: house battery stayed uncharged while the car charged. Fix: before the EV loop, the battery's share is pre-empted from `remaining_surplus` (up to `battery_max_power_kw`). EV then only gets what remains after the house battery is served. After the EV loop the pre-empted amount is returned to `remaining_surplus` so the battery block picks it up. When solar surplus is large enough for both (e.g. 5 000 W), both charge simultaneously.
 
-## What's New in 0.5.55
+### What's New in 0.5.55
 
 - **Fix: solar exported at low price instead of stored in battery** – `prefer_sell` triggered whenever `sell_price ≥ 0.80 SEK/kWh`, which caused the battery charging block to be skipped entirely — even when the sell price was mediocre (e.g. 0.86 SEK/kWh) and the cheapest future recharge price was much higher (e.g. 1.74 SEK/kWh). This is a losing trade: sell now for 0.86, buy back later for 1.74. Fix: `prefer_sell` now additionally requires that the sell price is at least 90 % of `best_charge_slot.buy_sek` — the cheapest upcoming grid-charge price. If selling is cheaper than what you'll pay to refill, store in the battery instead. Example: 0.86 < 1.74 × 0.90 = 1.57 → `prefer_sell = False` → battery charges ✓. High-price day: 3.50 ≥ 1.74 × 0.90 = 1.57 → `prefer_sell = True` → export ✓.
 
-## What's New in 0.5.54
+### What's New in 0.5.54
 
 - **Fix: battery charged from grid due to feedback loop in surplus formula** – v0.5.53 introduced `_effective_surplus_w = _raw_export_w + _batt_charge_w`. When solar dropped and the grid switched from export to import, `_raw_export_w` fell to 0 but `_batt_charge_w` still reflected the previous setpoint (e.g. 767 W). Result: the formula kept returning 767 W, the battery continued charging, and the house drew 632 W from the grid to compensate. Fix: the correction is now applied **only when the grid is actually exporting** (`_raw_export_w > 0`). If the grid is importing, the formula is not used and `solar_surplus_w` falls back to the standard `solar − house_load` calculation, which correctly yields 0 W when solar no longer exceeds load.
 
-## What's New in 0.5.53
+### What's New in 0.5.53
 
 - **Fix: solar surplus still exported when battery already charging** – v0.5.52 fixed the case where the battery was in standby (0 W) and real grid-export exceeded the calculated surplus. But if the battery was already charging (e.g. 559 W), the grid-export reading reflected only what remained *after* the battery had taken its share (e.g. 312 W), making the supplement helpless: `max(558, 312) = 558 W`. Root cause: the effective surplus formula must account for both: `real_surplus = grid_export_after_charging + battery_charge_power`. In the example: 312 + 559 = 871 W → setpoint raised to 871 W → export drops to near zero. Fix: `_effective_surplus_w = _raw_export_w + _batt_charge_w`.
 
-## What's New in 0.5.52
+### What's New in 0.5.52
 
 - **Fix: solar surplus going to grid instead of battery** – when the house-load sensor includes L3 loads powered directly by solar (bypassing the Sonnen's metering), the calculated surplus `solar_w − house_load_w` underestimates what the battery can actually capture. Result: SEM sent a 0 W charge setpoint, Sonnen entered standby, and all real solar surplus (up to 480 W) flowed to the grid. Fix: the surplus calculation is supplemented with the actual net grid-export reading (`−(grid_L1 + grid_L2 + grid_L3) − battery_discharge`). If more electricity is actually leaving the house than the formula predicted, that real-export value is used as the effective surplus — ensuring the battery receives it instead of the grid.
 
-## What's New in 0.5.51
+### What's New in 0.5.51
 
 - **Fix: opportunistic grid charging blocked on cloudy days** – the opportunistic charge block previously required `battery_charge_power_w == 0.0`, meaning any active solar-surplus charge (even 50 W trickle on an overcast day) prevented grid top-up entirely. On a day when the solar forecast is below 10 kWh, the battery could stay undercharged even during the cheapest price slots. Fix: the `== 0.0` guard is removed. The block now runs whenever today's **or** tomorrow's solar forecast is below `DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH` (10 kWh), and only overrides `battery_charge_power_w` if the calculated grid-charge rate is **higher** than the current solar-surplus rate (`max()` instead of assignment) — solar surplus always has priority; the grid only tops up to the target if solar alone is insufficient.
 
-## What's New in 0.5.50
+### What's New in 0.5.50
 
 - **Fix: plan export pauses at export floor** – the plan executor's `export` case now checks actual battery kWh against `export_floor_kwh` before discharging. If the battery reaches or drops below the floor (+ 0.5 kWh safety margin), export is paused and the reason is logged as `Plan export PAUSAD`. This prevents the battery from being drained below the overnight reserve when the actual SOC differs from the plan's projected SOC at generation time.
 
-## What's New in 0.5.49
+### What's New in 0.5.49
 
 - **Plan-mode activated**: DayPlan now drives actual Sonnen setpoints in `auto` mode (previously comparison/logging only). Coordinator overrides `battery_charge_power_w`/`battery_discharge_power_w` based on the current plan slot:
   - `solar_charge` – left to controller (actual solar surplus handled best in real-time)
@@ -1027,131 +934,131 @@ Stage 2 of the development roadmap — a controller with a correct value model.
 - **Fix plan executor sensors**: `PlanExecutorChargeSensor` (grid_charge) and `PlanExecutorDischargeSensor` (grid_charge during economic_peak) now return correct values. Sensors mirror exactly what the coordinator actually executes.
 - `battery_max_power_kw` added to coordinator data dict so sensors read the configured max instead of the 5 kW default.
 
-## What's New in 0.5.48
+### What's New in 0.5.48
 
 - **Fix: opportunistic charging blocked self-consumption discharge during economic peak** – each night when the battery fell below the export floor threshold (>0.5 kWh deficit) and the current hour happened to have a price below the percentile threshold, the opportunistic charging block triggered. It set `battery_charge_power_w > 0`, which caused the self-consumption discharge block to be skipped (the `decision.battery_charge_power_w == 0.0` condition failed). Result: discharge setpoint dropped to 0 for ~30 minutes (until the next hour with a higher price), grid covered the full house load, and the system also ran grid-to-battery charging in parallel. The cycle repeated every time a cheap price slot coincided with battery SOC below the floor. Fix: `_economic_peak` is now computed *before* the opportunistic charging block and added as a `not _economic_peak` guard. During economic peak (buy price ≥ cheapest future charge price × 1.2) it is more economical to discharge now and recharge cheaply later — opportunistic charging is counterproductive and is suppressed.
 
-## What's New in 0.5.47
+### What's New in 0.5.47
 
 - **Fix: economic-peak self-consumption threshold lowered from 2.0× to 1.2×** – the v0.5.44 guard (`buy_price ≥ best_charge_price × 2.0`) required a very large spread before the battery would discharge during expensive peak hours. In practice prices like 3.17 SEK/kWh now vs. 2.37 SEK/kWh at 02:45 (ratio 1.34×) were still blocked by both the 2.0× and the intermediate 1.5× threshold. The threshold is set to 1.2× so the battery bypasses the evening-floor whenever buying now costs ≥ 20 % more than the cheapest upcoming charge slot — a spread that is always worth an arbitrage trade (0.80 SEK/kWh net gain at tonight's prices). The decision reason suffix is now `×1.2`.
 
-## What's New in 0.5.45
+### What's New in 0.5.45
 
 - **Fix: proactive export blocked when upcoming night electricity is more expensive** – the export logic sold battery energy during the day (e.g. at 1.50–2.10 SEK/kWh) without checking whether upcoming dark hours would require buying electricity back at a higher price (e.g. 3.77 SEK/kWh). This was a losing trade: sell cheap, buy expensive. Fix: a new `_export_price_ok` guard is calculated before the export gate: `sell_price ≥ max(dark-slot buy prices in floor period) × 0.9`. If the current sell price is less than 90 % of the peak upcoming night buy price, export is blocked — the energy is more valuable held for evening self-consumption. The 90 % factor allows export when prices are close (e.g. sell 1.80 vs night 1.90 — slight gain worth taking). Same filter applied to morning export and mirrored in `EnergyPlanner` (high-slots are filtered to only those with sell ≥ 90 % of peak night buy). Tonight's case: sell 2.10 < 3.77 × 0.9 = 3.39 → export blocked ✓.
 
-## What's New in 0.5.44
+### What's New in 0.5.44
 
 - **Fix: battery sat idle during expensive evening peak — grid covered house load at 3.77 SEK/kWh** – the `evening_target_soc` guard (SOC floor protecting the night reserve) correctly blocked self-consumption when the battery was below 71 % target. But it made no economic distinction between cheap grid electricity (0.30–0.50 SEK/kWh at night) and expensive peak electricity (3.77 SEK/kWh in the evening). Fix: a new economic-peak condition checks whether the current buy price is ≥ 2× the cheapest upcoming charge price (`ps.best_charge_slot.buy_sek`). When true, the effective SOC floor drops to `battery_min_soc` — the battery discharges to cover house load now, and the opportunity-charge logic buys back cheap electricity later that night. Tonight's case: 3.77 / 1.25 = 3.0× → economic peak active → battery discharges 1 041 W instead of importing. The decision reason shows `| Självkonsumtion XXXW (ekonomisk topp Y.YY>Z.ZZ×2)` when this path is active.
 
-## What's New in 0.5.43
+### What's New in 0.5.43
 
 - **Fix: battery sat idle during morning price peak while waiting for solar** – when `wait_for_solar` is active (solar expected within 2 h) the `evening_target_soc` guard was still blocking self-consumption discharge. The battery would sit at ~39 % SOC while the house drew from the grid at morning peak prices (~1.26 SEK/kWh), even though solar would replenish the reserve by noon. Fix: when `wait_for_solar = True` and `solar_next_2h_kwh > 0`, the effective evening-target floor is reduced by 80 % of the expected solar SOC gain (`0.8 × solar_next_2h_kwh / capacity × 100 %`). With 5.7 kWh expected and 33 kWh capacity this shifts the threshold from 39.7 % down to ≈ 22 %, allowing the battery to cover morning load. The 80 % factor provides a safety margin in case clouds reduce actual production. The decision reason now appends `(sol X.X kWh/2h)` when this path is active. The same logic is mirrored in `EnergyPlanner`: dark slots now look ahead 2 h and reduce the floor by 80 % of expected solar, so the plan accurately reflects the controller's morning behaviour.
 
-## What's New in 0.5.42
+### What's New in 0.5.42
 
 - **Fix: EnergyPlanner simulation did not decrement battery for self-consumption** – the forward simulation in `energy_planner.py` produced `cover_load` slots (solar < house, daytime) and dark `idle` slots (night) without decrementing `batt_kwh`. As a result the plan overestimated available battery energy throughout the day and night, leading to inflated export capacity predictions and an inaccurate SOC trace. Fix: both cases now simulate battery self-consumption discharge — battery discharges to cover the house deficit (or full house load at night) while `batt_kwh > batt_min_kwh + export_floor_kwh`. The export-floor guard mirrors the controller's `battery_soc > evening_target_soc` check and protects the night-coverage reserve. When the battery is at its floor, the slot is shown as grid-covered with a clear reason string.
 
-## What's New in 0.5.41
+### What's New in 0.5.41
 
 - **Fix: battery never discharged for self-consumption — all house load above solar came from grid** – the self-consumption discharge block existed but was gated on `buy_price > 0.20 SEK/kWh`. In summer, when spot prices are low and total buy price can be near this threshold, the condition was never met. Result: the battery sat idle all day and every watt of house load that solar could not cover was imported from the grid. Fix: the price gate is removed. Stored solar is always cheaper than grid import regardless of current spot price — the battery now discharges to cover house deficit whenever `battery_soc > evening_target_soc` and `battery_soc > battery_min_soc`. The evening-target guard already protects the night energy reserve.
 
-## What's New in 0.5.39
+### What's New in 0.5.39
 
 - **New: number entities for proactive export thresholds** – two new adjustable parameters are now exposed as `number` entities in Home Assistant: `Proactive Export Price Percentile` (50–100%, step 5, default 75 — export triggers when sell price ≥ this percentile of today's prices) and `Proactive Export Absolute Min Price` (0.00–3.00 SEK/kWh, step 0.05, default 0.70 — always-export floor regardless of percentile). Both update the controller immediately without a restart and survive as long as HA is running (reset to config-flow defaults on restart).
 
-## What's New in 0.5.38
+### What's New in 0.5.38
 
 - **Fix: plan executor discharge sensor showed non-zero for idle/cover_load slots below evening floor** – v0.5.36 added the `evening_target` guard only for `export` slots. For `idle` and `cover_load` slots (battery covers house deficit at night), the same guard was missing — the sensor still returned `house_deficit_w` even when `battery_soc ≤ evening_target_soc_pct`. The guard is now applied to all discharge actions: any slot returns 0 W when `battery_soc ≤ evening_target`.
 
-## What's New in 0.5.37
+### What's New in 0.5.37
 
 - **Fix: "Bästa urladdningstimmen" discharged below evening floor after sunset** – the house-load discharge path (line `if not export_active … battery_soc > battery_min_soc`) only guarded against absolute min SOC. After sunset, `solar_w` drops below 100 W so `evening_fill = False` (solar check fails) even when `battery_soc < evening_target_soc`. At ~19:35, with battery at ~50% and evening target 53.3%, "Bästa urladdningstimmen" triggered (peak buy-price window) and discharged 1 384 W to cover house load — draining below the night-coverage floor and causing min-SOC depletion overnight. Fix: added `battery_soc > evening_target_soc` to the guard so the battery is protected below the night floor even when `evening_fill` is temporarily False (no solar).
 
-## What's New in 0.5.36
+### What's New in 0.5.36
 
 - **Fix: proactive export ignored `battery_min_soc` in energy check, discharging below floor** – the export guard `_battery_energy_kwh > _export_floor_kwh` compared the *total* battery energy (e.g. 51% × 33 kWh = 16.83 kWh) against the floor (10.98 kWh), concluding there was 5.85 kWh to export. But only the energy *above* min SOC is usable: `(51 − 20)% × 33 = 10.23 kWh < 10.98 kWh floor` → nothing to export. The controller discharged at 4.9 kW into the evening peak despite the battery already being below the night-coverage floor. Same bug was present in `EnergyPlanner.exportable_kwh`. Fix: both calculations now use `usable_kwh = (battery_soc − battery_min_soc)% × capacity`. The plan executor discharge sensor also gains an `evening_target` guard: for `export` slots it returns 0 W when `battery_soc ≤ evening_target_soc_pct`.
 
-## What's New in 0.5.35
+### What's New in 0.5.35
 
 - **Fix: `evening_target_soc` excluded `battery_min_soc`, causing severe underestimation** – the formula `evening_target_soc = evening_needed_kwh / capacity × 100` treated the battery as if all capacity were usable. But `battery_min_soc = 20%` is an absolute floor — the bottom 6.6 kWh are never accessible. Result: an 11.5 kWh evening need gave a 34.9% target, but at 34.9% only `(34.9 − 20) / 100 × 33 = 4.9 kWh` is actually usable — less than half the required amount. Battery depleted to min SOC every night even from 49–51% starting SOC. Fix: `evening_target_soc = min(battery_max_soc, battery_min_soc + evening_needed_kwh / capacity × 100)`. With the same 11.5 kWh need: `20 + 34.9 = 54.9%`, giving `(54.9 − 20) / 100 × 33 = 11.5 kWh` usable — exactly what's needed. Same fix applied to `EnergyPlanner.build_plan()`.
 
-## What's New in 0.5.34
+### What's New in 0.5.34
 
 - **Fix: `evening_target_soc` underestimated on sunny days — battery depleted overnight** – the dynamic evening target was computed as `(_eff_daily_kwh / 24) × hours_dark + 2 kWh`, where `_eff_daily_kwh = max(predicted_daily_kwh, yesterday_consumption_kwh)`. On sunny days `yesterday_consumption_kwh` is grid import only (~7 kWh), giving ~0.29 kW average — even though actual night load is ~0.9–1.2 kW. Result: `evening_target_soc ≈ 17%`, battery above that all day → `evening_fill = False` → controller exported solar instead of charging. Battery then depleted overnight from ~49–51% to min SOC. Fix: `hourly_load_kw` is now clamped to `min(max(daily_avg, house_load_w / 1000, 0.5), 1.5)`, matching the v0.5.27 fix applied to the export floor. With house load ~1.24 kW the evening target becomes ~53%, triggering `evening_fill = True` (49% < 53%) and forcing the controller to store solar before selling.
 
-## What's New in 0.5.33
+### What's New in 0.5.33
 
 - **Fix: Plan executor charge sensor used plan's `evening_target_soc_pct` instead of controller's** – the `prefer_sell` check in the charge sensor compared battery SOC against the plan's `evening_target_soc_pct` (computed from `solar_takeover_dt`, which could be set to the current day's solar ~11:15 → giving only ~16.5% target). The controller computes its `evening_target_soc` differently — searching `ps.slots` for the first slot after sunset where solar covers load, falling back to sunrise + 3 h, giving a realistic dark-period floor (~39% at 33% battery). This caused the sensor to show 0 W (prefer_sell=True, evening_fill=False) while the controller was charging at full surplus (evening_fill=True). Fix: `evening_target_soc` is now added to `ControlDecision`, set in `_auto_mode()` after the dynamic calculation, and stored in `coordinator.data` as `evening_target_soc_pct` — replacing the plan value. The charge sensor now mirrors the controller's own `evening_fill` result.
 
-## What's New in 0.5.32
+### What's New in 0.5.32
 
 - **Fix: Plan executor charge sensor ignored `prefer_sell` logic** – for `solar_charge` slots the sensor always showed the battery charge estimate, but the controller skips charging and exports solar whenever `sell_price ≥ sell_solar_min_price AND NOT evening_fill`. This caused the charge sensor to show e.g. 4 000 W while the controller was actually exporting at 0 W charge. Fix: `sell_solar_min_price` (from controller config) and `evening_target_soc_pct` (from day plan) are now stored in coordinator data. The sensor computes `prefer_sell = sell_price ≥ sell_solar_min_price AND battery_soc ≥ evening_target_soc` and returns 0 W when true — matching the controller's export decision. Attributes expose `prefer_sell`, `evening_fill`, `sell_price`, and `sell_solar_min_price` for full transparency.
 
-## What's New in 0.5.31
+### What's New in 0.5.31
 
 - **Fix: Plan executor charge sensor ignored EV charging priority** – the `Plan executor: charge` sensor showed `min(solar_surplus, battery_max)` as if all solar surplus went to the battery, but in practice the controller allocates surplus to EV chargers first. When an EV was drawing e.g. 5.5 kW from a 7 kW surplus, only 1.5 kW would actually reach the battery. Fix: for `solar_charge` slots the sensor now subtracts `ev_total_power_w` from solar surplus before calculating battery charge (`max(0, surplus − ev_total) → battery`). `ev_total_power_w` (sum of all charger `power_w` readings) is added to coordinator data and exposed as an attribute on the charge sensor alongside `battery_surplus_w`.
 
-## What's New in 0.5.30
+### What's New in 0.5.30
 
 - **Fix: Plan executor discharge sensor showed non-zero at min SOC** – when battery reached minimum SOC (20%), the controller correctly set discharge to 0 W, but the plan executor discharge sensor still reported the house deficit (e.g. 774 W) because it lacked a SOC guard. Fix: `battery_soc_pct` and `battery_min_soc` are now stored in coordinator data; the sensor returns 0 W whenever `battery_soc_pct ≤ battery_min_soc`, matching the controller's hard floor.
 
-## What's New in 0.5.29
+### What's New in 0.5.29
 
 - **Fix: Plan executor discharge showed only net export, not total battery discharge** – for `export` slots the sensor showed only the price-weighted dispatch component (e.g. 830 W to grid) but not the house-coverage component (e.g. 524 W). The actual controller discharge was their sum (1 354 W). Fix: the sensor now returns `min(net_export_w + house_deficit_w, battery_max_w)` for export slots, where `house_deficit_w = max(0, house_load_w − solar_power_w)`. A new `solar_power_w` key is added to coordinator data (used by the sensor). Attributes now expose `net_export_w`, `house_deficit_w`, `house_load_w`, and `solar_power_w` separately for full transparency.
 
-## What's New in 0.5.28
+### What's New in 0.5.28
 
 - **Fix: Plan executor discharge sensor showed 0 W for idle slots at night** – the `Plan executor: discharge` sensor only returned a value for `export` action slots. During `idle` slots at night (no planned export, but battery still covers house load), the sensor read 0 W even though the controller was discharging 1200–1500 W to power the house. Fix: for `idle` and `cover_load` slots, the sensor now returns `min(house_load_w − solar_surplus_w, battery_max_w)` — the same house-deficit logic the controller uses. `solar_surplus_w` and `house_load_w` are added as sensor attributes. `export` slot behavior is unchanged.
 
-## What's New in 0.5.27
+### What's New in 0.5.27
 
 - **Fix: export floor underestimated on sunny days, causing overnight battery drain** – on summer days with high solar production, `yesterday_consumption_kwh` only captures grid import (solar covered the rest), giving an average of ~320 W instead of the actual ~900 W night load. The export floor was then calculated as 320 W × 9 h + 2 kWh = 4.88 kWh, covering only ~4.6 hours of night — not the full 10+ hour dark period. After exporting down to that floor the battery hit min SOC around 00:30, leaving the house on expensive grid power until sunrise. Fix: `_hourly_load_kw` is now clamped to `min(max(yesterday_avg, house_load_w, 500 W), 1500 W)`, using the higher of the daily average and the current instantaneous house load (floor 500 W, cap 1500 W to exclude EV charging spikes). This raises the export floor to ~9–12 kWh on typical summer evenings, correctly preventing export when the battery cannot cover the full night. The same fix is applied to `EnergyPlanner.build_plan()` (new `house_load_w` parameter) for consistency.
 
-## What's New in 0.5.26
+### What's New in 0.5.26
 
 - **New: Plan executor shadow sensors** – two new sensors show what the plan executor *would have* commanded if running in plan mode, without affecting actual control. `Plan executor: charge` gives the charge setpoint (W) the executor would send — for `solar_charge` slots it is capped at actual solar surplus (not the Solcast forecast), for `grid_charge` slots it uses the plan's target directly. `Plan executor: discharge` gives the discharge setpoint for `export` slots. Both sensors include attributes (`plan_power_w`, `actual_surplus_w`, `capped`) to compare plan estimates against reality. Use these to gain confidence in plan-mode accuracy before switching the controller to plan-driven operation.
 
-## What's New in 0.5.25
+### What's New in 0.5.25
 
 - **Fix: EnergyPlanner AVVIKELSE spam after 0.5.24** – the EnergyPlanner was still using the old single-number export conditions (`solar_forecast_tomorrow_kwh >= 20 kWh` and `hours × average_load` floor) while the controller had already been updated to slot-based logic in 0.5.24. This caused continuous divergence warnings (plan=export, actual=idle) whenever the controller correctly blocked export because net solar tomorrow was below the floor. Both calculations in the planner now mirror the controller exactly: (1) export floor is Σ max(0, load_kwh − solar_kwh) per slot until solar takeover + 2 kWh safety margin; (2) `can_export` requires `net_solar_tomorrow_kwh >= export_floor_kwh` where net solar tomorrow is Σ max(0, solar_kwh − load_kwh) per slot for tomorrow's date.
 
-## What's New in 0.5.24
+### What's New in 0.5.24
 
 - **Fix: proactive export used crude raw-production check and overestimated export floor** – two related accuracy improvements: (1) The "can we refill tomorrow?" gate previously checked raw Solcast production ≥ 20 kWh, which passed even when house consumption ate most of the solar (e.g. 22 kWh forecast − 13 kWh house = only 9 kWh net available, too little to cover tonight's floor). Export now only runs when **net solar tomorrow** (slot-by-slot: Σ max(0, solar_kwh − load_kwh)) ≥ export floor. (2) The export floor itself was calculated as `hours × average_load + 2 kWh`, treating every hour until solar takeover as a full 875 W drain — ignoring that solar partially covers the house during the morning and evening ramps. The floor is now computed slot-by-slot as Σ max(0, load_kwh − solar_kwh), so the 3 h morning ramp (05:59–08:59) and 1.75 h evening wind-down (19:00–20:47) contribute only their actual deficit rather than full load, giving a more realistic floor (~2 kWh lower) and more accurate export headroom.
 
-## What's New in 0.5.23
+### What's New in 0.5.23
 
 - **Fix: battery didn't charge from solar surplus during daytime** – the dynamic `evening_target_soc` was being calculated from the *next daytime slot* where solar covers load (e.g. 8 minutes away at 11:00), giving `hours_dark = 8 min` and `evening_target_soc ≈ 6%`. With the battery at 20% min SOC, `battery_soc < evening_target_soc` was False → `evening_fill = False` → `prefer_sell = True` → the controller exported solar instead of charging the battery. Root cause: the `solar_covers_at` slot search started from `now` and immediately found today's solar production, not tomorrow morning's. Fix: during daytime (next sunset is before next sunrise), the search starts from **tonight's sunset**, so `solar_covers_at` is correctly anchored to tomorrow morning's solar takeover. `hours_dark` is now calculated as `solar_covers_at − sunset` (the actual dark period), giving a realistic `evening_target_soc` (~30–50%) and restoring `evening_fill` logic during the day.
 
-## What's New in 0.5.22
+### What's New in 0.5.22
 
 - **Fix: overnight battery drain to minimum SOC** – proactive export ran continuously from the evening peak window (19:00–21:00) all the way to 04:00 the next morning, draining the battery to 20% min SOC. Root cause: when the absolute minimum price threshold (0.70 kr/kWh) triggered export instead of the percentile, `_effective_threshold` was lowered to 0.70, causing the dispatch window to include every overnight slot (all prices ≥ 0.70 kr/kWh). The price-weighted dispatch then spread the battery's energy over 8–10 cheap night slots, and the floor kept shrinking as sunrise approached — leaving the system always above the floor and exporting continuously. Fix: the dispatch window (`_high_slots`) always uses the percentile threshold regardless of what triggered the export; and when no high-price slots remain in the window but only the absolute minimum is met, `export_active` is forced to `False`, stopping all export. The battery now stops exporting once the genuine high-price evening/morning window closes, even if the current sell price is still above 0.70 kr/kWh.
 
-## What's New in 0.5.21
+### What's New in 0.5.21
 
 - **New: EnergyPlanner sensors for plan-vs-actual comparison** – four new entities expose the current planned slot from the day planner, making dashboard comparison with actual battery commands straightforward without diving into logs: `Plan: åtgärd` (action text: export/solar_charge/idle/…), `Plan: laddningseffekt` (W, mirrors battery charge setpoint), `Plan: urladdningseffekt` (W, mirrors battery discharge setpoint), `Plan: anledning` (reason text, with `battery_soc_est_pct`, `export_floor_kwh`, and `evening_target_soc_pct` as attributes).
 
-## What's New in 0.5.20
+### What's New in 0.5.20
 
 - **Fix: EnergyPlanner false-positive AVVIKELSE during prefer-sell and proactive export** – three divergence patterns that are expected behavior, not planning errors, now resolve to a silent "soft match" (DEBUG instead of WARNING): (1) plan=idle but controller charges — opportunity charging overrides prefer-sell; (2) plan=solar_charge but controller exports — prefer-sell lets solar flow to grid naturally while proactive export drains residual battery headroom above the floor; (3) plan=solar_charge but controller is idle — prefer-sell is active, no battery charge commanded. True divergences (e.g. plan=export but controller charges, or plan=grid_charge but controller is idle) continue to log at WARNING.
 
-## What's New in 0.5.19
+### What's New in 0.5.19
 
 - **Fix: EnergyPlanner AVVIKELSE spam during opportunity charging** – the planner planned `idle` for solar slots where the battery was already above the export floor but still below maximum capacity. The controller then applied opportunity charging (buy price below threshold) from solar surplus, causing a divergence warning every 30 seconds. The planner now plans `solar_charge` whenever solar surplus is available *and* the battery has room below max SOC, regardless of export-floor position. `idle` during solar hours is reserved for the case where the battery is already full. This removes false-positive divergence warnings while keeping accurate divergence detection for cases where the controller genuinely deviates.
 
-## What's New in 0.5.18
+### What's New in 0.5.18
 
 - **Fix: battery charge command pulled from grid when solar exceeded house load** – during the transition cycle when the battery switches from discharge (proactive export) to charge mode, the grid sensor still reports a large export value from the previous cycle. The derived house-load formula (`grid + solar − battery_discharge + battery_charge − EV`) produces a negative result that is clamped to 0 W, making the controller believe solar surplus equals the full solar output (e.g. 3 600 W). The battery was then commanded to charge at its maximum rate (e.g. 3 300 W), while actual solar surplus was only ~2 800 W — causing ~500 W grid draw. Fix: `yesterday_consumption_kwh` is now fetched before the house-load calculation; when solar exceeds 200 W and the formula result is below yesterday's 24 h average load, that average is used as a floor, keeping the surplus estimate realistic and preventing spurious grid import.
 
-## What's New in 0.5.17
+### What's New in 0.5.17
 
 - **Fix: proactive export caused grid draw when house load exceeded solar** – the battery's `discharge_power_setpoint` during proactive export was set to the price-weighted export target (e.g. 500 W), but the Sonnenbatterie interprets this as the *total* battery output, not the grid feed-in on top of self-consumption. When house load (e.g. 988 W) exceeded solar (e.g. 70 W), the battery covered 500 W of that 488 W deficit, and the house imported the remaining ~488 W from the grid — while the intended export to the grid was zero. The discharge setpoint now adds the house deficit: `discharge_w = export_target + max(0, house_load − solar)`. The battery covers the full house deficit and the net feed-in to the grid matches the planned export target.
 
-## What's New in 0.5.16
+### What's New in 0.5.16
 
 - **Fix: evening target SOC was near zero in summer** – the dynamic evening target used `predicted_daily_kwh` (the temperature-based heating model) as a proxy for total house load. In summer, heating demand is zero, so the model returned ~1–2 kWh/day, making the evening target ~8% SOC even when the house was drawing 1 000 W. The evening target now uses `max(predicted_daily_kwh, yesterday_consumption_kwh)`. In summer, yesterday's actual consumption (e.g. 20 kWh/day) dominates; in winter, the temperature model can exceed it. The `solar_covers_at` search uses the same effective load, so the derived hours-dark and energy target are consistent with the export floor (which already used `yesterday_consumption_kwh`).
 
-## Recently Added
+### Recently Added
 
 - **Fix: evening fill charged too little when solar was being exported** – the system computes a dynamic `evening_target_soc` (e.g. 55%) based on hours to solar takeover × house load. But the condition that triggers filling required `solar_until_sunset_kwh < battery_remaining_kwh`. With strong remaining solar (5–9 kW until sunset), that condition was always false — the system assumed future solar would naturally fill the battery. The problem: that solar was exported by `prefer_sell` and never reached the battery. The deadlock was never broken. Fix: `evening_fill` now also triggers when `sell_price >= sell_solar_min_price`, i.e. when future solar would have been exported anyway. The battery fills immediately from surplus (e.g. 5 200 W for ~20 min), then export resumes automatically once the SOC target is reached.
 
@@ -1172,28 +1079,28 @@ Stage 2 of the development roadmap — a controller with a correct value model.
 - **Fix: `negative_slots_ahead` used sell price** – the price comparison for negative slots ahead used `sell_sek` instead of `spot_sek`, meaning slots with a slightly negative spot price but positive sell price were not counted. Fixed to use `spot_sek` throughout.
 - **Fix: battery charged and discharged simultaneously** – solar surplus charging started even when a discharge decision was already made (e.g. proactive export). Guard added: battery only charges from solar surplus when no discharge is commanded in the same cycle.
 
-## What's New in 0.5.11
+### What's New in 0.5.11
 
 - **Fix: stabilt export-golv baserat på gårdagens förbrukning** – exportgolvets timberäkning (`hours_dark × huslast + 2 kWh`) använde tidigare den momentana huslasten, vilket innebar att ett värmepumpsstart kl 04:00 kunde mångdubbla golvet och blockera export. Huslasten i beräkningen ersätts nu med gårdagens dygnsmedelförbrukning (`last_period`-attributet från `yesterday_consumption_entity` delat på 24 h). Golvet varierar nu bara när Solcast-prognosen förändras, inte vid momentana toppar.
 - **Fix: solar_takeover_dt sparas undan mot inaktuell Solcast-data** – om Solcast-sensorn serverade gammal data (alla slots i det förflutna) föll koden tillbaka på nästa soluppgång (~22 h), vilket gav ett felaktigt golv på 15–20 kWh. Koordinatorn sparar nu senaste giltiga `solar_takeover_dt` och återanvänder det om Solcast tillfälligt inte kan beräkna ett nytt värde. Värdet nollställs när solen producerar igen. Om Solcast uppdateras och ger ett *tidigare* takeover-datum (bättre prognos) uppdateras det sparade värdet.
 
-## What's New in 0.5.10
+### What's New in 0.5.10
 
 - **Fix: solar_takeover söker dagens prognos först** – exportgolvet (energireserven som skyddar batteriurladdning) beräknades mot imorgons Solcast-prognos även när solen redan producerade idag. Resultatet blev ett felaktigt "mörker" på 20+ timmar som blockerade export i onödan. Koden söker nu i dagens detailedForecast-slots (framtida slots) innan den faller tillbaka på imorgons prognos.
 - **Fix: proaktiv export blockeras vid solöverskott** – batteriet laddade ur för export samtidigt som det laddades från solöverskott. Proaktiv batteriexport aktiveras nu bara när solproduktionen inte överstiger huslasten med mer än 200 W. Vid solöverskott exporteras solenergin naturligt utan batteriinblandning.
 - **Fix: state_class för monetary- och energy-sensorer** – ett antal sensorer använde `state_class = MEASUREMENT` i kombination med `device_class = MONETARY` eller `ENERGY`, vilket HA varnar för. `BatteryAccumulatedCostSensor` använder nu `TOTAL`; övriga (prognos- och beräkningssensorer) använder `None`.
 
-## What's New in 0.5.9
+### What's New in 0.5.9
 
 - **Proactive export: absolute minimum sell price** – added a new Battery setting `export_min_sell_price_sek_kwh` (default 0.70 SEK/kWh). When the sell price meets or exceeds this threshold, the battery discharges and exports to the grid regardless of the relative percentile position. This fixes the case where all hours of the day have uniformly high prices, causing the percentile threshold to be too high to trigger even at genuinely profitable sell prices. Set to 0 to disable.
 - **Proactive export: today-only percentile** – the price percentile used to decide whether to export is now calculated from today's price slots only (previously it included tomorrow's prices, which could inflate the threshold when both days had high prices).
 
-## What's New in 0.5.8
+### What's New in 0.5.8
 
 - **Fix: config/options UI labels** – all config flow steps now have correct labels in both English and Swedish. The charger and car setup steps (`charger_menu`, `charger`, `car_menu`, `car` and their options counterparts) previously used wrong step IDs (`ev_menu`/`ev_car`) that did not match the actual flow, causing fields to show raw key names instead of readable labels. All fields — charger name, connection sensor, charge current setpoint, car onboard charger phases, etc. — now display correctly.
 - **Backtest framework** – added `testdata/backtest.py` for replaying historical sensor data through the energy controller. Reads timdata/realtidsdata CSVs, reconstructs `EnergyState` at each timestamp, runs `EnergyController.compute()`, and outputs a semicolon-separated CSV with comma as decimal separator (Excel-compatible). Supports date filtering and parameter overrides (`--min-soc`, `--percentile`).
 
-## What's New in 0.5.7
+### What's New in 0.5.7
 
 - **Battery cost accounting** – three new sensors track the accumulated cost of energy currently stored in the battery:
   - `sensor.sem_battery_accumulated_cost` – total cost (SEK) of energy in the battery. Grid energy is priced at the current buy price; solar energy is priced at the current sell price (opportunity cost – you could have sold it instead). During discharge the cost is reduced proportionally.
@@ -1205,18 +1112,18 @@ Stage 2 of the development roadmap — a controller with a correct value model.
 - **Solar-active battery charge cap** – when solar production exceeds 100 W the battery is never charged beyond the actual solar surplus; grid power is never drawn into the battery while the sun is producing.
 - **Discharge blocked when solar covers load** – if solar output already covers the full house load the system no longer forces battery discharge, even at high prices, since no grid power is being purchased anyway.
 
-## What's New in 0.5.6
+### What's New in 0.5.6
 
 - **Sell-price-aware battery charging** – when the sell price is at or above a configurable threshold (default SEK 0.80/kWh), solar surplus is exported to the grid instead of stored in the battery.
 - **Solcast-based evening fill** – the system compares the remaining Solcast solar forecast until sunset against how much energy the battery still needs to reach the configured minimum SOC (`evening_min_soc`, default 90 %). If the forecast falls short, the battery is charged from solar (or grid) even when sell prices are high. Because the Solcast forecast is calibrated to the actual panel location and angle, this works correctly across all seasons without any fixed clock time.
 - **Fix: battery no longer waits for solar during active production** – previously the "wait for solar" flag blocked battery charging all day whenever significant solar was expected within 2 h. The guard now only activates when current solar output is below 500 W (sun not yet producing).
 - **Sun integration** – `sun_next_setting` and `sun_next_rising` are read from the `sun.sun` entity and added to `EnergyState` for use in the evening-fill calculation.
 
-## What's New in 0.5.5
+### What's New in 0.5.5
 
 - **Solcast 30-minute solar forecast integration** – the `detailedForecast` attribute from Solcast sensors is matched against Nord Pool price slots, giving the scheduler per-slot solar data. New decisions: skip grid battery charging when significant solar is expected within 2 h, and create extra battery headroom ahead of a large solar peak. Six new sensors exposed (see [Entities](#entities)).
 
-## What's New in 0.5.4
+### What's New in 0.5.4
 
 - **Auto-clear active car after full charge** – when a car reaches its SOC target the active car selection is automatically reset to "unknown", so the charger is ready for the next session without manual intervention.
 
