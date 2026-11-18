@@ -79,4 +79,18 @@ def test_measured_overload_is_still_a_warning(caplog):
     ctrl = _ctrl()
     with caplog.at_level(logging.WARNING):
         ctrl._apply_phase_limits(_phase_state(18.0), ControlDecision())
-    assert any("L2" in r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("L2" in m for m in warnings)
+    # Den uppmätta strömmen står i texten, inte bara den beräknade med beslutet.
+    assert any("uppmätt 18.0A" in m for m in warnings)
+
+
+def test_regulating_at_the_margin_is_not_a_warning(caplog):
+    # 18 nov 2026 04–06: L2 uppmätt 15,1 A (reglerar mot 15 A, gräns 17 A) medan
+    # planen ville ladda 8 kW – loggen skrev "20,1 A" 38 gånger.
+    ctrl = _ctrl()
+    decision = ControlDecision(battery_charge_power_w=8000.0)
+    with caplog.at_level(logging.WARNING):
+        out = ctrl._apply_phase_limits(_phase_state(15.1), decision)
+    assert out.battery_charge_power_w < 8000.0
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

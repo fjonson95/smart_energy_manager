@@ -850,3 +850,15 @@ Husets egen grundobalans (16 nov 01:45: L1 0,23, L2 0,76, L3 0,41 kW) förklarar
 **Efter ändringen:** kvarvarande skillnad mellan kontrollerns andel och exekutorns är (a) mätartefakt (V_charge från föregående plan i skriptet) och (b) kontrollerns överskottsrättning med nätexport (`min(sol, export + laddning − urladdning)`), som exekutorn inte har – den ger pannan/dumpen mindre, aldrig dubbelräknat. Att ge exekutorn samma rättade överskott ändrar batteribeteendet och är ett eget beslut.
 
 **Mätning:** backtesterna oförändrade på öret (sommar 212,95, vinter 1 357,69, utan facit 321,80, nov14 129,86, lagerjusterat). pvmaxcomp och dump ingår inte i backtestens kostnad – utvärderas live.
+
+## 2026-11-18 – Fasvarningar på L2: reglering, inte överlast (v0.9.83)
+
+**Utredning:** 38 varningar "Pass 0: fas L2 import överskriden 15,1–20,1A (max 15,0A)" 04:42–06:09 (HA på v0.9.80). Elmätaren (`sensor.elmatare_current_l2`, 5-minutersstatistik): snitt 15,0–15,2 A i varje fönster 04:00–06:15, max 16–18 A (18,0 A 05:15–05:25), huvudsäkringens 20 A aldrig nådd. L1/L3 10–11 A. L2 bar värmepumpens kompressor (`sensor.ivt_phase_a_current` = L2, 4–6 A) och ~6 A på Elmhus kanal B. Varningen grindades på uppmätt > `max_current_effective` (15 A = regleringsmålet) men skrev ut `phase_current` = uppmätt + (nytt kommando − förra)/3, alltså med planens ostrypta 8 kW – "20,1 A" var aldrig uppmätt. Strypt laddning mot planen: timmarna 04/05/06 plan 8,0/5,7/2,6 kW, exekutor 6,7/4,7/2,4 kW (≈ 2,5 kWh, delvis flyttad till senare kvartar när planen byggs om).
+
+**Ändring:** varning bara när uppmätt ström > `max_current` (konfigurerade 17 A); texten visar uppmätt och med beslutet. "Inget mer att strypa" samma regel. Ingen ändring i regleringen.
+
+**Öppet:** värmepumpens last på L2 stryper nattladdningen (alternativ C, fasobalans i planens laddtak – mätt och bortvalt 2026-11-16 då bilen dominerade). Tas upp igen bara på användarens begäran.
+
+## 2026-11-18 – Fas B, steg B5.4.3: städning (v0.9.83)
+
+`np.float64` → `float` i planens slots (`target_power_w`, `battery_soc_est_pct`). Slottider i plansensorns attribut minutupplösta (15,4 kB live med 97 slots före ändringen; bilens `ev_charge_w` kan lägga till några hundra byte). `_fetch_weather_forecast` → `_update_forecast_temps` (bara dygnsmedeltemperaturen), `_daily_load_kwh_by_date` borta, `EnergyState.load_shape_p75`/`sun_next_*`/`battery_avg_cost_sek_kwh` borta. Backtesterna oförändrade på öret. Fas B är därmed klar; nästa är fas C (struktur) enligt HANDOFF.md.

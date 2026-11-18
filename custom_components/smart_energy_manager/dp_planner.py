@@ -375,8 +375,9 @@ class DPPlanner:
                 reason = (f"DP: håller batteriet, köper {deficit / h * 1000:.0f}W ({buy[t]:.2f} kr)"
                           if deficit > 0.01 else f"DP: vilar (sälj {sell[t]:.2f} kr)")
             planned.append(PlannedSlot(
-                start=s.start, end=s.end, action=action, target_power_w=power_w,
-                battery_soc_est_pct=round(soc_pct, 1), reason=reason,
+                # float(): numpy-tal i slots gav np.float64 i sensorattributen och planloggen.
+                start=s.start, end=s.end, action=action, target_power_w=float(power_w),
+                battery_soc_est_pct=round(float(soc_pct), 1), reason=reason,
                 # Laddslots håller också batteriet: när solen sviker ska exekutorn
                 # köpa nätdelen, inte ladda ur (15 nov 2026 12:00–12:30, köp 1,55 kr).
                 hold_battery=(k == 0 and deficit > 0.01) or k > 0,

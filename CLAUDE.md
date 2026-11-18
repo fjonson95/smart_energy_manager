@@ -67,7 +67,7 @@ docs/decisions.md       # Daterade beslut och flyttade incidentberättelser (P01
 6. Coordinator applicerar beslut via HA-tjänster
 
 ### Fasströmsgräns
-`20A × 3 faser × 230V = 13 800 W` total faskapacitet. `_apply_phase_limits()` i energy_controller ser till att summan håller sig under `max_current_per_phase`.
+`20A × 3 faser × 230V = 13 800 W` total faskapacitet. `_apply_phase_limits()` i energy_controller reglerar mot `max_current_per_phase` minus `DEFAULT_PHASE_CURRENT_MARGIN` (17 − 2 = 15 A) och varnar bara när den *uppmätta* strömmen är över den konfigurerade gränsen (17 A); 15–17 A är normal reglering och loggas på debug.
 
 ### Batterikostnad
 - Solenergi till batteri bokförs till **säljpris** (alternativkostnad)

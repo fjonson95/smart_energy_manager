@@ -33,3 +33,12 @@ def test_stale_plan_is_dropped():
 def test_plan_within_grace_is_still_used():
     p = _plan(25)
     assert plan_if_fresh(p, NOW) is p
+
+
+def test_plan_slots_hold_plain_floats():
+    # np.float64 i slots hamnade i sensorattributen och planloggen (B5.4.3).
+    from test_dp_solar_share import _plan
+    plan = _plan(solar_kw=1.44)
+    for s in plan.slots:
+        assert type(s.target_power_w) is float
+        assert type(s.battery_soc_est_pct) is float

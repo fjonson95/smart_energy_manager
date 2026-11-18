@@ -269,21 +269,8 @@ class EnergyState:
     # base_dhw + k * max(0, T_balance - avg_temp) [+ extra om disinfecting]
     predicted_daily_kwh: float = 0.0
 
-    # Lastens FORM: 24 värden (fraktion av dygnets totala kWh per timme, P75
-    # över rullande <=21-dygnsfönster, coordinator._get_load_shape(0.75)).
-    # None om ingen historik finns än, eller enskilda timmar utan täckning
-    # (då faller kvällsfyllningen tillbaka på det platta hourly_load_kw-snittet).
-    load_shape_p75: Optional[list] = None
-
-    # Sol-tider (från HA sun-integration, används för dynamisk kvällsfylling)
-    sun_next_setting: Optional[datetime] = None
-    sun_next_rising: Optional[datetime] = None
-
     # Tidpunkt då sol förväntas täcka huslasten (beräknat från Solcast imorgon)
     solar_takeover_dt: Optional[datetime] = None
-
-    # Snittpris för energin i batteriet (SEK/kWh) – från BatteryAccumulatedCostSensor
-    battery_avg_cost_sek_kwh: float = 0.0
 
     # Aktuell planslot-action från planen ("export", "grid_charge", "cover_load", "idle", …)
     # Sätts av coordinator precis innan compute() anropas. None = ingen plan tillgänglig.
@@ -903,10 +890,10 @@ class EnergyController:
                 loads[ph] = sign * current_a * self.voltage
             else:
                 loads[ph] = power_w
-        # Varning bara när den uppmätta strömmen redan är över gränsen – att
-        # strypa ett beslut som annars hade gått över är normal drift (951
-        # varningar 11 nov 2026, nästan alla nattladdning som ströps varje cykel).
-        measured_over = {ph: abs(w) / self.voltage > self.max_current_effective for ph, w in loads.items()}
+        # Varning bara vid verklig överlast: uppmätt ström över den KONFIGURERADE
+        # gränsen. Regleringen siktar på max − marginal, så 15,1 A mot 15 A är
+        # normal drift (18 nov 2026: 38 varningar med L2 i snitt 15,0–15,2 A).
+        measured_a = {ph: abs(w) / self.voltage for ph, w in loads.items()}
 
         # Baslinje = SEM:s eget senaste kommando, inte Sonnens fördröjda sensor (pendling 2026-09-14). Se docs/decisions.md C09.
         current_batt_per_phase = self._last_battery_command_w / 3.0  # positiv=laddning, negativ=urladdning
@@ -973,9 +960,9 @@ class EnergyController:
                     # (solproduktionen styr vi inte).
                     over_w = (abs(phase_current) - self.max_current_effective) * self.voltage
                     _LOGGER.log(
-                        logging.WARNING if iteration == 0 and measured_over[ph] else logging.DEBUG,
-                        "Pass %d: fas %s export överskriden %.1fA (max %.1fA)",
-                        iteration, ph, abs(phase_current), self.max_current_effective,
+                        logging.WARNING if iteration == 0 and measured_a[ph] > self.max_current else logging.DEBUG,
+                        "Pass %d: fas %s export – uppmätt %.1fA, med beslutet %.1fA (gräns %.1fA, reglerar mot %.1fA)",
+                        iteration, ph, measured_a[ph], abs(phase_current), self.max_current, self.max_current_effective,
                     )
                     if decision.battery_discharge_power_w > 0:
                         reduce_w_total = min(over_w * 3, decision.battery_discharge_power_w)
@@ -987,9 +974,9 @@ class EnergyController:
                 over_w = (phase_current - self.max_current_effective) * self.voltage
 
                 _LOGGER.log(
-                    logging.WARNING if iteration == 0 and measured_over[ph] else logging.DEBUG,
-                    "Pass %d: fas %s import överskriden %.1fA (max %.1fA)",
-                    iteration, ph, phase_current, self.max_current_effective,
+                    logging.WARNING if iteration == 0 and measured_a[ph] > self.max_current else logging.DEBUG,
+                    "Pass %d: fas %s import – uppmätt %.1fA, med beslutet %.1fA (gräns %.1fA, reglerar mot %.1fA)",
+                    iteration, ph, measured_a[ph], phase_current, self.max_current, self.max_current_effective,
                 )
 
                 # Prio 1: EV (lägst prio sist)
@@ -1048,9 +1035,10 @@ class EnergyController:
         for ph in PHASES:
             remaining_a = abs(loads[ph]) / self.voltage
             if remaining_a > self.max_current_effective + 0.05:
-                _LOGGER.warning(
-                    "Fas %s över gränsen efter fasskyddet: %.1fA (max %.1fA) – inget mer att strypa",
-                    ph, remaining_a, self.max_current_effective,
+                _LOGGER.log(
+                    logging.WARNING if remaining_a > self.max_current else logging.DEBUG,
+                    "Fas %s över reglergränsen efter fasskyddet: %.1fA (gräns %.1fA, reglerar mot %.1fA) – inget mer att strypa",
+                    ph, remaining_a, self.max_current, self.max_current_effective,
                 )
 
         # Separat exporttak – växelriktarens AC-exportgräns är en annan begränsning

@@ -1188,8 +1188,9 @@ class DayPlanReasonSensor(_DayPlanBase):
             # 16 kB-gräns för attribut och slutade sparas alls.
             "slots": [
                 {
-                    "start": slot.start.isoformat(),
-                    "end": slot.end.isoformat(),
+                    # Minutupplöst: attributen låg på 15,4 kB mot recorderns 16 kB (18 nov 2026).
+                    "start": slot.start.isoformat(timespec="minutes"),
+                    "end": slot.end.isoformat(timespec="minutes"),
                     "action": slot.action,
                     "target_power_w": round(slot.target_power_w, 0),
                     "battery_soc_est_pct": round(slot.battery_soc_est_pct, 1),
