@@ -12,7 +12,7 @@ from .coordinator import SmartEnergyCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Entiteter som togs bort när V-planeraren försvann (fas B5.4.1); utan
+# Entiteter som togs bort med V-planeraren (fas B5.4.1–B5.4.2); utan
 # städningen ligger de kvar som "inte längre tillhandahållen" i registret.
 _REMOVED_UNIQUE_IDS = (
     ("sensor", "sem_plan_b_action"),
@@ -21,6 +21,8 @@ _REMOVED_UNIQUE_IDS = (
     ("sensor", "sem_plan_b_reason"),
     ("sensor", "sem_active_planner"),
     ("select", "sem_planner_select"),
+    # B5.4.2: opportunistisk nätladdning (steg 4) borttagen – planen nätladdar.
+    ("switch", "sem_opportunistic_charge"),
 )
 
 

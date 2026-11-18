@@ -61,7 +61,6 @@
           "battery_min_soc": "Min SOC (%)",
           "battery_max_soc": "Max SOC (%)",
           "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
-          "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
           "ev_reserve_margin_kwh": "EV-marginal i exportgolvet vid låg sol (kWh, standard 2.5)",
           "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)",
           "battery_ac_discharge_energy_entity": "Ackumulerad AC-urladdning (kWh, valfri – för ekvivalenta fullcykler och uppmätt verkningsgrad)",
@@ -210,7 +209,6 @@
           "battery_min_soc": "Min SOC (%)",
           "battery_max_soc": "Max SOC (%)",
           "eta_roundtrip": "Batteriets tur-och-retur-verkningsgrad (0.5-1.0)",
-          "cycle_cost_sek_kwh": "Uppskattad slitagekostnad per cyklad kWh (kr/kWh)",
           "ev_reserve_margin_kwh": "EV-marginal i exportgolvet vid låg sol (kWh, standard 2.5)",
           "battery_power_inverted": "Inverterat tecken på batterieffekt (Sonnenbatterie: positiv = urladdning)",
           "battery_ac_discharge_energy_entity": "Ackumulerad AC-urladdning (kWh, valfri – för ekvivalenta fullcykler och uppmätt verkningsgrad)",
@@ -431,10 +429,6 @@
       "force_charge_battery": {
         "name": "Tvångsladdning batteri",
         "description": "Tvingar batteriet att ladda från nätet oavsett pris. Används manuellt för att snabbt fylla batteriet."
-      },
-      "opportunistic_charge": {
-        "name": "Opportunistisk nätladdning",
-        "description": "Laddar batteriet från nätet om köppriset är under den billiga priströskeln."
       }
     },
     "number": {

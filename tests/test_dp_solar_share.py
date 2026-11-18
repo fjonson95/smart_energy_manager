@@ -49,7 +49,8 @@ def test_step_mostly_from_sun_is_solar_charge():
 
 def test_grid_charge_in_economic_peak_stores_real_solar_surplus():
     # 12 nov 10:26: sol 3,8 kW, hus 1,3 kW, köp 2,93 ≥ 1,2 × nattens 2,0 (economic_peak);
-    # förr täckte grenen bara underskott och 2,5 kW exporterades.
+    # förr täckte grenen bara underskott och 2,5 kW exporterades. economic_peak finns
+    # inte längre (B5.4.2): planens nätladdning plus överskottet laddas.
     from custom_components.smart_energy_manager.energy_controller import (
         ControlDecision, EnergyController, EnergyState,
     )
@@ -76,7 +77,7 @@ def test_grid_charge_in_economic_peak_stores_real_solar_surplus():
     ctrl = EnergyController(max_current_per_phase=17, battery_min_soc=8, battery_max_soc=99)
     out = ctrl.apply_plan_executor(plan, "auto", state, ControlDecision(), now, 2500.0)
     assert out.battery_charge_power_w > 2000.0
-    assert "economic_peak" in out.reason
+    assert "economic_peak" not in out.reason
 
 
 def test_dp_charge_slot_holds_battery_and_carries_grid_part():

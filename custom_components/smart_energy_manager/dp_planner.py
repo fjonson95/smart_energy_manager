@@ -21,7 +21,7 @@ from typing import Optional
 
 import numpy as np
 
-from .const import DP_LOAD_BALANCE_TEMP_C, DP_LOAD_K_KWH_DD, PLANNER_DP
+from .const import DP_LOAD_BALANCE_TEMP_C, DP_LOAD_K_KWH_DD
 from .energy_planner import DayPlan, PlannedSlot, _PLAN_HORIZON_H
 
 _STEP_KWH = 0.1
@@ -401,5 +401,4 @@ class DPPlanner:
             marginal_value_charge_sek_kwh=v_stored * eta_leg,
             slots=planned,
             notes=notes,
-            planner=PLANNER_DP,
         )

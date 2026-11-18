@@ -172,8 +172,6 @@ MODE_FORCE_CHARGE_BATTERY = "force_charge_battery"
 MODE_MANUAL = "manual"
 OPERATING_MODES = [MODE_AUTO, MODE_FORCE_CHARGE_EV, MODE_FORCE_CHARGE_BATTERY, MODE_MANUAL]
 
-# ── Planerare: DayPlan.planner ("v" fanns till och med v0.9.80) ───────────────
-PLANNER_DP = "dp"
 
 # ── Laddarsensorvärden som räknas som "ansluten" ──────────────────────────────
 CHARGER_CONNECTED_STATES = {"connected", "charging", "plugged_in", "pluggedin", "waiting",
@@ -257,17 +255,14 @@ CONF_NEGATIVE_PRICE_THRESHOLD = "negative_price_threshold_sek"
 CONF_PROACTIVE_ABSORPTION_SLOTS = "proactive_absorption_slots"
 CONF_BATTERY_POWER_INVERTED = "battery_power_inverted"
 CONF_ETA_ROUNDTRIP = "eta_roundtrip"
-CONF_CYCLE_COST_SEK_KWH = "cycle_cost_sek_kwh"
 
 DEFAULT_NEGATIVE_PRICE_THRESHOLD = 0.0   # SEK/kWh
 DEFAULT_PROACTIVE_ABSORPTION_SLOTS = 4   # Antal negativa kvartstimmar inom 2h för att reagera
 DEFAULT_ETA_ROUNDTRIP = 0.849            # Batteriets tur-och-retur-verkningsgrad – uppmätt (v1.0 steg 1):
                                           # sensor.sonnen_batt_use_energy / sensor.sonnen_battcharge_energy,
                                           # anläggningens egna AC-räknare, inte en antagen siffra
-DEFAULT_CYCLE_COST_SEK_KWH = 0.05        # Uppskattad slitagekostnad per cyklad kWh
 
-DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH = 10.0   # Opportunistisk laddning tillåts om sol imorgon < detta (kWh)
-DEFAULT_CHEAP_CHARGE_BUY_PERCENTILE = 0.30  # Ladda under billigaste 30% av kommande prisslots
+DEFAULT_CHEAP_CHARGE_MAX_SOLAR_KWH = 10.0   # Lite sol idag/imorgon (kWh): bilens 8 A-schema och EV-reserven
 
 # ── Minimitid för extra varmvatten ──────────────────────────────────────────────
 CONF_EXTRA_HOT_WATER_MIN_RUNTIME_MINUTES = "extra_hot_water_min_runtime_minutes"

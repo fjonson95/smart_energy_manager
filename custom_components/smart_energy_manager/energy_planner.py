@@ -53,9 +53,6 @@ class DayPlan:
 
     slots: list[PlannedSlot] = field(default_factory=list)
     notes: str = ""
-    # "dp": exekutorn klämmer bara mot fysiken (fas B5.3). Standardvärdet "v"
-    # finns kvar för exekutorns gamla gren tills den tas bort i B5.4.2.
-    planner: str = "v"
 
     def slot_at(self, dt: datetime) -> Optional[PlannedSlot]:
         dt_aware = dt if dt.tzinfo else dt.astimezone()

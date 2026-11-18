@@ -54,7 +54,7 @@ from .const import (
     CONF_HEAT_FACTOR_KWH_DD, DEFAULT_HEAT_FACTOR_KWH_DD,
     CONF_BASE_DHW_KWH, DEFAULT_BASE_DHW_KWH,
     CONF_BATTERY_POWER_INVERTED,
-    CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH,
+    CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP,
     CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH,
 )
 
@@ -171,9 +171,6 @@ def _battery_schema(d: dict) -> vol.Schema:
         vol.Optional(CONF_BATTERY_POWER_INVERTED, default=_d(d, CONF_BATTERY_POWER_INVERTED, False)): selector.BooleanSelector(),
         vol.Optional(CONF_ETA_ROUNDTRIP, default=_d(d, CONF_ETA_ROUNDTRIP, DEFAULT_ETA_ROUNDTRIP)): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX)
-        ),
-        vol.Optional(CONF_CYCLE_COST_SEK_KWH, default=_d(d, CONF_CYCLE_COST_SEK_KWH, DEFAULT_CYCLE_COST_SEK_KWH)): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX)
         ),
         vol.Optional(CONF_EV_RESERVE_MARGIN_KWH, default=_d(d, CONF_EV_RESERVE_MARGIN_KWH, DEFAULT_EV_RESERVE_MARGIN_KWH)): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.0, max=20.0, step=0.5, mode=selector.NumberSelectorMode.BOX)

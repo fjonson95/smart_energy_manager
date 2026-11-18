@@ -61,7 +61,6 @@
           "battery_min_soc": "Min SOC (%)",
           "battery_max_soc": "Max SOC (%)",
           "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
-          "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
           "ev_reserve_margin_kwh": "EV reserve margin under low solar (kWh, default 2.5)",
           "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)",
           "battery_ac_discharge_energy_entity": "Cumulative AC discharge energy (kWh, optional – for equivalent full cycles and measured efficiency)",
@@ -210,7 +209,6 @@
           "battery_min_soc": "Min SOC (%)",
           "battery_max_soc": "Max SOC (%)",
           "eta_roundtrip": "Battery round-trip efficiency (0.5-1.0)",
-          "cycle_cost_sek_kwh": "Estimated wear cost per cycled kWh (SEK/kWh)",
           "ev_reserve_margin_kwh": "EV reserve margin under low solar (kWh, default 2.5)",
           "battery_power_inverted": "Inverted battery power sign (Sonnenbatterie: positive = discharging)",
           "battery_ac_discharge_energy_entity": "Cumulative AC discharge energy (kWh, optional – for equivalent full cycles and measured efficiency)",
@@ -431,10 +429,6 @@
       "force_charge_battery": {
         "name": "Force Charge Battery from Grid",
         "description": "Forces the battery to charge from the grid regardless of price. Use manually to quickly top up the battery."
-      },
-      "opportunistic_charge": {
-        "name": "Opportunistic Grid Charge",
-        "description": "Charges the battery from the grid when the buy price is below the cheap price threshold."
       }
     },
     "number": {

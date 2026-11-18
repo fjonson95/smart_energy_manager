@@ -149,8 +149,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         self._grid_scale = 1000.0 if self._config.get(CONF_GRID_POWER_UNIT, UNIT_W) == UNIT_KW else 1.0
         self._ev_scale   = 1000.0 if self._config.get(CONF_EV_POWER_UNIT,   UNIT_W) == UNIT_KW else 1.0
 
-        # Reserv och cykelkostnad är DP:s egna (B3-beslut), inte HA-inställningen
-        # CONF_CYCLE_COST_SEK_KWH som V-planeraren använde (borttagen i B5.4.1).
+        # Reserv och cykelkostnad (0,10 kr/kWh) är DP:s egna (B3-beslut).
         self._dp_planner = DPPlanner(
             battery_min_soc=float(self._config.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
             battery_max_soc=float(self._config.get(CONF_BATTERY_MAX_SOC, DEFAULT_BATTERY_MAX_SOC)),
@@ -195,7 +194,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # inaktuell Solcast-data inte nollställer värdet mitt i natten.
         # Nollställs när sol producerar igen (solar_w > 200 W).
         self._saved_solar_takeover_dt: Optional[datetime] = None
-        self.opportunistic_charge_enabled: bool = True
 
         # Minimitid-spärr för extra varmvatten (förhindrar flimmer på/av)
         self._extra_hot_water_started_at: Optional[datetime] = None
@@ -558,7 +556,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "solar_tomorrow_p10_kwh": _attr(tomorrow_entity, "estimate10"),
                 "solar_tomorrow_p90_kwh": _attr(tomorrow_entity, "estimate90"),
                 "notes": plan.notes,
-                "planner": plan.planner,
                 "daily_load_kwh_by_date": {str(d): round(v, 2) for d, v in self._day_plan_levels.items()},
                 "slot_columns": ["start", "action", "power_w", "soc_pct", "buy", "sell", "hold_battery", "reason"],
                 "slots": rows,
@@ -1721,7 +1718,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 sun_next_rising=self._get_sun_datetime("next_rising"),
                 solar_takeover_dt=solar_takeover_dt,
                 battery_avg_cost_sek_kwh=self._battery_avg_cost_sek_kwh,
-                opportunistic_charge_enabled=self.opportunistic_charge_enabled,
             )
             self._state = state
 
@@ -1873,10 +1869,6 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "battery_soc_pct": state.battery_soc_pct,
                 "battery_min_soc": float(c.get(CONF_BATTERY_MIN_SOC, 20)),
                 "battery_max_power_kw": state.battery_max_power_kw,
-                "sell_solar_min_price": self._controller.sell_solar_min_price,
-                "evening_target_soc_pct": decision.evening_target_soc if decision.evening_target_soc > 0 else (
-                    self._day_plan.evening_target_soc_pct if self._day_plan else 30.0
-                ),
                 "legionella_active": legionella_active,
                 "legionella_last_run": self._legionella.last_run,
                 "legionella_days_since": self._legionella.days_since_last_run,

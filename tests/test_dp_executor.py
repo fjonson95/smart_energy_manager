@@ -20,7 +20,7 @@ Q = NOW.replace(minute=15)
 
 
 def _run(action, target_w, *, solar_w, house_w, buy=2.93, sell=1.66, soc=50.0, v_charge=2.5,
-         hold=False, planner="dp", grid_charge_w=0.0):
+         hold=False, grid_charge_w=0.0):
     cur = PriceSlot(start=Q, end=Q + timedelta(minutes=15), spot_sek=sell - 0.065, buy_sek=buy, sell_sek=sell)
     night = PriceSlot(start=Q + timedelta(hours=10), end=Q + timedelta(hours=10, minutes=15),
                       spot_sek=0.85, buy_sek=2.0, sell_sek=0.9)
@@ -35,19 +35,17 @@ def _run(action, target_w, *, solar_w, house_w, buy=2.93, sell=1.66, soc=50.0, v
     plan = DayPlan(generated_at=NOW, valid_until=NOW + timedelta(hours=1), evening_target_soc_pct=8.0,
                    export_floor_kwh=2.46, total_exportable_kwh=0.0, expected_revenue_sek=0.0,
                    solar_takeover_dt=None, hourly_load_kw=1.5, slots=[slot],
-                   marginal_value_charge_sek_kwh=v_charge, planner=planner)
+                   marginal_value_charge_sek_kwh=v_charge)
     ctrl = EnergyController(max_current_per_phase=25, battery_min_soc=8, battery_max_soc=99)
     return ctrl.apply_plan_executor(plan, "auto", state, ControlDecision(), NOW,
                                     max(0.0, solar_w - house_w))
 
 
 def test_grid_charge_is_not_vetoed_by_economic_peak():
-    # köp 2,93 ≥ 1,2 × 2,0: V-vägen laddar ur, plan B laddar som planerat.
+    # köp 2,93 ≥ 1,2 × 2,0: den borttagna V-vägen laddade ur, planen laddar som planerat.
     out = _run("grid_charge", 3000.0, solar_w=0.0, house_w=1300.0)
     assert out.battery_charge_power_w == 3000.0
     assert out.battery_discharge_power_w == 0.0
-    v = _run("grid_charge", 3000.0, solar_w=0.0, house_w=1300.0, planner="v")
-    assert v.battery_charge_power_w == 0.0
 
 
 def test_grid_charge_adds_real_solar_surplus():

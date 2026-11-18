@@ -838,3 +838,15 @@ Husets egen grundobalans (16 nov 01:45: L1 0,23, L2 0,76, L3 0,41 kW) förklarar
 **Kvar till B5.4.2:** `DayPlan.planner` och V-grenen i `apply_plan_executor` (oåtkomlig i drift), `_auto_mode`:s batteripolicy (steg 4) och `sell_solar_min_price`, samt HA-inställningen `cycle_cost_sek_kwh` som ingen läser längre (DP har egen 0,10). Väderprognosen hämtas fortfarande, men bara för prognosdygnens medeltemperatur.
 
 **Mätning:** backtesterna oförändrade på öret: sommar 212,95, vinter 1 357,69, utan facit 27 okt–10 nov 321,80, 10–14 nov 129,86 (lagerjusterat). Max-SOC-invarianten i sommarbacktesten håller nu (DP-vägen laddar inte vid max) och är inte längre xfail.
+
+## 2026-11-18 – Fas B, steg B5.4.2: batteriets överskottsandel från planen, steg 4 borta (v0.9.82)
+
+**Mätning före ändring (backtestens sim-bana, mätskript i sessionens scratchpad):** steg 4:s förslag (ladda inte om sälj ≥ `sell_solar_min_price` 0,80 och ≥ 0,9 × billigaste köp) jämfört med planens regel. Sommar: 107 av 377 överskottskvartar skilde sig (73 där planen lagrar men steg 4 trodde att den inte gjorde det); energi under pvmaxcomp-taket 109,6 → 62,3 kWh; dumpens täckningsvillkor slår om i 58 kvartar. Vinter: 740 av 892; 112,8 → 11,2 kWh; 66 kvartar. Avvikelserna mellan regeln och exekutorns faktiska laddning (15/191 kvartar) var alla grid_charge/solar_charge där planens nätdel läggs ovanpå hela överskottet – ofarligt för andelen. Backtesten matar inte `plan_marginal_value_charge_sek_kwh` till kontrollern, så dumpens huvudregel slår aldrig till där (0 dumpkvartar); driften matar den.
+
+**Beslut (användaren):** en delad funktion i stället för en kopia av regeln. `plan_surplus_charge_w(action, v_charge, sell, surplus, can_charge, max_w)`: laddande kvart → allt, export → inget, övriga → allt om överskott > 100 W och sälj < V_charge, ingen plan → allt. Används i `_execute_dp_slot` och i `_auto_mode` (förtur före EV-loopen när Sonnen faktiskt laddar > 100 W, sedan andelen efter EV).
+
+**Ändring:** exekutorns V-gren, `DayPlan.planner`, `_auto_mode`:s kvällsmål/kvällsfyllning/`prefer_sell`/`wait_solar`/opportunistisk nätladdning/econ-peak-egenförbrukning, `sell_solar_min_price`, `evening_min_soc`, `ControlDecision.evening_target_soc`, `switch.sem_opportunistic_charge` (registerstädning), `cycle_cost_sek_kwh` ur config flow och const borttagna. Utan plan: ladda överskott, täck underskott; batteritexter i beslutet bara utan plan ("(ingen plan)"), annars skriver exekutorn "Plan <åtgärd>: …".
+
+**Efter ändringen:** kvarvarande skillnad mellan kontrollerns andel och exekutorns är (a) mätartefakt (V_charge från föregående plan i skriptet) och (b) kontrollerns överskottsrättning med nätexport (`min(sol, export + laddning − urladdning)`), som exekutorn inte har – den ger pannan/dumpen mindre, aldrig dubbelräknat. Att ge exekutorn samma rättade överskott ändrar batteribeteendet och är ett eget beslut.
+
+**Mätning:** backtesterna oförändrade på öret (sommar 212,95, vinter 1 357,69, utan facit 321,80, nov14 129,86, lagerjusterat). pvmaxcomp och dump ingår inte i backtestens kostnad – utvärderas live.
