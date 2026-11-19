@@ -175,6 +175,7 @@ class DPPlanner:
         cap_only_loads: Optional[list] = None,
         phase_limit_a: Optional[float] = None,
         grid_voltage: float = 230.0,
+        solar_factor_by_date: Optional[dict] = None,
         **_unused,
     ) -> DayPlan:
         """load_kw_by_start: {slot-start: kW} som ersätter lastmodellen –
@@ -189,7 +190,10 @@ class DPPlanner:
         (last − sol) antas jämnt fördelad, kända laster på sina faser. Utan den
         planerade DP 7,9 kW laddning rakt igenom Legionellans patron (26 okt
         2026) som exekutorns fasskydd sedan ströp – planen räknade med kvartar
-        som inte gick att använda."""
+        som inte gick att använda.
+
+        solar_factor_by_date: {datum: faktor} för dygn med snötäckta paneler
+        (solar_snow.solar_factors) – Solcasts sol × faktor."""
         now_a = now if now.tzinfo else now.astimezone()
         horizon_end = now_a + timedelta(hours=_PLAN_HORIZON_H)
         cap = battery_capacity_kwh
@@ -261,6 +265,8 @@ class DPPlanner:
                     cap_ph[ph] = cap_ph.get(ph, 0.0) + k_kw / len(k_phases) * overlap_h / h
             load_kw = load_kw_at(start)
             solar_kw = s.solar_kwh * frac / h
+            if solar_factor_by_date:
+                solar_kw *= solar_factor_by_date.get(s.start.astimezone().date(), 1.0)
             hours[t] = h
             net[t] = (load_kw + sum(extra_ph.values()) - solar_kw) * h
             buy[t] = s.buy_sek
@@ -388,6 +394,9 @@ class DPPlanner:
         notes = (f"DP: SOC {battery_soc_pct:.0f}% → {energies[i] / cap * 100:.0f}% | "
                  f"V={v_stored:.2f}kr/kWh lagrad | slutvärde {ref_buy * eta_leg:.2f}kr/kWh | "
                  f"reserv {reserve_kwh:.1f}kWh | export {exported_kwh:.1f}kWh")
+        if solar_factor_by_date:
+            days = ", ".join(f"{d:%d/%m} ×{f:.2f}" for d, f in sorted(solar_factor_by_date.items()))
+            notes += f" | snö på panelerna: sol {days}"
         return DayPlan(
             generated_at=now_a,
             valid_until=now_a + timedelta(minutes=15),

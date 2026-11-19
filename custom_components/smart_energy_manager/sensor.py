@@ -1175,6 +1175,8 @@ class DayPlanReasonSensor(_DayPlanBase):
             "daily_load_kwh_by_date": {
                 str(d): round(v, 1) for d, v in self.coordinator.day_plan_levels.items()
             },
+            "snow_covered": self.coordinator.snow_state.covered,
+            "solar_factor_by_date": {str(d): f for d, f in self.coordinator.solar_factors.items()},
             # Live-feedback 2026-09-23: användaren kunde inte spåra VARFÖR V
             # (sparvärdet) hamnade där det hamnade utan den här texten - bara
             # sparvärdet, ingen förklaring av vilken slot/möjlighet som satte

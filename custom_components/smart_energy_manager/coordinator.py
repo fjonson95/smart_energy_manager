@@ -73,6 +73,7 @@ from .energy_planner import DayPlan
 from .dp_planner import DPPlanner, calibrated_daily_levels, plan_if_fresh
 from .legionella import LegionellaManager
 from .savings_tracker import DailySavingsTracker
+from .solar_snow import SnowState, solar_factors, update_snow_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -220,6 +221,15 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         # Väderprognosens dygnsmedeltemperatur per lokalt datum (sätts av
         # _update_forecast_temps) – ger lastnivån per dygn i planen.
         self._forecast_mean_temp_by_date: dict = {}
+        # SMHI:s dygnsprognos {datum: (condition, tmax, tmin)} – snötäckningen framåt.
+        self._forecast_days_by_date: dict = {}
+        # Snötäckta paneler (solar_snow): tillståndet överlever omstart så att en
+        # täckning som upptäcktes under dagen gäller även för nattens planering.
+        self._snow = SnowState()
+        self._snow_store = Store(hass, 1, f"{DOMAIN}_snow")
+        self._snow_samples: list[tuple[datetime, float]] = []
+        self._solar_factors: dict = {}
+        self._plan_snow_sig: tuple = (False, 1.0)
 
         # Produktionskvot (P3-2): rullande 3-dygns kvot faktisk/prognos
         # solproduktion – upptäcker snötäckta/nedsmutsade paneler som
@@ -349,7 +359,73 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
         await self._load_savings_store()
         await self._load_heating_backup_store()
         await self._load_export_margin_store()
+        await self._load_snow_store()
         await super().async_config_entry_first_refresh()
+
+    async def _load_snow_store(self) -> None:
+        data = await self._snow_store.async_load()
+        if isinstance(data, dict):
+            self._snow = SnowState(
+                covered=bool(data.get("covered", False)),
+                ratio=float(data.get("ratio", 1.0)),
+                since=data.get("since"),
+            )
+
+    def _solcast_today_energy(self, now: datetime) -> tuple[float, float]:
+        """(prognos hittills idag, prognos senaste timmen) i kWh ur Solcasts
+        halvtimmar för idag – PriceScheduler tar bara med kommande slots."""
+        c = self._config
+        entity = c.get(CONF_SOLCAST_TODAY_DETAILED) or c.get(CONF_SOLCAST_TODAY)
+        st = self.hass.states.get(entity) if entity else None
+        so_far = last_hour = 0.0
+        hour_ago = now - timedelta(hours=1)
+        for entry in (st.attributes.get("detailedForecast") or []) if st else []:
+            try:
+                start = entry.get("period_start")
+                start = start if isinstance(start, datetime) else datetime.fromisoformat(str(start))
+                if start.tzinfo is None:
+                    start = dt_util.as_local(start)
+                kw = float(entry.get("pv_estimate", 0) or 0)
+            except (AttributeError, TypeError, ValueError):
+                continue
+            end = start + timedelta(minutes=30)
+            if dt_util.as_local(start).date() != dt_util.as_local(now).date() or start >= now:
+                continue
+            so_far += kw * (min(end, now) - start).total_seconds() / 3600.0
+            overlap_h = (min(end, now) - max(start, hour_ago)).total_seconds() / 3600.0
+            if overlap_h > 0:
+                last_hour += kw * overlap_h
+        return so_far, last_hour
+
+    def _update_snow(self, now: datetime, outdoor_temp_c: Optional[float]) -> None:
+        actual_entity = self._config.get(CONF_ACTUAL_SOLAR_DAILY_ENTITY)
+        if not actual_entity:
+            return
+        actual = self._get_state_float(actual_entity, default=None)
+        today = dt_util.as_local(now).date()
+        actual_last_hour = None
+        if actual is not None:
+            self._snow_samples = [
+                (ts, v) for ts, v in self._snow_samples
+                if dt_util.as_local(ts).date() == today and ts >= now - timedelta(minutes=75) and v <= actual
+            ]
+            older = [v for ts, v in self._snow_samples if ts <= now - timedelta(hours=1)]
+            if older:
+                actual_last_hour = actual - older[-1]
+            self._snow_samples.append((now, actual))
+        so_far, last_hour = self._solcast_today_energy(now)
+        new = update_snow_state(self._snow, today, actual, so_far, actual_last_hour, last_hour, outdoor_temp_c)
+        if new != self._snow:
+            if new.covered != self._snow.covered:
+                _LOGGER.info(
+                    "Solpanelerna %s: %.1f kWh mot prognos %.1f kWh idag (%.1f °C)",
+                    "verkar snötäckta" if new.covered else "producerar igen",
+                    actual or 0.0, so_far, outdoor_temp_c if outdoor_temp_c is not None else float("nan"),
+                )
+            self._snow = new
+            self.hass.async_create_task(self._snow_store.async_save(
+                {"covered": new.covered, "ratio": new.ratio, "since": new.since}
+            ))
 
     async def _load_pv_ratio_store(self) -> None:
         data = await self._pv_ratio_store.async_load()
@@ -1718,6 +1794,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
             self._state = state
 
             pv_production_ratio = self._update_pv_production_ratio(now, state.solar_forecast_today_kwh)
+            self._update_snow(now, state.outdoor_temp_c)
 
             # ── Dag-framåt plan ────────────────────────────────────────────
             # Direkt efter omstart saknar Sonnen-sensorn värde och SOC faller tillbaka på 50 %;
@@ -1733,9 +1810,13 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 # Planen byggs också om när Legionellas fönster ändras (valt,
                 # startat, klart) – patronen tar fasutrymmet DP annars laddar i.
                 legionella_window = self._legionella.planned_window
+                # Ny snötäckning (eller fri igen) ska slå igenom direkt, inte efter 15 min.
+                snow_sig = (self._snow.covered, round(self._snow.ratio * 20) / 20)
                 if (plan_expired or ps_sig != self._last_plan_ps_sig
-                        or legionella_window != self._plan_legionella_window):
+                        or legionella_window != self._plan_legionella_window
+                        or snow_sig != self._plan_snow_sig):
                     self._plan_legionella_window = legionella_window
+                    self._plan_snow_sig = snow_sig
                     known_loads = []
                     if legionella_window is not None:
                         known_loads.append((
@@ -1764,6 +1845,10 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             else 0.0
                         )
                         await self._update_forecast_temps()
+                        self._solar_factors = solar_factors(
+                            self._snow, dt_util.as_local(now).date(), self._forecast_days_by_date,
+                        )
+                        _tomorrow = dt_util.as_local(now).date() + timedelta(days=1)
                         self._day_plan_levels = calibrated_daily_levels(
                             self._daily_consumption_history, now.date(), self._forecast_mean_temp_by_date,
                         ) or {}
@@ -1777,7 +1862,8 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             battery_max_power_kw=state.battery_max_power_kw,
                             ps=price_schedule,
                             predicted_daily_kwh=state.predicted_daily_kwh,
-                            solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh,
+                            solar_forecast_tomorrow_kwh=state.solar_forecast_tomorrow_kwh
+                            * self._solar_factors.get(_tomorrow, 1.0),
                             solar_takeover_dt=state.solar_takeover_dt,
                             house_load_w=state.house_load_w,
                             pv_production_ratio=pv_production_ratio,
@@ -1791,6 +1877,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                             ev_demand=_ev_demand,
                             phase_limit_a=self._controller.max_current_effective,
                             grid_voltage=self._controller.voltage,
+                            solar_factor_by_date=self._solar_factors or None,
                         ))
                         self._last_plan_ps_sig = ps_sig
                         _LOGGER.info(
@@ -1915,6 +2002,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
 
         forecast_days = (response or {}).get(weather_entity, {}).get("forecast", [])
         self._forecast_mean_temp_by_date = {}
+        self._forecast_days_by_date = {}
         for day in forecast_days:
             try:
                 day_dt_raw = day.get("datetime")
@@ -1925,9 +2013,9 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 day_dt = datetime.fromisoformat(day_dt_raw)
                 if day_dt.tzinfo is None:
                     day_dt = day_dt.astimezone()
-                self._forecast_mean_temp_by_date[dt_util.as_local(day_dt).date()] = (
-                    float(temp_max_c) + float(temp_min_c)
-                ) / 2.0
+                day_date = dt_util.as_local(day_dt).date()
+                self._forecast_mean_temp_by_date[day_date] = (float(temp_max_c) + float(temp_min_c)) / 2.0
+                self._forecast_days_by_date[day_date] = (day.get("condition"), float(temp_max_c), float(temp_min_c))
             except (ValueError, TypeError) as err:
                 _LOGGER.debug("Kunde inte tolka väderprognos-dag %s: %s", day, err)
 
@@ -2273,3 +2361,11 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
     @property
     def day_plan_levels(self) -> dict:
         return self._day_plan_levels
+
+    @property
+    def snow_state(self) -> SnowState:
+        return self._snow
+
+    @property
+    def solar_factors(self) -> dict:
+        return self._solar_factors

@@ -4,6 +4,16 @@ Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.
 
 Backtestsiffror är besparing mot ett hus utan batteri. Från 0.9.81 är de lagerjusterade (energin kvar i batteriet räknas med): sommar = `testdata/history`, vinter = jan–apr 2026, "utan facit" = 27 okt–10 nov och 10–14 nov med riktiga Solcast-prognoser.
 
+## 0.9.84 – 2026-11-19 – Snötäckta solpaneler
+
+**Nytt**
+- Planen känner igen snötäckta paneler: om produktionen hittills under dagen är under 30 % av Solcasts prognos och det är minusgrader räknas panelerna som täckta. 19 nov gav de 0,7 kWh mot prognosen 6,0 kWh.
+- Medan panelerna är täckta räknar planen med Solcasts sol × den uppmätta kvoten, så den nätladdar på natten i stället för att vänta på sol som inte kommer.
+- Täckningen förs vidare med SMHI:s prognos tills dygnsmax når 1,5 °C, och ny snö mellan −5 och +5 °C täcker panelerna igen. När panelerna ger minst halva prognosen under en timme gäller Solcast direkt.
+- Planens anteckning visar "snö på panelerna: sol 20/11 ×0.12". Plansensorn har attributen `snow_covered` och `solar_factor_by_date`.
+
+**Verifierat:** pytest 86 · backtest oförändrad (sommar 212,95 · vinter 1 357,69 · utan facit 321,80 / 129,86 kr)
+
 ## 0.9.83 – 2026-11-18 – Fasvarningar bara vid verklig överlast
 
 **Ändrat**

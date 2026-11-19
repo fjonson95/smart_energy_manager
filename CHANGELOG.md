@@ -4,6 +4,16 @@ All notable changes to Smart Energy Manager. See [README.md](README.md) for the 
 
 Backtest figures are savings against a house without a battery. From 0.9.81 they are inventory-adjusted (energy left in the battery counts): summer = `testdata/history`, winter = Jan–Apr 2026, "without hindsight" = 27 Oct–10 Nov and 10–14 Nov with real Solcast forecasts.
 
+## 0.9.84 – 2026-11-19 – Snow-covered solar panels
+
+**New**
+- The plan recognises snow-covered panels: if production so far today is below 30 % of the Solcast forecast and it is below freezing, the panels count as covered. On 19 Nov they gave 0.7 kWh against a forecast of 6.0 kWh.
+- While the panels are covered the plan uses Solcast's solar × the measured ratio, so it grid-charges at night instead of waiting for sun that will not come.
+- The covering is carried forward with SMHI's forecast until the daily maximum reaches 1.5 °C, and new snow between −5 and +5 °C covers the panels again. Once the panels give at least half the forecast over an hour, Solcast applies again right away.
+- The plan note shows "snö på panelerna: sol 20/11 ×0.12". The plan sensor has the attributes `snow_covered` and `solar_factor_by_date`.
+
+**Verified:** pytest 86 · backtests unchanged (summer 212.95 · winter 1,357.69 · without hindsight 321.80 / 129.86 SEK)
+
 ## 0.9.83 – 2026-11-18 – Phase warnings only for real overload
 
 **Changed**

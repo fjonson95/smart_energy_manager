@@ -862,3 +862,15 @@ Husets egen grundobalans (16 nov 01:45: L1 0,23, L2 0,76, L3 0,41 kW) förklarar
 ## 2026-11-18 – Fas B, steg B5.4.3: städning (v0.9.83)
 
 `np.float64` → `float` i planens slots (`target_power_w`, `battery_soc_est_pct`). Slottider i plansensorns attribut minutupplösta (15,4 kB live med 97 slots före ändringen; bilens `ev_charge_w` kan lägga till några hundra byte). `_fetch_weather_forecast` → `_update_forecast_temps` (bara dygnsmedeltemperaturen), `_daily_load_kwh_by_date` borta, `EnergyState.load_shape_p75`/`sun_next_*`/`battery_avg_cost_sek_kwh` borta. Backtesterna oförändrade på öret. Fas B är därmed klar; nästa är fas C (struktur) enligt HANDOFF.md.
+
+## 2026-11-19 – Snötäckta solpaneler (v0.9.84)
+
+**Utfall 19 nov:** första snön. Panelerna gav 0,7 kWh mot Solcast 6,0 kWh (12 %), −4,2 °C. Planen räknade med sol mitt på dagen (urladdning 377–755 W, solladdning 09:30); exekutorn täckte i stället det verkliga underskottet (1,5–3,3 kW/h mot planens 0,6–1,8) och batteriet var tomt 19:45 i slutet av kvällstoppen. Kvällens plan för 20 nov: nätladdning bara till ~21 % och ~9 kWh sol 09–13 till kvällstoppen 15–19 – med kvarliggande snö köps den toppen för ~4 kr. Produktionskvoten (3 dygn) visade 1,35 och DP använde den inte; V:s snöskydd (påslag på V, `_simulate_drought_days`) försvann i B5.4.1.
+
+**Beslut (användaren):** snödetektering som räknar ned planens sol, inte en manuell brytare.
+
+**Ändring:** `solar_snow.py` (ren logik). Täckt: dagens faktiska/prognos hittills < 0,30 (prognos ≥ 1 kWh) och ≤ 0 °C. Fri: senaste timmen ≥ 0,50 av prognosen (≥ 0,3 kWh), eller dagens kvot ≥ 0,30. Framåt: SMHI dygnsmax ≥ 1,5 °C → fri; snö (`snowy`, `snowy-rainy`) inom −5…+5 °C → täckt med 0,15; dygn utan prognos ärver. DP: `solar_factor_by_date` multiplicerar `s.solar_kwh`; morgondagens underskott (utan priser) får också faktorn. Planen byggs om direkt när täckningen ändras. Tillstånd i `.storage/smart_energy_manager_snow`.
+
+**Känd svaghet:** en mulen dag i minusgrader som Solcast missat räknas som snö tills panelerna ger halva prognosen en timme eller SMHI visar töväder. Kostnaden är då nätladdning som solen hade kunnat ersätta.
+
+**Mätning:** backtesterna oförändrade (de matar inga faktorer, och backtestens solprognos är utfallet). Test: med 2,6 kr natt, 4,2 kr kväll och 20 kWh sol i morgon nätladdar planen 17,6 kWh med sol och 29,6 kWh med faktor 0,12. Utvärderas live.

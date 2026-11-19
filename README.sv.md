@@ -1,49 +1,56 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.83-blue)
+![Version](https://img.shields.io/badge/version-0.9.84-blue)
 
 En HACS-integration för Home Assistant som optimerar egenförbrukning av solenergi med batteri, EV-laddare och elpanna/varmvattenberedare.
 
-## Nyheter i 0.9.83
+## Nyheter i 0.9.84
 
-- Fasvarningar kommer bara när uppmätt ström är över den inställda gränsen (17 A), och visar det uppmätta värdet.
-- Sista städningen efter fas B: vanliga flyttal i planen, minutupplösta slottider i plansensorns attribut.
+- Planen känner igen snötäckta solpaneler (låg produktion i minusgrader) och räknar med Solcast × den uppmätta kvoten tills SMHI visar töväder, så den nätladdar på natten i stället för att vänta på sol.
 
 Äldre versioner: [CHANGELOG.sv.md](CHANGELOG.sv.md).
 
 ## Systemöversikt
 
+Enlinjeöversikt över anläggningen som SEM är byggt för (efter elritningarna; husets egen central är inte med):
+
 ```
-Elnät (3-fas, max 20A/fas)
-    │
-    │    Batteri-inverter (3-fas)      Sol-inverter (3-fas)
-    │           │                             │
-    └─────┬─────┴─────────────────────────────┴──── Elmätare 4 (huslast) ────┬──── Övriga laster
-          │                                                                  │
-          │                                                              Elmätare 5
-          │                                                                   │
-          │                                                                Elpanna
-          │                                                              (1-fas kompressor
-          │                                                             +2-fas elpatron
-          └────┐                                                        +ackumulatortank)
-               │
-           EV-laddare
-        (1- eller 3-fas hårdvara,
-         flera bilar turas om,
-         bilval via HA-entitet)
+Elnät 3×20 A
+  │
+Elmätare (Kamstrup, nätägarens) ── HAN-port → P1IB → MQTT via wifi → HA
+  │
+HB1 40 A ──── Garage, MB3 63 A
+                ├── C16A 3-fas ── Laddbox (nätsidan – ingen reservkraft)
+                ├── JFB 30 mA, C16A ── Sonnen 10, batteri (3-fas)
+                │      WM271 + strömtrafo: spänning, "Prod" (sol), "Förb" (hus) → Sonnen via Modbus
+                └── Sonnen Protect (kontaktorer Q5P/Q6P: nät ⇄ reservdrift)
+                      │ skyddad sida
+Inkommande skåp ──────┤
+                      ├── HB2 40 A ── C20A ── Solväxelriktare (3-fas)
+                      └── Förråd, MB4 63 A ── 3EM (mäter hus + förråd)
+                            ├── JFB 25 A/30 mA
+                            │     ├── F1 C16A 3-fas ── Panna/värmepump (egen fasmätare)
+                            │     │     kompressor ~3,5 kW på en fas, elpatron ~5,8 kW mellan de två andra
+                            │     ├── F2 C16A 3-fas ── uttag
+                            │     └── F3–F7 C10A ── belysning, uttag, kyl/frys, övriga grupper
+                            └── Husets central (inte med i ritningen)
 ```
 
-> **OBS:** Laddarens fasantal (hårdvaran) och bilens fasantal (`car_phases`, 1/2/3-fas) är två separata inställningar. Fasbelastningen i fasskyddet styrs alltid av **bilens** inbyggda laddare, inte av laddarhårdvarans fasantal – se [EV-laddare och bilval](#ev-laddare-och-bilval).
+- **Fasgräns**: huvudsäkringar 3 × 20 A. SEM reglerar mot `max_current_per_phase` (17 A) minus 2 A marginal och lägger ihop batteri, laddbox och panna per fas (`_apply_phase_limits()`).
+- **Reservkraft**: allt på den skyddade sidan (solväxelriktare, hus, förråd) ligger bakom Sonnen Protect. Laddboxen sitter på nätsidan och är strömlös vid avbrott.
+- **Batteriets mätning**: WM271 hör till Sonnen-batteriet (dess egen styrning). SEM läser batteriet via Sonnen-integrationen.
 
-### Elmätarroller
+> **OBS:** Laddarens antal faser (hårdvara) och bilens antal faser (`car_phases`, 1/2/3-fas) är två separata inställningar. Fasbelastningen i fasskyddet styrs alltid av **bilens** inbyggda laddare, inte av laddarhårdvarans fasantal – se [EV-laddare och bilval](#ev-laddare-och-bilval).
 
-| Mätare | Placering | Tecken | Enhet |
-|---|---|---|---|
-| Elmätare 1 | Nätanslutning | Negativ = export, Positiv = import | kW |
-| Elmätare 2 | Batteri-inverter AC-sida | Negativ = förbrukning | W |
-| Elmätare 3 | Sol-inverter | Positiv = produktion | W |
-| Elmätare 4 | Fastighetslast (exkl. sol, batteri och EV-laddare) | Positiv = förbrukning | W |
-| Elmätare 5 | Elpanna | Positiv = förbrukning | W |
+### Elmätarnas roller
+
+| Mätare | Placering | I ritningen | Tecken | Enhet |
+|---|---|---|---|---|
+| Mätare 1 | Nätanslutning | nätägarens mätare via HAN-porten (P1IB, MQTT) | Negativ = export, Positiv = import | kW |
+| Mätare 2 | Batteriinverter AC-sida | Sonnen 10 (via Sonnen-integrationen) | Negativ = förbrukning | W |
+| Mätare 3 | Solinverter | växelriktaren bakom HB2/C20A | Positiv = produktion | W |
+| Mätare 4 | Fastighetslast (exkl. sol, batteri och laddbox) | 3EM vid MB4 (hus + förråd) | Positiv = förbrukning | W |
+| Mätare 5 | Panna | fasmätaren på F1 | Positiv = förbrukning | W |
 
 > **OBS:** Elm1 rapporterar i **kW** – välj enheten `kW` i konfigurationen. EV-laddare (intern mätare) rapporterar också i **kW**.
 

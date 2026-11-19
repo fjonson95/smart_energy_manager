@@ -1,51 +1,58 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.83-blue)
+![Version](https://img.shields.io/badge/version-0.9.84-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.83
+## What's New in 0.9.84
 
-- Phase warnings fire only when the measured current exceeds the configured limit (17 A), and show the measured value.
-- Last phase B cleanup: plain floats in the plan, minute-resolution slot times in the plan sensor's attributes.
+- The plan recognises snow-covered solar panels (low production in frost) and counts on Solcast × the measured ratio until SMHI forecasts a thaw, so it grid-charges at night instead of waiting for sun.
 
 Older releases: [CHANGELOG.md](CHANGELOG.md).
 
 ## System Overview
 
+Single-line overview of the installation SEM was built for (from the electrical drawings; the house's own panel is not included):
+
 ```
-Grid (3-phase, max 20A/phase)
-    │
-    │    Battery inverter (3-phase)     Solar inverter (3-phase)
-    │           │                             │
-    └─────┬─────┴─────────────────────────────┴──── Meter 4 (house load) ────┬──── Other loads
-          │                                                                  │
-          │                                                              Meter 5
-          │                                                                   │
-          │                                                                Boiler
-          │                                                              (1-phase compressor
-          │                                                             +2-phase heating element
-          └────┐                                                        +buffer tank)
-               │
-           EV charger
-        (1- or 3-phase hardware,
-         multiple cars take turns,
-         car selection via HA entity)
+Grid 3×20 A
+  │
+Utility meter (Kamstrup) ── HAN port → P1IB → MQTT over Wi-Fi → HA
+  │
+HB1 40 A ──── Garage, MB3 63 A
+                ├── C16A 3-phase ── EV charger (grid side – not backed up)
+                ├── RCD 30 mA, C16A ── Sonnen 10 battery (3-phase)
+                │      WM271 + current transformers: voltage, "Prod" (solar), "Förb" (house) → Sonnen via Modbus
+                └── Sonnen Protect (contactors Q5P/Q6P: grid ⇄ backup)
+                      │ protected side
+Incoming cabinet ─────┤
+                      ├── HB2 40 A ── C20A ── Solar inverter (3-phase)
+                      └── Storage building, MB4 63 A ── 3EM (measures house + storage building)
+                            ├── RCD 25 A/30 mA
+                            │     ├── F1 C16A 3-phase ── Boiler/heat pump (own phase meter)
+                            │     │     compressor ~3.5 kW on one phase, heating element ~5.8 kW across the other two
+                            │     ├── F2 C16A 3-phase ── outlet
+                            │     └── F3–F7 C10A ── lighting, outlets, fridge/freezer, other groups
+                            └── House panel (not in the drawing)
 ```
+
+- **Phase limit**: 3 × 20 A main fuses. SEM regulates against `max_current_per_phase` (17 A) minus a 2 A margin and adds up the battery, EV charger and boiler per phase (`_apply_phase_limits()`).
+- **Backup**: everything on the protected side (solar inverter, house, storage building) is behind Sonnen Protect. The EV charger is on the grid side and is not powered during an outage.
+- **Battery metering**: the WM271 belongs to the Sonnen battery (its own control). SEM reads the battery through the Sonnen integration.
 
 > **NOTE:** The charger's number of phases (hardware) and the car's number of phases (`car_phases`, 1/2/3-phase) are two separate settings. Phase load in the phase protection is always governed by the **car's** built-in charger, not by the charger hardware's phase count – see [EV Charger and Car Selection](#ev-charger-and-car-selection).
 
 ### Electricity Meter Roles
 
-| Meter | Location | Sign | Unit |
-|---|---|---|---|
-| Meter 1 | Grid connection | Negative = export, Positive = import | kW |
-| Meter 2 | Battery inverter AC side | Negative = consumption | W |
-| Meter 3 | Solar inverter | Positive = production | W |
-| Meter 4 | Property load (excl. solar, battery, and EV charger) | Positive = consumption | W |
-| Meter 5 | Boiler | Positive = consumption | W |
+| Meter | Location | In the drawing | Sign | Unit |
+|---|---|---|---|---|
+| Meter 1 | Grid connection | utility meter via HAN port (P1IB, MQTT) | Negative = export, Positive = import | kW |
+| Meter 2 | Battery inverter AC side | Sonnen 10 (via the Sonnen integration) | Negative = consumption | W |
+| Meter 3 | Solar inverter | inverter behind HB2/C20A | Positive = production | W |
+| Meter 4 | Property load (excl. solar, battery, and EV charger) | 3EM at MB4 (house + storage building) | Positive = consumption | W |
+| Meter 5 | Boiler | phase meter on F1 | Positive = consumption | W |
 
 > **NOTE:** Meter 1 reports in **kW** – select the unit `kW` in the configuration. The EV charger (internal meter) also reports in **kW**.
 

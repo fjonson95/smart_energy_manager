@@ -31,6 +31,7 @@ custom_components/smart_energy_manager/
   price_scheduler.py    # Nordpool-schemaläggning, headroom, negativt-pris-logik
   heat_planner.py       # Rena funktioner för värmepump/varmvatten (steg 7)
   savings_tracker.py    # Daglig besparing mot hus utan batteri
+  solar_snow.py         # Ren logik – snötäckta paneler: solfaktor per dygn till planen
   sensor.py             # Alla HA-sensorer inkl. batterikostnadsackumulatorer
   legionella.py         # Legionella-schemaläggning för varmvatten
   select.py             # Bilvals-entitet per laddare
@@ -81,6 +82,9 @@ Håller bara headroom (reducerar `battery_max_soc`) inför kommande negativt pri
 
 ### Batteriplanen – dynamisk programmering
 `DPPlanner` löser hela 48 h-horisonten på en gång över (kvart, lagrad energi i 0,1 kWh-steg) mot kända priser, Solcast p50 och lastprognosen, med η delad lika på laddning/urladdning och egen cykelkostnad (0,10 kr/kWh, B3). V = värdegradienten vid aktuell SOC; `marginal_value_charge_sek_kwh` (V_charge = V × √η) är tröskeln exekutorn och varmvattendumpen jämför säljpriset mot. Varje kvart får en åtgärd (`grid_charge`, `solar_charge` med nätdel `grid_charge_w`, `cover_load`, `export`, `idle`) och `hold_battery`. Exekutorn (`apply_plan_executor` → `_execute_dp_slot()`) klämmer bara mot fysiken (B5.3); hur mycket av ett verkligt solöverskott batteriet tar avgör `plan_surplus_charge_w()`, som `_auto_mode` också använder så att pannans soldriftstak (pvmaxcomp) och varmvattendumpen bara får det batteriet lämnar (B5.4.2). Utan plan laddar batteriet överskott och täcker underskott, inget mer. V-planeraren (regel 1–4, merit-ordning) togs bort i B5.4.1; historiken finns i `docs/decisions.md` P01–P16 och i v0.9.80.
+
+### Snötäckta paneler
+`solar_snow.update_snow_state()` räknar panelerna som täckta när dagens produktion (`actual_solar_daily_entity`) är under 30 % av Solcasts prognos hittills (minst 1 kWh prognos) och det är ≤ 0 °C; fri igen när senaste timmen ger ≥ 50 % av prognosen (minst 0,3 kWh). `solar_factors()` för täckningen framåt med SMHI:s dygnsprognos (fri vid dygnsmax ≥ 1,5 °C, ny snö inom −5…+5 °C täcker, `NEW_SNOW_RATIO` 0,15) och ger `{datum: kvot}` som DP multiplicerar Solcasts sol med. Tillståndet sparas i `.storage/smart_energy_manager_snow` så att nattens planering minns dagens mätning. Backtesten matar inga faktorer.
 
 ### Observerad solar takeover – Store-format
 `coordinator._takeover_store` (`{DOMAIN}_solar_takeover`) sparar:
