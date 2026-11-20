@@ -4,6 +4,14 @@ All notable changes to Smart Energy Manager. See [README.md](README.md) for the 
 
 Backtest figures are savings against a house without a battery. From 0.9.81 they are inventory-adjusted (energy left in the battery counts): summer = `testdata/history`, winter = Jan–Apr 2026, "without hindsight" = 27 Oct–10 Nov and 10–14 Nov with real Solcast forecasts.
 
+## 0.9.85 – 2026-11-20 – Snow detection no longer flips back and forth
+
+**Fixed**
+- When the snow slides off during the day, the panels no longer count as covered again on the day's total production. On 20 Nov the plan switched five times between snow and clear in four minutes, because the morning's snow kept the day's ratio below 30 %.
+- On the same day the panels can only count as covered again if the last hour gives less than 30 % of the forecast below freezing.
+
+**Verified:** pytest 89 · backtests unchanged (summer 212.95 · winter 1,357.69 · without hindsight 321.80 / 129.86 SEK)
+
 ## 0.9.84 – 2026-11-19 – Snow-covered solar panels
 
 **New**

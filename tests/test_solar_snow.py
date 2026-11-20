@@ -38,6 +38,27 @@ def test_production_back_in_the_last_hour_clears():
     assert not update_snow_state(covered, TOMORROW, 0.9, 3.0, 0.8, 1.2, -1.0).covered
 
 
+def test_cleared_today_does_not_flap_back_on_the_day_ratio():
+    # 20 nov 10:56: snön gled av, men morgonen höll dagens kvot under 30 % –
+    # tillståndet bytte mellan täckt och fritt var 30:e sekund till 11:00.
+    s = update_snow_state(SnowState(True, 0.12, "2026-11-19"), TOMORROW, 1.1, 3.9, 0.7, 1.2, -1.0)
+    assert not s.covered and s.cleared_on == TOMORROW.isoformat()
+    for actual, so_far, hour, f_hour in ((1.1, 4.0, 0.7, 1.2), (1.2, 4.2, 0.8, 1.3), (1.4, 4.5, 0.9, 1.3)):
+        s = update_snow_state(s, TOMORROW, actual, so_far, hour, f_hour, -1.0)
+        assert not s.covered
+
+
+def test_cleared_today_covers_again_on_a_dead_last_hour():
+    s = SnowState(cleared_on=TOMORROW.isoformat())
+    s = update_snow_state(s, TOMORROW, 4.0, 6.0, 0.1, 1.5, -2.0)
+    assert s.covered and s.ratio == 0.07
+
+
+def test_cleared_yesterday_judges_today_on_the_day_ratio_again():
+    s = update_snow_state(SnowState(cleared_on=TODAY.isoformat()), TOMORROW, 0.2, 3.0, 0.0, 0.8, -3.0)
+    assert s.covered
+
+
 def test_covered_carries_until_forecast_thaw():
     covered = SnowState(True, 0.12, "2026-11-19")
     days = {TOMORROW: ("partlycloudy", -1.0, -6.0), TOMORROW + timedelta(days=1): ("sunny", 2.0, -3.0)}

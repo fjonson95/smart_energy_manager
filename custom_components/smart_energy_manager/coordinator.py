@@ -369,6 +369,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 covered=bool(data.get("covered", False)),
                 ratio=float(data.get("ratio", 1.0)),
                 since=data.get("since"),
+                cleared_on=data.get("cleared_on"),
             )
 
     def _solcast_today_energy(self, now: datetime) -> tuple[float, float]:
@@ -424,7 +425,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 )
             self._snow = new
             self.hass.async_create_task(self._snow_store.async_save(
-                {"covered": new.covered, "ratio": new.ratio, "since": new.since}
+                {"covered": new.covered, "ratio": new.ratio, "since": new.since, "cleared_on": new.cleared_on}
             ))
 
     async def _load_pv_ratio_store(self) -> None:

@@ -4,6 +4,14 @@ Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.
 
 Backtestsiffror är besparing mot ett hus utan batteri. Från 0.9.81 är de lagerjusterade (energin kvar i batteriet räknas med): sommar = `testdata/history`, vinter = jan–apr 2026, "utan facit" = 27 okt–10 nov och 10–14 nov med riktiga Solcast-prognoser.
 
+## 0.9.85 – 2026-11-20 – Snödetekteringen pendlar inte
+
+**Rättat**
+- När snön glider av under dagen räknas panelerna inte som täckta igen på dagens samlade produktion. 20 nov bytte planen fem gånger mellan snö och fritt på fyra minuter, eftersom morgonens snö höll dagens kvot under 30 %.
+- Samma dag kan panelerna bli täckta igen bara om senaste timmen ger under 30 % av prognosen i minusgrader.
+
+**Verifierat:** pytest 89 · backtest oförändrad (sommar 212,95 · vinter 1 357,69 · utan facit 321,80 / 129,86 kr)
+
 ## 0.9.84 – 2026-11-19 – Snötäckta solpaneler
 
 **Nytt**

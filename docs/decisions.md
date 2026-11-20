@@ -874,3 +874,9 @@ Husets egen grundobalans (16 nov 01:45: L1 0,23, L2 0,76, L3 0,41 kW) förklarar
 **Känd svaghet:** en mulen dag i minusgrader som Solcast missat räknas som snö tills panelerna ger halva prognosen en timme eller SMHI visar töväder. Kostnaden är då nätladdning som solen hade kunnat ersätta.
 
 **Mätning:** backtesterna oförändrade (de matar inga faktorer, och backtestens solprognos är utfallet). Test: med 2,6 kr natt, 4,2 kr kväll och 20 kWh sol i morgon nätladdar planen 17,6 kWh med sol och 29,6 kWh med faktor 0,12. Utvärderas live.
+
+## 2026-11-20 – Snödetekteringen: första dygnet och pendling (v0.9.85)
+
+**Utfall 20 nov:** snöplanen nätladdade ~16 kWh 00:30–06:00 för 2,44–2,55 kr (före v0.9.84 ~4 kWh) och täckte morgontoppen ur batteriet. Panelerna gav 0,7 kWh fram till 10:33; snön gled av ~10:45 och detekteringen släppte 10:56 (senaste timmen ≥ 50 %). Solladdning 11:00–13:15, dygnet 15,0 kWh mot Solcast 14,7, batteriet 51 % kl 19. Kostnaden för att ha räknat med snö var liten: nattens ~2,5 kr / 0,85 ≈ 3,0 kr mot kvällens 3,0–3,4 kr, och energin ligger kvar i batteriet.
+
+**Bugg:** 10:56–11:00 bytte planen fem gånger mellan "vilar" och "håller batteriet". Fri-regeln (senaste timmen) släppte täckningen; nästa cykel täckte dagskvoten (morgonens snö, < 30 %) igen. **Ändring:** `SnowState.cleared_on`; fri samma dag täcks bara av senaste timmen (< 30 % av prognosen, ≥ 0,3 kWh, ≤ 0 °C). Sparas i Store. Test spelar upp förloppet.

@@ -31,6 +31,10 @@ class SnowState:
     covered: bool = False
     ratio: float = 1.0          # uppmätt faktisk/prognos medan täckt
     since: Optional[str] = None  # ISO-datum då täckningen upptäcktes
+    # ISO-datum då panelerna blev fria. Samma dag räknas de inte som täckta på
+    # dagens samlade kvot – morgonens snö drog ned den, och tillståndet pendlade
+    # mellan täckt och fritt var 30:e sekund (20 nov 2026 10:56–11:00).
+    cleared_on: Optional[str] = None
 
 
 def update_snow_state(
@@ -44,17 +48,23 @@ def update_snow_state(
 ) -> SnowState:
     """Nytt tillstånd efter dagens mätning. Utan tillräcklig prognos att mäta
     mot (natt, tidig morgon) behålls tillståndet – täckningen förs över natten."""
-    if (state.covered and actual_last_hour_kwh is not None
-            and forecast_last_hour_kwh >= MIN_HOUR_FORECAST_KWH
-            and actual_last_hour_kwh >= CLEAR_RATIO * forecast_last_hour_kwh):
-        return SnowState()
+    today_iso = today.isoformat()
+    frost = outdoor_temp_c is not None and outdoor_temp_c <= 0.0
+    hour_known = actual_last_hour_kwh is not None and forecast_last_hour_kwh >= MIN_HOUR_FORECAST_KWH
+    if state.covered and hour_known and actual_last_hour_kwh >= CLEAR_RATIO * forecast_last_hour_kwh:
+        return SnowState(cleared_on=today_iso)
+    if not state.covered and state.cleared_on == today_iso:
+        # Fri tidigare idag: bara senaste timmen kan täcka igen.
+        if hour_known and frost and actual_last_hour_kwh < COVER_RATIO * forecast_last_hour_kwh:
+            return SnowState(True, round(max(0.0, actual_last_hour_kwh / forecast_last_hour_kwh), 2), today_iso)
+        return state
     if actual_today_kwh is None or forecast_so_far_kwh < MIN_FORECAST_KWH:
         return state
     ratio = max(0.0, actual_today_kwh / forecast_so_far_kwh)
-    if ratio < COVER_RATIO and outdoor_temp_c is not None and outdoor_temp_c <= 0.0:
-        return SnowState(True, round(ratio, 2), state.since if state.covered else today.isoformat())
+    if ratio < COVER_RATIO and frost:
+        return SnowState(True, round(ratio, 2), state.since if state.covered else today_iso)
     if state.covered and ratio >= COVER_RATIO:
-        return SnowState()
+        return SnowState(cleared_on=today_iso)
     if state.covered:
         # Fortfarande lågt men plusgrader: behåll täckningen med dagens kvot.
         return SnowState(True, round(ratio, 2), state.since)

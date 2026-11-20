@@ -1,14 +1,14 @@
 # Smart Energy Manager – HACS Integration
 
-![Version](https://img.shields.io/badge/version-0.9.84-blue)
+![Version](https://img.shields.io/badge/version-0.9.85-blue)
 
 A HACS integration for Home Assistant that optimizes self-consumption of solar energy with battery, EV charger, and electric boiler/water heater.
 
 Läs detta på svenska: [README.sv.md](https://github.com/fjonson95/smart_energy_manager/blob/main/README.sv.md)
 
-## What's New in 0.9.84
+## What's New in 0.9.85
 
-- The plan recognises snow-covered solar panels (low production in frost) and counts on Solcast × the measured ratio until SMHI forecasts a thaw, so it grid-charges at night instead of waiting for sun.
+- Snow detection no longer flips back and forth when the snow slides off during the day.
 
 Older releases: [CHANGELOG.md](CHANGELOG.md).
 
