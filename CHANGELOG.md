@@ -4,6 +4,20 @@ All notable changes to Smart Energy Manager. See [README.md](README.md) for the 
 
 Backtest figures are savings against a house without a battery. From 0.9.81 they are inventory-adjusted (energy left in the battery counts): summer = `testdata/history`, winter = Jan–Apr 2026, "without hindsight" = 27 Oct–10 Nov and 10–14 Nov with real Solcast forecasts.
 
+## 0.9.86 – 2026-11-21 – Cleanup
+
+**Fixed**
+- The decision text no longer shows a stray "+" after the action (for example "holds the battery +"). Power values with a plus sign were not fully removed.
+- The descriptions of min and max SOC promised an automatic reduction before negative prices and an evening target that do not exist. They now say what the limits do: the plan and the controller stay within them, and a change is saved and reloads the integration.
+
+**Removed**
+- The two export numbers from 0.9.62 ("Proactive export absolute min price" and "price percentile"), still listed as unavailable, are removed from the entity registry at startup.
+
+**Cleaned up**
+- Default phases for new installations follow the reference installation: compressor on L2, immersion heater between L1 and L3. Existing settings are not affected.
+
+**Verified:** pytest 91 · backtests unchanged (summer 212.95 · winter 1,357.69 · without hindsight 321.80 / 129.86 SEK)
+
 ## 0.9.85 – 2026-11-20 – Snow detection no longer flips back and forth
 
 **Fixed**

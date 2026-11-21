@@ -1950,7 +1950,7 @@ class SmartEnergyCoordinator(DataUpdateCoordinator):
                 "solar_surplus_w": solar_surplus_w,
                 "ev_total_power_w": sum(ch.power_w for ch in state.chargers),
                 "battery_soc_pct": state.battery_soc_pct,
-                "battery_min_soc": float(c.get(CONF_BATTERY_MIN_SOC, 20)),
+                "battery_min_soc": float(c.get(CONF_BATTERY_MIN_SOC, DEFAULT_BATTERY_MIN_SOC)),
                 "battery_max_power_kw": state.battery_max_power_kw,
                 "legionella_active": legionella_active,
                 "legionella_last_run": self._legionella.last_run,

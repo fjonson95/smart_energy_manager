@@ -130,8 +130,9 @@ DEFAULT_SELL_EXTRA_REVENUE = 0.065  # Nätnytta, Lerum Energi (6,50 öre inkl. m
 DEFAULT_BATTERY_MIN_SOC = 10
 DEFAULT_BATTERY_MAX_SOC = 95
 
-DEFAULT_HEAT_PUMP_PHASE = "L3"
-DEFAULT_HEAT_PUMP_PATRON_PHASES = ["L1", "L2"]
+# Referensinstallationen (IVT, bekräftat 2026-11-20): kompressorn på L2, patronen mellan L1 och L3.
+DEFAULT_HEAT_PUMP_PHASE = "L2"
+DEFAULT_HEAT_PUMP_PATRON_PHASES = ["L1", "L3"]
 DEFAULT_HEAT_PUMP_PATRON_POWER_KW = 6.0
 
 # Värmepumpens uppmätta fasström (A) per elnätsfas – valfritt. Visar vad som

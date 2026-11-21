@@ -4,6 +4,20 @@ Alla nämnvärda ändringar i Smart Energy Manager. Se [README.sv.md](README.sv.
 
 Backtestsiffror är besparing mot ett hus utan batteri. Från 0.9.81 är de lagerjusterade (energin kvar i batteriet räknas med): sommar = `testdata/history`, vinter = jan–apr 2026, "utan facit" = 27 okt–10 nov och 10–14 nov med riktiga Solcast-prognoser.
 
+## 0.9.86 – 2026-11-21 – Städning
+
+**Rättat**
+- Beslutstexten visar inte längre ett ensamt "+" efter åtgärden (till exempel "håller batteriet +"). Effektsiffror med plustecken togs inte bort helt.
+- Beskrivningarna av min- och max-SOC lovade en automatisk sänkning före negativa priser och ett kvällsmål som inte finns. De säger nu vad gränserna gör: planen och kontrollern håller sig inom dem, och en ändring sparas och laddar om integrationen.
+
+**Borttaget**
+- De två exportnumren från 0.9.62 ("Proaktiv export absolut minpris" och "prispercentil"), som låg kvar som otillgängliga, tas bort ur entitetsregistret vid start.
+
+**Städat**
+- Standardfaserna för nya installationer följer referensanläggningen: kompressorn på L2, patronen mellan L1 och L3. Befintliga inställningar påverkas inte.
+
+**Verifierat:** pytest 91 · backtest oförändrad (sommar 212,95 · vinter 1 357,69 · utan facit 321,80 / 129,86 kr)
+
 ## 0.9.85 – 2026-11-20 – Snödetekteringen pendlar inte
 
 **Rättat**

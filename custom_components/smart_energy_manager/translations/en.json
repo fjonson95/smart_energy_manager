@@ -434,11 +434,11 @@
     "number": {
       "battery_min_soc": {
         "name": "Battery Min SOC",
-        "description": "Lowest allowed battery SOC. Energy below this threshold is unusable and is excluded from the evening target calculation."
+        "description": "Lowest allowed battery SOC. The plan and the controller never discharge below it. A change is saved to the options and reloads the integration."
       },
       "battery_max_soc": {
         "name": "Battery Max SOC",
-        "description": "Highest allowed battery SOC. Automatically reduced before upcoming negative-price slots to make room for absorption."
+        "description": "Highest allowed battery SOC. The plan and the controller never charge above it; room ahead of negative prices is scheduled by the plan. A change is saved to the options and reloads the integration."
       }
     },
     "select": {

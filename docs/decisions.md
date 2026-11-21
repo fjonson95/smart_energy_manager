@@ -880,3 +880,13 @@ Husets egen grundobalans (16 nov 01:45: L1 0,23, L2 0,76, L3 0,41 kW) förklarar
 **Utfall 20 nov:** snöplanen nätladdade ~16 kWh 00:30–06:00 för 2,44–2,55 kr (före v0.9.84 ~4 kWh) och täckte morgontoppen ur batteriet. Panelerna gav 0,7 kWh fram till 10:33; snön gled av ~10:45 och detekteringen släppte 10:56 (senaste timmen ≥ 50 %). Solladdning 11:00–13:15, dygnet 15,0 kWh mot Solcast 14,7, batteriet 51 % kl 19. Kostnaden för att ha räknat med snö var liten: nattens ~2,5 kr / 0,85 ≈ 3,0 kr mot kvällens 3,0–3,4 kr, och energin ligger kvar i batteriet.
 
 **Bugg:** 10:56–11:00 bytte planen fem gånger mellan "vilar" och "håller batteriet". Fri-regeln (senaste timmen) släppte täckningen; nästa cykel täckte dagskvoten (morgonens snö, < 30 %) igen. **Ändring:** `SnowState.cleared_on`; fri samma dag täcks bara av senaste timmen (< 30 % av prognosen, ≥ 0,3 kWh, ≤ 0 °C). Sparas i Store. Test spelar upp förloppet.
+
+## 2026-11-21 – Städrelease och golvvärmetest (v0.9.86)
+
+**Min/max-SOC-numren:** listan 20 nov påstod att numren bara når kontrollern och inte överlever omstart. Fel: `_persist_to_options()` skriver till `entry.options`, uppdateringslyssnaren laddar om integrationen och DP-planeraren byggs med det nya värdet. Bara beskrivningstexterna var fel (automatisk sänkning före negativa priser, kvällsmål) och är rättade.
+
+**"+" i beslutstexten:** exekutorn skriver `{power_w:+.0f}W`; sensorns regex tog bara `-?\d+W`, så "+0W" blev "+".
+
+**Faser:** kompressorn på L2 bekräftad av användaren och mätt natten till 20 nov (`ivt_phase_a` 5–9 A snitt, max 14,5 A, L2 reglerad kring 15 A medan L1/L3 hade 6–10 A ledigt – underlag för alternativ C). Patronens L1/L3 inte sedd köra.
+
+**Golvvärmetest 20–21 nov:** se docs/golvvarme_styrning.md 4.6. Börvärdet 21,5 → 19 °C kl 22–01 sänkte framledningen ~4–5 K, huset föll 0,2 K, ~2 kWh värme flyttades till återhämtningen 01–03 utan nettobesparing.

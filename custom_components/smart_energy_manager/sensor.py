@@ -331,7 +331,7 @@ class SmartEnergyPhaseL3Sensor(_BaseEnergySensor):
         return round(d.phase_loads.L3) if d else 0
 
 
-_POWER_VALUE_RE = re.compile(r"\s*-?\d+(?:\.\d+)?W\b")
+_POWER_VALUE_RE = re.compile(r"\s*[-+]?\d+(?:\.\d+)?W\b")
 
 
 class SmartEnergyDecisionReasonSensor(_BaseEnergySensor):

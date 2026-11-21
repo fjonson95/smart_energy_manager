@@ -434,11 +434,11 @@
     "number": {
       "battery_min_soc": {
         "name": "Batteri min SOC",
-        "description": "Lägsta tillåtna SOC för batteriet. Energi under denna gräns är oanvändbar och räknas inte in i kvällsmålet."
+        "description": "Lägsta tillåtna SOC för batteriet. Planen och kontrollern laddar aldrig ur under denna gräns. En ändring sparas i inställningarna och laddar om integrationen."
       },
       "battery_max_soc": {
         "name": "Batteri max SOC",
-        "description": "Högsta tillåtna SOC för batteriet. Reduceras automatiskt inför kommande negativpristimmar för att ha rum att absorbera."
+        "description": "Högsta tillåtna SOC för batteriet. Planen och kontrollern laddar aldrig över denna gräns; utrymme inför negativa priser planeras av planen. En ändring sparas i inställningarna och laddar om integrationen."
       }
     },
     "select": {
